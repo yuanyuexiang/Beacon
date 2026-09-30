@@ -11,6 +11,7 @@ Beacon 是餐厅菜单销售线索工具。T0/T1 技术探索已完成（`plan/e
 - `plan/archive/`：历史方案，不作为当前执行指令。
 - `plan/exploration.md`：T0/T1 探索记录、可测量发现、复现命令。
 - `plan/validation-report-v1.md`：V 第一批 50 家的漏斗、提取质量、成本与工具问题。
+- `plan/model-eval-v1.md`：DeepSeek 转录评测（准确率、观察精确率、成本）。
 - `plan/tasks.md`、`plan/decisions.md`：任务进度与决策记录。
 - `scripts/`：抽样、抓取、探针、提取、样稿渲染脚本；`templates/`：样稿模板；`data/`：受控数据（gitignore）。
 - `reports/`：综合研究报告。
@@ -33,7 +34,7 @@ Beacon 是餐厅菜单销售线索工具。T0/T1 技术探索已完成（`plan/e
 
 - `docker compose -f infra/docker-compose.yml up -d`：启动 PostgreSQL 16（端口 5433，开发库 `beacon`、测试库 `beacon_test`）。
 - `cd apps/api && uv sync`：安装依赖（Python 3.12，`.python-version`）。
-- `cp apps/api/.env.example apps/api/.env`：填写 `BEACON_*` 变量；`BEACON_DATA_DIR` 必须是绝对路径。
+- `cp apps/api/.env.example apps/api/.env`：填写 `BEACON_*` 变量；`BEACON_DATA_DIR` 必须是绝对路径。模型转录需 `BEACON_LLM_PROVIDER=deepseek` 与 `BEACON_DEEPSEEK_API_KEY`（默认 fake，不调用模型；评测记录 `plan/model-eval-v1.md`）。
 - `cd apps/api && uv run alembic upgrade head`：迁移；`uv run alembic revision --autogenerate -m "..."` 生成新迁移。
 - `cd apps/api && uv run uvicorn app.main:app --reload --port 8000`：启动 API（`/api/health`、`/api/health/db`）。
 - `cd apps/api && uv run pytest`：测试（自动对 `beacon_test` 做 upgrade/downgrade，不依赖网络与真实模型）。

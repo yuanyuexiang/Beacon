@@ -25,6 +25,18 @@ def pytest_configure() -> None:
     os.environ.setdefault("BEACON_SECRET_KEY", "test-secret-key-0123456789abcdef0123456789abcdef")
     os.environ.pop("BEACON_BOOTSTRAP_OPERATOR", None)
     os.environ.pop("BEACON_BOOTSTRAP_PASSWORD", None)
+    # 测试不读取 apps/api/.env（其中可能有真实密钥）
+    from app.core.config import Settings
+
+    Settings.model_config["env_file"] = None
+    for k in (
+        "BEACON_LLM_PROVIDER",
+        "BEACON_DEEPSEEK_API_KEY",
+        "BEACON_ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "ANTHROPIC_API_KEY",
+    ):
+        os.environ.pop(k, None)
 
 
 def alembic_config() -> Config:

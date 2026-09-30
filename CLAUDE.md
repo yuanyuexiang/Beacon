@@ -4,7 +4,7 @@
 
 ## 当前状态与依据
 
-Beacon 已完成 T0/T1 技术探索（Islington 60 家抽样，5 份菜单，见 `plan/exploration.md`）和 `plan/development.md` 的 D1～D10 最小工具（apps/api 57 个测试、apps/web 工作台已构建）。V 第一批已完成（`plan/validation-report-v1.md`：50 家，M/N=10/50，I/M=3/10）。下一步：视觉路径评测、真人计时的第二批，以及条件齐备后的 B。研究脚本在 `scripts/`，受控数据在 `data/`（已忽略，不提交）。当前未触达任何餐厅。
+Beacon 已完成 T0/T1 技术探索（Islington 60 家抽样，5 份菜单，见 `plan/exploration.md`）和 `plan/development.md` 的 D1～D10 最小工具（apps/api 57 个测试、apps/web 工作台已构建）。V 第一批已完成（`plan/validation-report-v1.md`：50 家，M/N=10/50，I/M=3/10），DeepSeek 视觉转录已评测。下一步：真人计时的第二批（人工基线），以及条件齐备后的 B。研究脚本在 `scripts/`，受控数据在 `data/`（已忽略，不提交）。当前未触达任何餐厅。
 
 先阅读 `AGENTS.md`、`欧洲餐厅菜单设计与印刷获客系统方案.md`、`plan/roadmap.md`、`plan/development.md`、`plan/validation.md` 与 `plan/exploration.md`。任务状态在 `plan/tasks.md`，决策在 `plan/decisions.md`；开始/完成跟踪任务时同步更新。
 
@@ -24,7 +24,7 @@ Beacon 已完成 T0/T1 技术探索（Islington 60 家抽样，5 份菜单，见
 - 桌面阶段使用现有工具、记录表与必要脚本，不先搭完整系统。
 - 采用 Monorepo：`apps/api/` 为模块化 Python 后端，`apps/web/` 为前端，`packages/api-client/` 按需生成；目录与边界见 `plan/development.md`。
 - 开发时优先 FastAPI + PostgreSQL；需要队列再用 Celery + Redis，需要 UI 再用 Next.js + Ant Design；不用 n8n 作重复核心。
-- 一个实际模型 provider + FakeProvider，接口可替换，不提前接多个厂商。
+- 实际模型 provider 为 DeepSeek（`deepseek-flash`，已真实评测，`plan/model-eval-v1.md`）+ FakeProvider；Anthropic 适配器保留未验证。接口可替换；模型结果一律 needs_review；模型只用于图片与图片 PDF，HTML/文本 PDF 用规则引擎。密钥只放 `apps/api/.env`。
 - 模板生成局部样稿；菜名、价格需逐项核对，不用文生图生成整张菜单。
 - 后端命令（已实测）：`docker compose -f infra/docker-compose.yml up -d`；`cd apps/api && uv sync && uv run alembic upgrade head && uv run pytest && uv run ruff check . && uv run mypy app tests`。前端：`pnpm install && pnpm --filter beacon-web typecheck && pnpm --filter beacon-web test && pnpm --filter beacon-web build`。完整清单见 `AGENTS.md`，操作流程见 `docs/操作手册.md`。
 - 研究脚本运行方式见 `plan/exploration.md` 六（`uv run --python 3.12 --no-project [--with pdfplumber] scripts/<name>.py`）；系统 Python 3.9 不用于抓取。

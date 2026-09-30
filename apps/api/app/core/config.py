@@ -22,7 +22,13 @@ class Settings(BaseSettings):
     # 关闭后仍阻断字面量的本机/内网地址与非 http(s) 协议。
     fetch_ip_check: bool = True
     fetch_user_agent: str = "Mozilla/5.0 (Macintosh) BeaconResearch/0.1 (+research use)"
-    llm_provider: str = "fake"
+    llm_provider: str = "fake"  # fake | anthropic | deepseek
+    llm_model: str | None = None  # 为空时按 provider 取默认：anthropic→claude-opus-5-5，deepseek→deepseek-flash
+    llm_thinking: bool = False  # 转录任务默认关闭思考（省 token、避免截断）；DeepSeek 生效
+    llm_effort: str = "medium"  # low | medium | high | xhigh | max
+    anthropic_api_key: str | None = None  # 或用环境变量 ANTHROPIC_API_KEY
+    deepseek_api_key: str | None = None
+    deepseek_base_url: str = "https://api.deepseek.com"
     templates_dir: Path = Path(__file__).resolve().parents[4] / "templates"  # <repo>/templates
     chrome_path: Path | None = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 

@@ -111,7 +111,7 @@ def run_analysis(
     engine_version = rules.RULES_VERSION if engine == "rules" else None
     if engine != "rules":
         provider = get_provider()
-        engine, engine_version = provider.name, "0"
+        engine, engine_version = provider.name, str(getattr(provider, "model", "0"))
     latest = latest_analysis(db, asset.id)
     if (
         latest is not None
@@ -141,15 +141,17 @@ def run_analysis(
             a.status = AnalysisStatus(r.status)
             a.error = r.note
         else:
-            pr = (
-                provider.analyze_image(data, {})
-                if asset.kind == AssetKind.image
-                else provider.analyze_text(data.decode("utf-8", "ignore"), {})
-            )
+            if asset.kind == AssetKind.image or (asset.kind == AssetKind.pdf and _pdf_has_no_text(data)):
+                pr = provider.analyze_image(data, {"media_type": asset.content_type})
+            elif asset.kind == AssetKind.pdf:
+                pr = provider.analyze_text(_pdf_text(data), {})
+            else:
+                pr = provider.analyze_text(rules.html_visible_text(data), {})
+
             a.items, a.issues, a.measurements = (
                 pr.items,
                 pr.issues,
-                {"kind": asset.kind.value, "provider_notes": pr.notes},
+                {"kind": asset.kind.value, "provider_notes": pr.notes, "usage": pr.usage},
             )
             a.status = AnalysisStatus.needs_review  # 模型结果一律需人工核对
             a.error = pr.notes
@@ -158,3 +160,16 @@ def run_analysis(
     db.commit()
     db.refresh(a)
     return a, True
+
+
+def _pdf_text(data: bytes) -> str:
+    from io import BytesIO
+
+    import pdfplumber
+
+    with pdfplumber.open(BytesIO(data)) as pdf:
+        return "\n".join((p.extract_text() or "") for p in pdf.pages)
+
+
+def _pdf_has_no_text(data: bytes) -> bool:
+    return len(_pdf_text(data).strip()) < 50

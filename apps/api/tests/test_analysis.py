@@ -90,3 +90,11 @@ def test_image_asset_analysis_needs_review(client, db):
     aid = _upload(client, lead_id, "mini.png", "image/png")
     r = client.post(f"/api/assets/{aid}/analyses").json()
     assert r["status"] == "needs_review" and r["issues"][0]["issue_code"] == "image_only_menu"
+
+
+def test_multi_price_line_is_split():
+    items = rules._parse_line("Bacon 3.9 / Smoked Salmon 3.9 / Feta 3", {"page": 1, "line": 7})
+    assert [(i["name"], i["price_text"]) for i in items] == [("Bacon", "3.9"), ("Smoked Salmon", "3.9"), ("Feta", "3")]
+    assert items[1]["evidence"]["segment"] == 2
+    # 分隔符前后有非价格段时不拆（避免把描述切碎）
+    assert len(rules._parse_line("Soup of the day / served with bread 5", {"line": 1})) == 1

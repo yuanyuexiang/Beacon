@@ -9,7 +9,8 @@ type Lead = { id: string; name: string; source_key: string; website: string | nu
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
 type Issue = { issue_code: string; fact: string; severity: string; confirmed: boolean | null; confirmed_by: string | null; note: string | null; deleted?: boolean; evidence: Record<string, unknown> };
-type Analysis = { id: string; version: number; parent_version: number | null; status: string; engine: string; review_state: string | null; items: Item[] | null; issues: Issue[] | null; measurements: Record<string, unknown> | null; error: string | null };
+type Candidates = { pdf_links?: string[]; image_candidates?: { src: string; alt: string }[]; iframes?: string[] };
+type Analysis = { id: string; version: number; parent_version: number | null; status: string; engine: string; engine_version: string | null; review_state: string | null; items: Item[] | null; issues: Issue[] | null; measurements: (Record<string, unknown> & Candidates) | null; error: string | null };
 type Content = { id: string; kind: string; version: number; status: string; approval_valid: boolean; approval_invalid_reason: string | null; body_text: string | null; html_url: string | null; png_url: string | null; spec: Record<string, unknown> | null };
 
 const SCREENING = ["unchecked", "candidate", "unknown", "excluded_cafe", "excluded_chain", "excluded_canteen", "excluded_community", "excluded_institution", "excluded_pub", "excluded_closed", "excluded_other"];
@@ -78,6 +79,7 @@ export default function LeadDetail() {
           { title: "操作", render: (_, a) => <Space>
             {a.source_url && a.fetch_status !== "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/retry`, { method: "POST" }).then(reload).catch(err)}>重试</Button>}
             {a.fetch_status === "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/analyses`, { method: "POST" }).then(reload).catch(err)}>分析（规则）</Button>}
+            {a.fetch_status === "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/analyses?engine=provider`, { method: "POST" }).then(reload).catch(err)}>模型转录</Button>}
             {latest(a.id) && <Tag>v{latest(a.id).version} {label(latest(a.id).status)}{latest(a.id).review_state === "reviewed" ? " · 已审核" : ""}</Tag>}
           </Space> },
         ]} />
@@ -93,6 +95,16 @@ export default function LeadDetail() {
             editable && <Button type="primary" onClick={() => api(`/api/analyses/${an.id}/review`, { method: "POST" }).then(reload).catch(err)}>完成审核</Button>
           }>
             {an.error && <Typography.Paragraph type="warning">{an.error}</Typography.Paragraph>}
+            {(an.measurements?.pdf_links?.length || an.measurements?.image_candidates?.length) ? (
+              <Card type="inner" size="small" title="页面里发现的候选菜单文件（一键接入后再分析；图片可能是菜品照片，请先打开确认）" style={{ marginBottom: 8 }}>
+                {(an.measurements?.pdf_links ?? []).map((u) => (
+                  <div key={u}><a href={u} target="_blank" rel="noreferrer">{u}</a> <Button size="small" onClick={() => api(`/api/leads/${id}/assets`, json({ url: u })).then(reload).catch(err)}>接入 PDF</Button></div>
+                ))}
+                {(an.measurements?.image_candidates ?? []).map((c) => (
+                  <div key={c.src}><a href={c.src} target="_blank" rel="noreferrer">{c.src.slice(-60)}</a> {c.alt && <Typography.Text type="secondary">{c.alt}</Typography.Text>} <Button size="small" onClick={() => api(`/api/leads/${id}/assets`, json({ url: c.src })).then(reload).catch(err)}>接入图片</Button></div>
+                ))}
+              </Card>
+            ) : null}
             <Tabs items={[
               { key: "file", label: "原文件", children: a.storage_path ? (a.kind === "image" ? <img alt="menu" src={`/api/files/${a.storage_path}`} style={{ maxWidth: "100%" }} /> : <iframe title="file" src={`/api/files/${a.storage_path}`} style={{ width: "100%", height: 600, border: 0 }} />) : null },
               { key: "items", label: `菜品与价格（${items.length}）`, children: (
@@ -107,14 +119,22 @@ export default function LeadDetail() {
               { key: "issues", label: `问题候选（${issues.length}）`, children: (
                 <Table<Issue> rowKey={(_, i) => String(i)} size="small" pagination={false} dataSource={issues} columns={[
                   { title: "代码", dataIndex: "issue_code", render: (v, r) => <Tag color={r.severity === "blocking" ? "red" : r.severity === "candidate" ? "gold" : "blue"}>{v}</Tag> },
-                  { title: "事实（测量值）", dataIndex: "fact" },
+                  { title: "事实（测量值）", dataIndex: "fact", render: (v, r) => <>{v}{(r as Issue & { fact_zh?: string | null }).fact_zh && <div><Typography.Text type="secondary">{(r as Issue & { fact_zh?: string | null }).fact_zh}</Typography.Text></div>}</> },
                   { title: "证据", render: (_, r) => JSON.stringify(r.evidence) },
                   { title: "人工确认", render: (_, r, i) => <Switch checked={r.confirmed === true} disabled={!editable} checkedChildren="属实" unCheckedChildren="未确认" onChange={(c) => correct(an, [{ field_path: `issues[${i}].confirmed`, new_value: c ? true : null }])} /> },
                   { title: "备注", dataIndex: "note", render: (v, _, i) => editable ? <Typography.Text editable={{ onChange: (nv) => correct(an, [{ field_path: `issues[${i}].note`, new_value: nv }]) }}>{v ?? ""}</Typography.Text> : v },
                 ]} />
               ) },
+              { key: "add", label: "人工新增", children: editable ? (
+                <Form layout="inline" onFinish={(v) => correct(an, [{ field_path: "issues[new]", new_value: { issue_code: v.issue_code, fact: v.fact, evidence: { region: v.region, file: a.storage_path }, severity: "candidate" }, reason: "人工目视" }])}>
+                  <Form.Item name="issue_code" rules={[{ required: true }]}><Select placeholder="问题代码" style={{ width: 200 }} options={["text_overlap", "missing_spaces", "low_resolution", "price_format_mixed_decimals", "price_format_mixed_symbol", "small_text", "typo", "other"].map((c) => ({ value: c }))} /></Form.Item>
+                  <Form.Item name="fact" rules={[{ required: true }]}><Input placeholder="可核对的事实（英文，用于对外文案）" style={{ width: 360 }} /></Form.Item>
+                  <Form.Item name="region" rules={[{ required: true }]}><Input placeholder="位置（如：中栏 Signature 第 3 条）" style={{ width: 240 }} /></Form.Item>
+                  <Button htmlType="submit">新增问题（记为人工确认）</Button>
+                </Form>
+              ) : <Typography.Text type="secondary">已审核的版本不能再新增。</Typography.Text> },
               { key: "m", label: "测量", children: <pre style={{ fontSize: 12 }}>{JSON.stringify(an.measurements, null, 1)}</pre> },
-              { key: "v", label: `版本（${analyses[a.id].length}）`, children: analyses[a.id].map((x) => <div key={x.id}>v{x.version} ← v{x.parent_version ?? "-"} · {x.engine} · {label(x.status)} · {x.review_state ?? "未审核"}</div>) },
+              { key: "v", label: `版本（${analyses[a.id].length}）`, children: analyses[a.id].map((x) => <div key={x.id}>v{x.version} ← v{x.parent_version ?? "-"} · {x.engine}{x.engine_version ? ` ${x.engine_version}` : ""} · {label(x.status)} · {x.review_state ?? "未审核"}</div>) },
             ]} />
           </Card>
         );

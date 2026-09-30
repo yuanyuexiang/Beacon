@@ -10,7 +10,7 @@ import statistics
 from dataclasses import dataclass, field
 from io import BytesIO
 
-RULES_VERSION = "0.4"
+RULES_VERSION = "0.5"
 PHONE_WIDTH_PX = 375.0
 SMALL_TEXT_PX = 9.0
 PRICE_RE = re.compile(r"(?P<sym>£|€|\$)?\s?(?P<num>\d{1,3}(?:\.\d{1,2})?)")
@@ -40,10 +40,20 @@ def _item(name: str, sym: str | None, num: str, evidence: dict) -> dict:
     }
 
 
+MULTI_SEP = re.compile(r"\s+/\s+|\s+\|\s+|\s+•\s+")
+
+
 def _parse_line(text: str, evidence: dict) -> list[dict]:
     text = text.strip()
     if not text or len(text) > 200:
         return []
+    # 一行多价："Bacon 3.9 / Smoked Salmon 3.9" → 按分隔符拆成多段，每段都以价格结尾时逐段解析
+    parts = MULTI_SEP.split(text)
+    if len(parts) >= 2 and all(LINE_END.match(p.strip()) for p in parts):
+        out: list[dict] = []
+        for k, part in enumerate(parts):
+            out += _parse_line(part, {**evidence, "segment": k + 1})
+        return out
     m = LINE_END.match(text)
     if m and len(m.group("name")) >= 2 and not re.search(r"\d\s*$", m.group("name")):
         return [_item(m.group("name"), m.group("sym"), m.group("num"), evidence)]
@@ -326,3 +336,13 @@ def analyze(kind: str, data: bytes, base_url: str | None = None) -> RulesResult:
     if kind == "image":
         return analyze_image(data)
     return RulesResult(status="needs_review", note=f"不支持的类型：{kind}")
+
+
+def html_visible_text(data: bytes) -> str:
+    """供模型转录用的可见文本（去脚本/样式/标签）。"""
+    import html as html_mod
+
+    s = data.decode("utf-8", errors="ignore")
+    t = re.sub(r"<script.*?</script>|<style.*?</style>|<noscript.*?</noscript>", " ", s, flags=re.S | re.I)
+    t = html_mod.unescape(re.sub(r"<[^>]+>", "\n", t))
+    return re.sub(r"\n\s*\n+", "\n", re.sub(r"[ \t]+", " ", t)).strip()
