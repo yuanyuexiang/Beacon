@@ -1,48 +1,51 @@
-# Repository Guidelines
+# 仓库贡献指南
 
-## Project Structure & Module Organization
+## 项目结构与模块组织
 
-Beacon is a planning-stage restaurant menu sales intelligence project. No application source, automated tests, or build configuration exists yet.
+Beacon 是餐厅菜单销售线索工具，目前处于规划阶段，尚无应用代码或构建配置。
 
-- `欧洲餐厅菜单设计与印刷获客系统方案.md`: primary product proposal.
-- `plan/roadmap.md`: validation-first phases and implementation boundaries.
-- `plan/validation.md`: sampling, evidence, channel eligibility, metrics, and decision gates.
-- `plan/archive/`: historical plans, not current instructions.
-- `plan/tasks.md` and `plan/decisions.md`: task status and decision records.
-- `reports/`: synthesized research reports.
-- `research_notes/`: supporting research grouped by report topic.
-- `汇报/`: presentation assets (`.pptx`).
+- `欧洲餐厅菜单设计与印刷获客系统方案.md`：主要产品方案。
+- `plan/roadmap.md`：验证阶段、开发顺序与实施边界。
+- `plan/validation.md`：抽样、证据、渠道准入、指标与阶段判定条件。
+- `plan/development.md`：开发任务、依赖关系与验收用例。
+- `plan/archive/`：历史方案，不作为当前执行指令。
+- `plan/tasks.md`、`plan/decisions.md`：任务进度与决策记录。
+- `reports/`：综合研究报告。
+- `research_notes/`：按报告主题组织的研究资料。
+- `汇报/`：演示材料（`.pptx`）。
 
-Future code may use `backend/` (FastAPI), `frontend/` (Next.js), `templates/`, `infra/`, and `scripts/`; these directories are not implemented.
+未来代码可能使用 `backend/`（FastAPI）、`frontend/`（Next.js）、`templates/`、`infra/` 和 `scripts/`；这些目录尚未实现。
 
-## Build, Test, and Development Commands
+## 构建、测试与开发命令
 
-No build, test, or server commands exist. For documentation, run:
+目前没有可运行的构建、测试或服务启动命令。文档工作可使用：
 
-- `rg --files`: inspect available documents.
-- `git diff --check`: detect whitespace errors in tracked changes.
-- `git diff --stat` and `git status --short`: review scope, including newly created files.
+- `rg --files`：查看仓库文件。
+- `git diff --check`：检查已跟踪文件改动中的空白字符错误。
+- `git diff --stat`、`git status --short`：检查改动范围及新增文件。
 
-When scaffolding lands, document verified commands here and in `CLAUDE.md`. The draft roadmap selects uv, pnpm, and Docker Compose; do not assume they are configured.
+项目骨架建立后，将验证过的命令同步到本文件和 `CLAUDE.md`。计划工具包括 uv、pnpm 和 Docker Compose，不应假定它们已经配置。
 
-## Coding Style & Naming Conventions
+## 编码风格与命名约定
 
-Write project documentation in Chinese. Use descriptive headings, relative links, and comparison tables. Preserve topic-based filenames and list indentation. Cite research sources; distinguish proposals from decisions.
+项目文档使用中文，采用清晰的标题、相对链接和对比表格。保留按主题命名的文件及现有列表缩进。研究结论注明来源，明确区分建议与已确认决策。
 
-No formatter or linter is installed. The planned code toolchain uses Ruff and mypy; establish indentation and naming conventions when adding source code.
+目前未配置格式化或代码检查工具。计划采用 Ruff 和 mypy；添加源码时再落实缩进和命名规范。
 
-## Testing Guidelines
+## 测试要求
 
-For document changes, check links, paths, and consistency across the proposal, roadmap, and tasks. Preview changed Markdown and slides.
+文档修改需检查链接、路径，以及方案、路线图和任务清单的一致性，并预览修改后的 Markdown 或演示材料。
 
-Planned testing includes pytest, Vitest/Testing Library, and Playwright. Prioritize eligibility, approval, suppression, and retry rules with success/failure paths; global coverage targets are deferred. Future fixtures belong in `backend/tests/fixtures/`; ordinary tests should use local fixtures and `FakeProvider`. Test naming conventions and executable commands remain to be established.
+计划采用 pytest、Vitest/Testing Library 和 Playwright。优先覆盖渠道准入、审批、拒收抑制及重试规则的成功和失败路径，暂不设全局覆盖率目标。未来测试夹具放在 `backend/tests/fixtures/`；普通测试使用本地夹具和 `FakeProvider`。测试命名与实际运行命令待实现时确定。
 
-## Commit & Pull Request Guidelines
+## 提交与合并请求规范
 
-Use imperative English commit subjects, matching history: “Add proposal …” or “Refactor code structure …”. No prefix is required.
+沿用历史记录，以英文祈使句作为提交标题，例如 `Add proposal …`、`Refactor code structure …`，不强制添加前缀。
 
-Keep changes focused. PRs should describe the purpose, affected documents or milestones, related issues/tasks, and validation performed. Include screenshots for presentation or future UI changes.
+每次改动保持聚焦。PR 应说明目的、涉及的文档或里程碑、关联问题或任务，以及已完成的验证。演示材料或未来界面发生变化时附截图。
 
-## Contributor Workflow
+## 协作流程
 
-Read `CLAUDE.md`, the proposal, and roadmap before feature work. Update task checkboxes and progress when starting or completing tracked tasks; record resolved design choices in `plan/decisions.md`. Sample sourcing is deferred by user request. Do not treat process approval as authorization to contact prospects. Preserve unrelated working-tree changes.
+开展功能工作前，阅读 `CLAUDE.md`、产品方案和路线图。开始或完成跟踪任务时，更新任务复选框与进度；确定的设计选择记录到 `plan/decisions.md`。
+
+先做技术探索，再开发工具；销售验证独立推进。流程获认可不代表获准联系潜在客户。保留工作区中与当前任务无关的改动。
