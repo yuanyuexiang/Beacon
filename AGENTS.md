@@ -12,6 +12,7 @@ Beacon 是餐厅菜单销售线索工具。T0/T1 技术探索已完成（`plan/e
 - `plan/exploration.md`：T0/T1 探索记录、可测量发现、复现命令。
 - `plan/validation-report-v1.md`：V 第一批 50 家的漏斗、提取质量、成本与工具问题。
 - `plan/model-eval-v1.md`：DeepSeek 转录评测（准确率、观察精确率、成本）。
+- 名单来源：`app/integrations/fsa.py`（FSA API）、`app/integrations/overture.py`（Overture Places，缓存在数据目录）；不使用 Google Maps 抓取。
 - `plan/tasks.md`、`plan/decisions.md`：任务进度与决策记录。
 - `scripts/`：抽样、抓取、探针、提取、样稿渲染脚本；`templates/`：样稿模板；`data/`：受控数据（gitignore）。
 - `reports/`：综合研究报告。

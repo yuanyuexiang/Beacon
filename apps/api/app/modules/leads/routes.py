@@ -217,3 +217,89 @@ def list_runs(batch_key: str, db: Session = Depends(get_db), op: Operator = Depe
             select(runs.BatchRun).where(runs.BatchRun.batch_id == batch.id).order_by(runs.BatchRun.started_at)
         ).all()
     ]
+
+
+class FsaSyncIn(BaseModel):
+    authority_id: int
+    business_type_id: int = 1
+    exclude_awaiting: bool = True
+    sample_n: int | None = None
+    seed: int | None = None
+
+
+@router.get("/sources/fsa/authorities")
+def fsa_authorities(db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> list[dict]:
+    from app.integrations import fsa
+
+    try:
+        return fsa.list_authorities()
+    except Exception as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"FSA 接口不可用：{e.__class__.__name__}: {e}") from e
+
+
+@router.post("/batches/{batch_key}/sync/fsa")
+def sync_fsa(
+    batch_key: str, body: FsaSyncIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    """从 FSA 名录自动建立候选（OGL v3）。同批次重复同步只补新记录。"""
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "批次不存在")
+    try:
+        result = service.sync_fsa(
+            db,
+            batch,
+            body.authority_id,
+            body.business_type_id,
+            body.exclude_awaiting,
+            body.sample_n,
+            body.seed,
+            op.username,
+        )
+    except Exception as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"FSA 同步失败：{e.__class__.__name__}: {e}") from e
+    audit.record(
+        db,
+        op,
+        "sync_fsa",
+        "batch",
+        batch.id,
+        after={**body.model_dump(), **{k: v for k, v in result.items() if k != "source_version"}},
+    )
+    db.commit()
+    return result
+
+
+class OvertureIn(BaseModel):
+    max_distance_m: float = 200
+    min_similarity: float = 0.5
+    overwrite: bool = False
+
+
+@router.post("/batches/{batch_key}/enrich/overture")
+def enrich_overture(
+    batch_key: str, body: OvertureIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    """用 Overture Places 补官网/电话（首次按批次范围下载，之后复用缓存）。只填空缺，来源与置信度记入线索。"""
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "批次不存在")
+    try:
+        result = service.enrich_overture(db, batch, body.max_distance_m, body.min_similarity, body.overwrite)
+    except Exception as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Overture 补全失败：{e.__class__.__name__}: {e}") from e
+    audit.record(db, op, "enrich_overture", "batch", batch.id, after={k: v for k, v in result.items() if k != "bbox"})
+    db.commit()
+    return result
+
+
+@router.post("/batches/{batch_key}/screen")
+def auto_screen(batch_key: str, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> dict:
+    """规则筛选建议：咖啡店/连锁/机构/酒吧标为排除并写明规则版本；其余保持 unchecked 交人工。"""
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "批次不存在")
+    result = service.auto_screen(db, batch)
+    audit.record(db, op, "auto_screen", "batch", batch.id, after=result)
+    db.commit()
+    return result
