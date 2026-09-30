@@ -4,8 +4,9 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { approvalText, label } from "@/lib/format";
+import { PageHeader } from "@/components/PageHeader";
 
-type Lead = { id: string; name: string; source_key: string; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
+type Lead = { id: string; name: string; source_key: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
 type Issue = { issue_code: string; fact: string; severity: string; confirmed: boolean | null; confirmed_by: string | null; note: string | null; deleted?: boolean; evidence: Record<string, unknown> };
@@ -44,23 +45,25 @@ export default function LeadDetail() {
   const reviewedAnalyses = Object.values(analyses).flatMap((list) => list.filter((a) => a.review_state === "reviewed" && a.id === list[list.length - 1]?.id));
 
   return (
-    <Space direction="vertical" size="large" style={{ width: "100%" }}>
-      <Card size="small" title={<>{lead.name} <Typography.Text type="secondary">{lead.source_key}</Typography.Text></>}>
+    <div>
+      <PageHeader title={lead.name} subtitle={<>{lead.source_key} · {lead.postcode ?? ""} · {lead.website ? <a href={lead.website} target="_blank" rel="noreferrer">{lead.website}</a> : "无官网"} · 筛选 <Tag color={lead.screening_class === "candidate" ? "green" : "default"}>{lead.screening_class}</Tag> 主体 {label(lead.entity_status)}</>} />
+      <Card size="small" title="基本信息与人工判断" style={{ marginBottom: 16 }}>
         <Form
           layout="inline"
           initialValues={lead}
+          style={{ rowGap: 8 }}
           onFinish={(v) => api(`/api/leads/${id}`, json(v, "PATCH")).then(() => { message.success("已保存"); reload(); }).catch(err)}
         >
-          <Form.Item name="website" label="官网"><Input style={{ width: 260 }} /></Form.Item>
-          <Form.Item name="screening_class" label="筛选"><Select style={{ width: 170 }} options={SCREENING.map((s) => ({ value: s }))} /></Form.Item>
-          <Form.Item name="screening_reason" label="原因"><Input style={{ width: 220 }} /></Form.Item>
-          <Form.Item name="entity_status" label="主体"><Select style={{ width: 120 }} options={["unknown", "company", "sole_trader", "other"].map((s) => ({ value: s }))} /></Form.Item>
-          <Form.Item name="entity_evidence" label="主体证据"><Input style={{ width: 200 }} /></Form.Item>
-          <Button htmlType="submit">保存</Button>
+          <Form.Item name="website" label="官网"><Input style={{ width: 280 }} /></Form.Item>
+          <Form.Item name="screening_class" label="筛选"><Select style={{ width: 180 }} options={SCREENING.map((s) => ({ value: s }))} /></Form.Item>
+          <Form.Item name="screening_reason" label="原因"><Input style={{ width: 240 }} /></Form.Item>
+          <Form.Item name="entity_status" label="主体"><Select style={{ width: 130 }} options={["unknown", "company", "sole_trader", "other"].map((s) => ({ value: s }))} /></Form.Item>
+          <Form.Item name="entity_evidence" label="主体证据"><Input style={{ width: 220 }} /></Form.Item>
+          <Button type="primary" htmlType="submit">保存</Button>
         </Form>
       </Card>
 
-      <Card size="small" title="菜单文件" extra={
+      <Card size="small" title="菜单文件" style={{ marginBottom: 16 }} extra={
         <Space>
           <Form layout="inline" onFinish={(v) => api(`/api/leads/${id}/assets`, json(v)).then(reload).catch(err)}>
             <Form.Item name="url" rules={[{ required: true }]}><Input placeholder="人工核对过的菜单 URL" style={{ width: 320 }} /></Form.Item>
@@ -72,11 +75,11 @@ export default function LeadDetail() {
         </Space>
       }>
         <Table<Asset> rowKey="id" size="small" pagination={false} dataSource={assets} columns={[
-          { title: "类型", dataIndex: "kind" },
-          { title: "来源", render: (_, a) => a.source_url ?? a.original_filename ?? "-" },
-          { title: "状态", render: (_, a) => <>{label(a.fetch_status)} {a.fetch_error && <Typography.Text type="danger">{a.fetch_error}</Typography.Text>}</> },
-          { title: "文件", render: (_, a) => a.storage_path ? <a href={`/api/files/${a.storage_path}`} target="_blank" rel="noreferrer">打开</a> : "-" },
-          { title: "操作", render: (_, a) => <Space>
+          { title: "类型", dataIndex: "kind", width: 80 },
+          { title: "来源", ellipsis: true, render: (_, a) => a.source_url ?? a.original_filename ?? "-" },
+          { title: "状态", width: 120, render: (_, a) => <>{label(a.fetch_status)} {a.fetch_error && <Typography.Text type="danger">{a.fetch_error}</Typography.Text>}</> },
+          { title: "文件", width: 70, render: (_, a) => a.storage_path ? <a href={`/api/files/${a.storage_path}`} target="_blank" rel="noreferrer">打开</a> : "-" },
+          { title: "操作", width: 330, render: (_, a) => <Space>
             {a.source_url && a.fetch_status !== "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/retry`, { method: "POST" }).then(reload).catch(err)}>重试</Button>}
             {a.fetch_status === "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/analyses`, { method: "POST" }).then(reload).catch(err)}>分析（规则）</Button>}
             {a.fetch_status === "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/analyses?engine=provider`, { method: "POST" }).then(reload).catch(err)}>模型转录</Button>}
@@ -91,7 +94,7 @@ export default function LeadDetail() {
         const issues = an.issues ?? [];
         const editable = an.review_state !== "reviewed";
         return (
-          <Card key={a.id} size="small" title={`证据与修正 · ${a.kind} · 分析 v${an.version}（${an.engine}，${label(an.status)}）`} extra={
+          <Card key={a.id} size="small" style={{ marginBottom: 16 }} title={`证据与修正 · ${a.kind} · 分析 v${an.version}（${an.engine}，${label(an.status)}）`} extra={
             editable && <Button type="primary" onClick={() => api(`/api/analyses/${an.id}/review`, { method: "POST" }).then(reload).catch(err)}>完成审核</Button>
           }>
             {an.error && <Typography.Paragraph type="warning">{an.error}</Typography.Paragraph>}
@@ -171,6 +174,6 @@ export default function LeadDetail() {
           </Card>
         ))}
       </Card>
-    </Space>
+    </div>
   );
 }

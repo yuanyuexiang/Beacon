@@ -48,7 +48,7 @@ Docker 全套（已实测）：`cp infra/.env.example infra/.env && docker compo
 - `pnpm install`：根目录 workspace 安装（`pnpm-workspace.yaml` 的 `allowBuilds` 已放行 esbuild、unrs-resolver）。
 - `pnpm --filter beacon-web dev`：开发服务器 3000 端口，`/api/*` 重写到 `BEACON_API_URL`（默认 http://localhost:8000）。
 - `pnpm --filter beacon-web typecheck`、`lint`、`test`（Vitest）、`build`（Next 生产构建）。
-- 页面：`/login`、`/`（批次、导入、批量运行、统计）、`/leads/[id]`（文件、证据与修正、审核、样稿与文案、审批）、`/tasks`（准入、人工任务、事件、抑制）。
+- 页面（管理系统布局：左侧导航 + 顶部面包屑）：`/login`、`/`（仪表盘：漏斗、渠道、成本）、`/leads`（批次与线索：统计、筛选、自动建名单抽屉、导入、批量运行、导出）、`/leads/[id]`（文件、证据与修正、审核、样稿与文案、审批）、`/tasks`（任务、渠道准入、回复回填、抑制名单页签）、`/settings`（流程与边界说明）。
 
 文档工作可使用：
 
