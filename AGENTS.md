@@ -31,7 +31,7 @@ Beacon 是餐厅菜单销售线索工具。T0/T1 技术探索已完成（`plan/e
 - `uv run --python 3.12 --no-project --with pdfplumber scripts/menu_probe.py data/evidence --out <json>`
 - `uv run --python 3.12 --no-project --with pdfplumber scripts/extract_items.py <pdf> --out <json>`
 - `python3 scripts/render_sample.py <spec.json> --out <path>`（本机 Chrome 无头渲染）
-- `python3 scripts/assign_arms.py <leads.json> --seed N --prefix data/records/<batch>`（人工基线分组与计时工作表，说明见 `docs/人工基线操作说明.md`）
+- `python3 scripts/assign_arms.py <leads.json> --seed N --prefix data/records/<batch> [--single-arm]`（真人计时工作表；`--single-arm` 全部进工具组，说明见 `docs/真人计时操作说明.md`）
 
 Docker 全套（已实测）：`cp infra/.env.example infra/.env && docker compose -f infra/docker-compose.yml up -d --build`（postgres + api 自动迁移 + web，http://localhost:3000）；容器内测试 `docker compose -f infra/docker-compose.yml --profile test run --rm api-test`。
 
