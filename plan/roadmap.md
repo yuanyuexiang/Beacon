@@ -36,7 +36,7 @@ T1 的失败也是交付：若没有真实菜单跑通，先修正数据/解析�
 - 发送：验证期人工执行和回填；后续接入一种符合业务条件的服务，避免两套节奏引擎。
 - 依赖：引入前核对用途、确切版本许可证及数据处理安排；继续遵守项目排除 AGPL/GPL 等依赖的政策。
 
-拟建目录：`backend/app/`、`backend/tests/fixtures/`、`frontend/`、`templates/`、`scripts/`、`infra/`。尚无运行命令；首次实现时更新 `AGENTS.md` 和 `CLAUDE.md`。
+采用 Monorepo：`apps/api/`、`apps/web/`、按需创建的 `packages/api-client/`，以及根目录 `templates/`、`scripts/`、`infra/`；后端夹具放在 `apps/api/tests/fixtures/`。模块边界见 [开发说明](development.md)。尚无运行命令；首次实现时更新 `AGENTS.md` 和 `CLAUDE.md`。
 
 ## 四 数据与审核约束
 

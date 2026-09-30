@@ -4,15 +4,15 @@
 
 ## 当前状态与依据
 
-Beacon 处于验证准备阶段，没有应用代码、构建系统或测试。用户先要求整理验证流程，后确认英国试点且没有现成名单；当前未采集样本、未触达。
+Beacon 已完成 T0/T1 技术探索（Islington 60 家抽样，5 份菜单，见 `plan/exploration.md`）和 `plan/development.md` 的 D1～D10 最小工具（apps/api 57 个测试、apps/web 工作台已构建）。下一步是 V（约 50 家新候选扩大验证）与 B（人工商业验证，条件未齐）。研究脚本在 `scripts/`，受控数据在 `data/`（已忽略，不提交）。当前未触达任何餐厅。
 
-先阅读 `AGENTS.md`、`欧洲餐厅菜单设计与印刷获客系统方案.md`、`plan/roadmap.md`、`plan/development.md` 与 `plan/validation.md`。任务状态在 `plan/tasks.md`，决策在 `plan/decisions.md`；开始/完成跟踪任务时同步更新。
+先阅读 `AGENTS.md`、`欧洲餐厅菜单设计与印刷获客系统方案.md`、`plan/roadmap.md`、`plan/development.md`、`plan/validation.md` 与 `plan/exploration.md`。任务状态在 `plan/tasks.md`，决策在 `plan/decisions.md`；开始/完成跟踪任务时同步更新。
 
 `plan/archive/` 是历史快照；`reports/` 与 `research_notes/` 是研究输入，不能覆盖当前方案。研究中的“实测”若无可复现产物，应标为未在本仓库复核。汇报 PPT 尚未同步当前版本，不能直接作为当前承诺对外使用。
 
 ## 产品与当前范围
 
-目标是减少菜单设计与印刷业务的线索研究、素材准备时间，并验证有效意向与成本。约 10 家技术探索后即可开发最小工具，再用约 50 家新候选扩大验证；人工商业验证可并行，不作为开发前置；当前只整理流程，国家已确定为英国；建议 FSA 公开名录底表，城市、样本、经营参数和负责人待落实。
+目标是减少菜单设计与印刷业务的线索研究、素材准备时间，并验证有效意向与成本。约 10 家技术探索后即可开发最小工具，再用约 50 家新候选扩大验证；人工商业验证可并行，不作为开发前置；下一步从 T0/T1 开始技术探索，国家已确定为英国；建议 FSA 公开名录底表，城市、样本、经营参数和负责人待落实。
 
 首版仅保留名单导入、菜单分析与证据、人工审核、一个局部示例模板、人工联系任务及结果。暂缓多源同步、复杂评分、自动跟进、完整 CRM、生产印刷文件、多国、多租户。
 
@@ -22,10 +22,12 @@ Beacon 处于验证准备阶段，没有应用代码、构建系统或测试。�
 
 - 固定、可审计流程；模糊任务交模型，事实和对外内容由人确认。
 - 桌面阶段使用现有工具、记录表与必要脚本，不先搭完整系统。
+- 采用 Monorepo：`apps/api/` 为模块化 Python 后端，`apps/web/` 为前端，`packages/api-client/` 按需生成；目录与边界见 `plan/development.md`。
 - 开发时优先 FastAPI + PostgreSQL；需要队列再用 Celery + Redis，需要 UI 再用 Next.js + Ant Design；不用 n8n 作重复核心。
 - 一个实际模型 provider + FakeProvider，接口可替换，不提前接多个厂商。
 - 模板生成局部样稿；菜名、价格需逐项核对，不用文生图生成整张菜单。
-- 代码出现后补真实构建、测试、lint 命令；计划工具为 uv、pnpm、Ruff、mypy、pytest，前端测试按需要加入。
+- 后端命令（已实测）：`docker compose -f infra/docker-compose.yml up -d`；`cd apps/api && uv sync && uv run alembic upgrade head && uv run pytest && uv run ruff check . && uv run mypy app tests`。前端：`pnpm install && pnpm --filter beacon-web typecheck && pnpm --filter beacon-web test && pnpm --filter beacon-web build`。完整清单见 `AGENTS.md`，操作流程见 `docs/操作手册.md`。
+- 研究脚本运行方式见 `plan/exploration.md` 六（`uv run --python 3.12 --no-project [--with pdfplumber] scripts/<name>.py`）；系统 Python 3.9 不用于抓取。
 
 ## 必须落实的边界
 

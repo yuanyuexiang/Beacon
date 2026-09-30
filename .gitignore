@@ -1,0 +1,30 @@
+# 受控证据与真实数据：不提交
+data/
+*.env
+.env.*
+!.env.example
+
+# macOS / 编辑器
+.DS_Store
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+dist/
+coverage/
+backups/
+
+# Next.js 生成物
+apps/web/.next/
+apps/web/next-env.d.ts
+*.tsbuildinfo

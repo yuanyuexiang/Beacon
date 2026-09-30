@@ -1,0 +1,11 @@
+{
+  "name": "beacon-monorepo",
+  "private": true,
+  "packageManager": "pnpm@11.2.2",
+  "scripts": {
+    "web:dev": "pnpm --filter beacon-web dev",
+    "web:build": "pnpm --filter beacon-web build",
+    "web:test": "pnpm --filter beacon-web test",
+    "web:lint": "pnpm --filter beacon-web lint"
+  }
+}

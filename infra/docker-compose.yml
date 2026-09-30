@@ -1,0 +1,21 @@
+# 本地开发依赖。启动：docker compose -f infra/docker-compose.yml up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: beacon-postgres
+    environment:
+      POSTGRES_USER: beacon
+      POSTGRES_PASSWORD: beacon
+      POSTGRES_DB: beacon
+    ports:
+      - "5433:5432"
+    volumes:
+      - beacon-pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beacon -d beacon"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  beacon-pgdata:

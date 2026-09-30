@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>{{restaurant}} — {{section}}</title>
+<style>
+  :root{--ink:#1f2a24;--accent:#0b5d3b;--muted:#6b7570;--rule:#c9b98a}
+  html,body{margin:0;background:#fff;color:var(--ink);font-family:Georgia,"Times New Roman",serif}
+  .sheet{width:375px;padding:28px 22px;box-sizing:border-box}
+  h1{font:600 13px/1.2 Helvetica,Arial,sans-serif;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin:0 0 4px}
+  h2{font:400 22px/1.15 Georgia,serif;margin:0 0 14px;letter-spacing:.02em}
+  hr{border:0;border-top:1px solid var(--rule);margin:0 0 14px}
+  .item{display:flex;align-items:baseline;gap:8px;margin:0 0 11px}
+  .name{font-size:16px;line-height:1.3;flex:1 1 auto;min-width:0}
+  .dots{flex:1 0 12px;border-bottom:1px dotted #b8b8b8;transform:translateY(-4px)}
+  .price{font-size:16px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .desc{font-size:13px;line-height:1.35;color:var(--muted);margin:2px 0 0;flex-basis:100%}
+  .foot{margin-top:18px;font:11px/1.4 Helvetica,Arial,sans-serif;color:var(--muted)}
+</style></head><body><div class="sheet">
+<h1>{{restaurant}}</h1><h2>{{section}}</h2><hr>
+{{items}}
+<p class="foot">Sample layout for review only · source: {{source}} · items and prices transcribed, not altered · {{generated}}</p>
+</div></body></html>

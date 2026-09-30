@@ -27,6 +27,21 @@
 
 以上方向经本轮用户确认；城市及经营数值仍未代为确定。
 
+## Monorepo 约定（2026-09-30）
+
+D18：采用同仓库的 `apps/web` 与 `apps/api`，前后端独立构建与部署；后端按业务模块组织，暂不拆微服务。共享 API 客户端按需生成；pnpm 与 uv 分别管理依赖，不强制引入 Turborepo。
+
+## T1 后决策（2026-09-30）
+
+- D19：研究区域 Islington，目标类型为 FSA 类型 1 中的独立或小型集团堂食餐厅；抽样按 FHRSID 排序后固定种子随机抽取，排除 AwaitingInspection。用户尚未确认试点城市，此为技术探索选择。
+- D20：首版支持格式为文本型 PDF（含坐标分栏）与 HTML 文本；图片与扫描件进入人工/视觉队列；抓取被拒站点转人工下载。依据：5 份菜单中 PDF 3、HTML 1、图片 1，且无模型密钥。
+- D21：样稿渲染先用本机 Chrome 无头模式（零依赖）；部署环境改用 Playwright Chromium，模板不变。
+- D22：D1～D10 时间盒 11 人日（exploration.md 五）；超出先缩范围。
+- D23：抓取脚本统一用 `uv run --python 3.12`，系统 Python 3.9 存在 TLS 握手失败。
+- D24：后端不引入 Celery/Redis；批量处理为同步逐 job 执行并持久化状态（≤100 家），更大批次再评估队列。
+- D25：数据库驱动用 psycopg 3（LGPL-3.0，作为未修改的库使用）；其余核心依赖为 MIT/BSD/Apache（fastapi、sqlalchemy、alembic、pydantic、pdfplumber、httpx）。LGPL 未列入项目排除清单，正式上线前由负责人确认。
+- D26：真实模型 provider 暂未接入（无密钥）；`engine=provider` 仅 FakeProvider，结果一律 needs_review，不作为验证依据。
+
 ## 保留原则
 
 - 固定、可审计工作流；模糊判断交模型，结果需证据与审核。
