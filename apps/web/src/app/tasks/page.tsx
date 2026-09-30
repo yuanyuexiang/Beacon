@@ -1,9 +1,9 @@
 "use client";
-import { Button, Card, DatePicker, Form, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
+import { Badge, Button, Card, DatePicker, Form, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
-import { PageHeader } from "@/components/PageHeader";
+import { HeroBand } from "@/components/ui";
 import { label } from "@/lib/format";
 
 type Lead = { id: string; name: string; source_key: string };
@@ -56,14 +56,14 @@ export default function TasksPage() {
 
   return (
     <>
-      <PageHeader title="人工任务与回复" subtitle="系统不发送消息。准入、审批、抑制在创建、打开、记录发送三个时点都会复核。"
+      <HeroBand kicker="MANUAL OUTREACH" title="人工任务与回复" subtitle="系统不发送消息。准入、审批、抑制在创建、打开、记录发送三个时点都会复核。"
         extra={<>
           <Select showSearch style={{ width: 320 }} placeholder="选择门店以管理准入与回填" optionFilterProp="label" value={leadId} onChange={pick} options={leads.map((l) => ({ value: l.id, label: `${l.name}（${l.source_key}）` }))} />
           {leadId && <Link href={`/leads/${leadId}`}><Button>查看详情</Button></Link>}
         </>} />
       <Card size="small">
         <Tabs items={[
-          { key: "tasks", label: `任务（${(leadId ? tasks.filter((t) => t.lead_id === leadId) : tasks).length}）`, children: taskTable },
+          { key: "tasks", label: <span>任务 <Badge count={(leadId ? tasks.filter((t) => t.lead_id === leadId) : tasks).length} showZero color="#cf010e" /></span>, children: taskTable },
           { key: "elig", label: "渠道准入", disabled: !leadId, children: leadId ? (
             <>
               <Form layout="inline" onFinish={(v) => api(`/api/leads/${leadId}/eligibility`, json(v)).then(() => reload(leadId)).catch(err)} style={{ marginBottom: 12, rowGap: 8 }}>
@@ -102,7 +102,7 @@ export default function TasksPage() {
               ]} />
             </>
           ) : null },
-          { key: "sup", label: `抑制名单（${sups.length}）`, children: (
+          { key: "sup", label: <span>抑制名单 <Badge count={sups.length} showZero color="#8a8a8a" /></span>, children: (
             <Table<Sup> rowKey="id" size="small" pagination={false} dataSource={sups} columns={[
               { title: "门店", dataIndex: "lead_id", render: (v) => (v ? name(v) : "-") }, { title: "范围", dataIndex: "scope" },
               { title: "联系值", dataIndex: "contact_ref" }, { title: "原因", dataIndex: "reason", render: (v) => <Tag color="red">{v}</Tag> }, { title: "时间", dataIndex: "created_at", render: (v) => v.slice(0, 19) },

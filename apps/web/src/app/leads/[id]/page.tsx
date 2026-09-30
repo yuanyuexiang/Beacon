@@ -4,7 +4,8 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { approvalText, label } from "@/lib/format";
-import { PageHeader } from "@/components/PageHeader";
+import { HeroBand, SCREEN_ZH, ScreenTag } from "@/components/ui";
+import { Steps } from "antd";
 
 type Lead = { id: string; name: string; source_key: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
@@ -43,10 +44,16 @@ export default function LeadDetail() {
   const correct = (a: Analysis, corrections: { field_path: string; new_value: unknown; reason?: string }[]) =>
     api(`/api/analyses/${a.id}`, json({ corrections }, "PATCH")).then(reload).catch(err);
   const reviewedAnalyses = Object.values(analyses).flatMap((list) => list.filter((a) => a.review_state === "reviewed" && a.id === list[list.length - 1]?.id));
+  const progress = content.some((c) => c.approval_valid) ? 5 : content.length ? 4 : reviewedAnalyses.length ? 3 : Object.values(analyses).some((l) => l.length) ? 2 : assets.some((a) => a.fetch_status === "fetched") ? 1 : 0;
 
   return (
     <div>
-      <PageHeader title={lead.name} subtitle={<>{lead.source_key} · {lead.postcode ?? ""} · {lead.website ? <a href={lead.website} target="_blank" rel="noreferrer">{lead.website}</a> : "无官网"} · 筛选 <Tag color={lead.screening_class === "candidate" ? "green" : "default"}>{lead.screening_class}</Tag> 主体 {label(lead.entity_status)}</>} />
+      <HeroBand kicker="LEAD" title={lead.name} subtitle={<>{lead.source_key} · {lead.postcode ?? ""} · {lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: "#fab736" }}>{lead.website}</a> : "无官网"}</>}
+        extra={<><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /><Tag style={{ marginInlineEnd: 0 }}>主体 {label(lead.entity_status)}</Tag></>}>
+      </HeroBand>
+      <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: "14px 20px" } }}>
+        <Steps size="small" current={progress} items={[{ title: "菜单文件" }, { title: "分析" }, { title: "人工审核" }, { title: "样稿 / 文案" }, { title: "审批" }, { title: "准入与任务" }]} />
+      </Card>
       <Card size="small" title="基本信息与人工判断" style={{ marginBottom: 16 }}>
         <Form
           layout="inline"
@@ -55,7 +62,7 @@ export default function LeadDetail() {
           onFinish={(v) => api(`/api/leads/${id}`, json(v, "PATCH")).then(() => { message.success("已保存"); reload(); }).catch(err)}
         >
           <Form.Item name="website" label="官网"><Input style={{ width: 280 }} /></Form.Item>
-          <Form.Item name="screening_class" label="筛选"><Select style={{ width: 180 }} options={SCREENING.map((s) => ({ value: s }))} /></Form.Item>
+          <Form.Item name="screening_class" label="筛选"><Select style={{ width: 160 }} options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} /></Form.Item>
           <Form.Item name="screening_reason" label="原因"><Input style={{ width: 240 }} /></Form.Item>
           <Form.Item name="entity_status" label="主体"><Select style={{ width: 130 }} options={["unknown", "company", "sole_trader", "other"].map((s) => ({ value: s }))} /></Form.Item>
           <Form.Item name="entity_evidence" label="主体证据"><Input style={{ width: 220 }} /></Form.Item>
