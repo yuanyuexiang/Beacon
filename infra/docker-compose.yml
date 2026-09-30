@@ -1,4 +1,9 @@
-# 本地开发依赖。启动：docker compose -f infra/docker-compose.yml up -d
+# 本地完整部署：postgres + api（自动迁移）+ web。
+#   启动：docker compose -f infra/docker-compose.yml up -d --build
+#   访问：http://localhost:3000（工作台，/api 已代理到后端）、http://localhost:8000/api/docs
+#   测试：docker compose -f infra/docker-compose.yml --profile test run --rm api-test
+#   仅数据库（本机开发/测试用）：docker compose -f infra/docker-compose.yml up -d postgres
+# 变量来自 infra/.env（见 .env.example）；缺失时用下面的默认值。
 services:
   postgres:
     image: postgres:16-alpine
@@ -17,5 +22,67 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: beacon-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      BEACON_DATABASE_URL: postgresql+psycopg://beacon:beacon@postgres:5432/beacon
+      BEACON_DATA_DIR: /data
+      BEACON_SECRET_KEY: ${BEACON_SECRET_KEY:-dev-only-secret-key-please-change-0123456789abcdef}
+      BEACON_BOOTSTRAP_OPERATOR: ${BEACON_BOOTSTRAP_OPERATOR:-admin}
+      BEACON_BOOTSTRAP_PASSWORD: ${BEACON_BOOTSTRAP_PASSWORD:-admin-dev-password}
+      BEACON_CHROME_PATH: ""
+    ports:
+      - "8000:8000"
+    volumes:
+      - beacon-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        BEACON_API_URL: http://api:8000
+    container_name: beacon-web
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      BEACON_API_URL: http://api:8000
+    ports:
+      - "3000:3000"
+
+  # 在容器里跑后端测试（使用同一 postgres 的 beacon_test 库）
+  api-test:
+    profiles: ["test"]
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      target: base
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BEACON_TEST_DATABASE_URL: postgresql+psycopg://beacon:beacon@postgres:5432/beacon_test
+      BEACON_DATABASE_URL: postgresql+psycopg://beacon:beacon@postgres:5432/beacon_test
+      BEACON_DATA_DIR: /tmp/beacon-test-data
+      BEACON_SECRET_KEY: test-secret-key-0123456789abcdef0123456789abcdef
+    command: ["sh", "-c", "uv sync --frozen && uv run pytest -q"]
+
 volumes:
   beacon-pgdata:
+  beacon-data:

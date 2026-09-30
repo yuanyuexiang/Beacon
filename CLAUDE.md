@@ -26,7 +26,7 @@ Beacon 已完成 T0/T1 技术探索（Islington 60 家抽样，5 份菜单，见
 - 开发时优先 FastAPI + PostgreSQL；需要队列再用 Celery + Redis，需要 UI 再用 Next.js + Ant Design；不用 n8n 作重复核心。
 - 实际模型 provider 为 DeepSeek（`deepseek-flash`，已真实评测，`plan/model-eval-v1.md`）+ FakeProvider；Anthropic 适配器保留未验证。接口可替换；模型结果一律 needs_review；模型只用于图片与图片 PDF，HTML/文本 PDF 用规则引擎。密钥只放 `apps/api/.env`。
 - 模板生成局部样稿；菜名、价格需逐项核对，不用文生图生成整张菜单。
-- 后端命令（已实测）：`docker compose -f infra/docker-compose.yml up -d`；`cd apps/api && uv sync && uv run alembic upgrade head && uv run pytest && uv run ruff check . && uv run mypy app tests`。前端：`pnpm install && pnpm --filter beacon-web typecheck && pnpm --filter beacon-web test && pnpm --filter beacon-web build`。完整清单见 `AGENTS.md`，操作流程见 `docs/操作手册.md`。
+- Docker 全套：`docker compose -f infra/docker-compose.yml up -d --build`（含 web、api 与自动迁移；测试 `--profile test run --rm api-test`）。后端本机命令（已实测）：`docker compose -f infra/docker-compose.yml up -d postgres`；`cd apps/api && uv sync && uv run alembic upgrade head && uv run pytest && uv run ruff check . && uv run mypy app tests`。前端：`pnpm install && pnpm --filter beacon-web typecheck && pnpm --filter beacon-web test && pnpm --filter beacon-web build`。完整清单见 `AGENTS.md`，操作流程见 `docs/操作手册.md`。
 - 研究脚本运行方式见 `plan/exploration.md` 六（`uv run --python 3.12 --no-project [--with pdfplumber] scripts/<name>.py`）；系统 Python 3.9 不用于抓取。
 
 ## 必须落实的边界

@@ -1,0 +1,15 @@
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+data/
+backups/
+.git/
+apps/api/.env
+**/.env
+plan/archive/
+research_notes/
+汇报/

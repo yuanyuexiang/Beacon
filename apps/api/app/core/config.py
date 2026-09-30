@@ -30,7 +30,12 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     templates_dir: Path = Path(__file__).resolve().parents[4] / "templates"  # <repo>/templates
-    chrome_path: Path | None = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    chrome_path: Path | None = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")  # 容器内设为空
+
+    @field_validator("chrome_path", mode="before")
+    @classmethod
+    def _empty_chrome(cls, v):
+        return None if v in ("", None) else v
 
     @field_validator("data_dir")
     @classmethod

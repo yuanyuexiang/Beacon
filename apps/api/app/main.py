@@ -19,7 +19,9 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Beacon API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="Beacon API", version="0.1.0", lifespan=lifespan, docs_url="/api/docs", openapi_url="/api/openapi.json"
+)
 api = APIRouter(prefix="/api")
 
 

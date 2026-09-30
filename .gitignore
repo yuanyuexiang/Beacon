@@ -28,3 +28,4 @@ backups/
 apps/web/.next/
 apps/web/next-env.d.ts
 *.tsbuildinfo
+infra/.env

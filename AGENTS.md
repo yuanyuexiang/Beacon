@@ -31,9 +31,11 @@ Beacon 是餐厅菜单销售线索工具。T0/T1 技术探索已完成（`plan/e
 - `uv run --python 3.12 --no-project --with pdfplumber scripts/extract_items.py <pdf> --out <json>`
 - `python3 scripts/render_sample.py <spec.json> --out <path>`（本机 Chrome 无头渲染）
 
-后端（`apps/api`，已实测，需先启动数据库）：
+Docker 全套（已实测）：`cp infra/.env.example infra/.env && docker compose -f infra/docker-compose.yml up -d --build`（postgres + api 自动迁移 + web，http://localhost:3000）；容器内测试 `docker compose -f infra/docker-compose.yml --profile test run --rm api-test`。
 
-- `docker compose -f infra/docker-compose.yml up -d`：启动 PostgreSQL 16（端口 5433，开发库 `beacon`、测试库 `beacon_test`）。
+后端（`apps/api`，本机开发，需先 `docker compose -f infra/docker-compose.yml up -d postgres`）：
+
+- `docker compose -f infra/docker-compose.yml up -d postgres`：只启动 PostgreSQL 16（端口 5433，开发库 `beacon`、测试库 `beacon_test`）。
 - `cd apps/api && uv sync`：安装依赖（Python 3.12，`.python-version`）。
 - `cp apps/api/.env.example apps/api/.env`：填写 `BEACON_*` 变量；`BEACON_DATA_DIR` 必须是绝对路径。模型转录需 `BEACON_LLM_PROVIDER=deepseek` 与 `BEACON_DEEPSEEK_API_KEY`（默认 fake，不调用模型；评测记录 `plan/model-eval-v1.md`）。
 - `cd apps/api && uv run alembic upgrade head`：迁移；`uv run alembic revision --autogenerate -m "..."` 生成新迁移。
