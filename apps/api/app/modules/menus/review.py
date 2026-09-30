@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from app.modules.menus.models import AnalysisCorrection, AnalysisStatus, MenuAnalysis
 
 PATH_RE = re.compile(r"^(items|issues)\[(\d+)\]\.([a-zA-Z_]+)$")
+NEW_RE = re.compile(r"^(items|issues)\[new\]$")
 ALLOWED_ITEM_FIELDS = {"name", "price_text", "price", "currency_symbol", "decimals", "deleted"}
-ALLOWED_ISSUE_FIELDS = {"confirmed", "note", "fact", "deleted"}
+ALLOWED_ISSUE_FIELDS = {"confirmed", "note", "fact", "fact_zh", "deleted"}
 
 
 class CorrectionError(ValueError):
@@ -33,6 +34,54 @@ def apply_corrections(db: Session, base: MenuAnalysis, corrections: list[dict], 
     now = datetime.now(UTC)
     rows: list[AnalysisCorrection] = []
     for c in corrections:
+        mn = NEW_RE.match(c.get("field_path", ""))
+        if mn:
+            new = c.get("new_value")
+            if not isinstance(new, dict):
+                raise CorrectionError("新增条目必须是对象")
+            if mn.group(1) == "issues":
+                if not new.get("issue_code") or not new.get("fact") or not new.get("evidence"):
+                    raise CorrectionError("新增问题必须包含 issue_code、fact 与 evidence（位置证据）")
+                issues.append(
+                    {
+                        "issue_code": str(new["issue_code"]),
+                        "fact": str(new["fact"]),
+                        "fact_zh": new.get("fact_zh"),
+                        "evidence": new["evidence"],
+                        "severity": new.get("severity", "candidate"),
+                        "confirmed": True,
+                        "confirmed_by": by,
+                        "confirmed_at": now.isoformat(),
+                        "note": c.get("reason"),
+                        "added_by_human": True,
+                    }
+                )
+            else:
+                mm = re.fullmatch(r"(£|€|\$)?\s?(\d{1,3}(?:\.\d{1,2})?)", str(new.get("price_text", "")).strip())
+                if not new.get("name") or not mm:
+                    raise CorrectionError("新增菜品必须包含 name 与可识别的 price_text")
+                items.append(
+                    {
+                        "name": str(new["name"]),
+                        "price_text": mm.group(0),
+                        "price": float(mm.group(2)),
+                        "currency_symbol": mm.group(1),
+                        "decimals": len(mm.group(2).split(".")[1]) if "." in mm.group(2) else 0,
+                        "evidence": new.get("evidence") or {"source": "human"},
+                        "added_by_human": True,
+                    }
+                )
+            rows.append(
+                AnalysisCorrection(
+                    field_path=c["field_path"],
+                    old_value=None,
+                    new_value=new,
+                    reason=c.get("reason"),
+                    corrected_by=by,
+                    corrected_at=now,
+                )
+            )
+            continue
         m = PATH_RE.match(c.get("field_path", ""))
         if not m:
             raise CorrectionError(f"不支持的字段路径：{c.get('field_path')}")

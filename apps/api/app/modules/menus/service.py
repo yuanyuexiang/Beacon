@@ -73,6 +73,7 @@ def fetch_asset(db: Session, asset: MenuAsset, transport: httpx.BaseTransport | 
             timeout=s.fetch_timeout_seconds,
             user_agent=s.fetch_user_agent,
             transport=transport,
+            resolve_check=s.fetch_ip_check,
         )
         asset.final_url, asset.http_status, asset.content_type = r.final_url, r.status, r.content_type
         if r.status != 200:
@@ -135,7 +136,7 @@ def run_analysis(
     try:
         data = resolve_within(asset.storage_path).read_bytes()
         if engine == "rules":
-            r = rules.analyze(asset.kind.value, data)
+            r = rules.analyze(asset.kind.value, data, asset.final_url or asset.source_url)
             a.items, a.measurements, a.issues = r.items, r.measurements, r.issues
             a.status = AnalysisStatus(r.status)
             a.error = r.note

@@ -41,6 +41,10 @@ D18：采用同仓库的 `apps/web` 与 `apps/api`，前后端独立构建与部
 - D24：后端不引入 Celery/Redis；批量处理为同步逐 job 执行并持久化状态（≤100 家），更大批次再评估队列。
 - D25：数据库驱动用 psycopg 3（LGPL-3.0，作为未修改的库使用）；其余核心依赖为 MIT/BSD/Apache（fastapi、sqlalchemy、alembic、pydantic、pdfplumber、httpx）。LGPL 未列入项目排除清单，正式上线前由负责人确认。
 - D26：真实模型 provider 暂未接入（无密钥）；`engine=provider` 仅 FakeProvider，结果一律 needs_review，不作为验证依据。
+- D27（V 后）：HTML 菜单提取采用 DOM 关联（价格节点→同卡片内标题/加粗文本），并输出 PDF/图片候选；按行匹配仅作兜底。
+- D28（V 后）：`BEACON_FETCH_IP_CHECK` 默认开启；仅在解析器把域名映射到代理地址的环境关闭，关闭后字面量内网地址仍阻断。
+- D29（V 后）：人工可在分析上新增问题与菜品（`issues[new]`/`items[new]`），必须带证据位置，并记为人工确认；用于图片菜单转录。
+- D30（V 后）：下一批 50 家由真人执行并计时以取得人工基线；视觉路径评测优先于 Squarespace 渲染。
 
 ## 保留原则
 

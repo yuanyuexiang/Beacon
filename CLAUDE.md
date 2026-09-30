@@ -4,7 +4,7 @@
 
 ## 当前状态与依据
 
-Beacon 已完成 T0/T1 技术探索（Islington 60 家抽样，5 份菜单，见 `plan/exploration.md`）和 `plan/development.md` 的 D1～D10 最小工具（apps/api 57 个测试、apps/web 工作台已构建）。下一步是 V（约 50 家新候选扩大验证）与 B（人工商业验证，条件未齐）。研究脚本在 `scripts/`，受控数据在 `data/`（已忽略，不提交）。当前未触达任何餐厅。
+Beacon 已完成 T0/T1 技术探索（Islington 60 家抽样，5 份菜单，见 `plan/exploration.md`）和 `plan/development.md` 的 D1～D10 最小工具（apps/api 57 个测试、apps/web 工作台已构建）。V 第一批已完成（`plan/validation-report-v1.md`：50 家，M/N=10/50，I/M=3/10）。下一步：视觉路径评测、真人计时的第二批，以及条件齐备后的 B。研究脚本在 `scripts/`，受控数据在 `data/`（已忽略，不提交）。当前未触达任何餐厅。
 
 先阅读 `AGENTS.md`、`欧洲餐厅菜单设计与印刷获客系统方案.md`、`plan/roadmap.md`、`plan/development.md`、`plan/validation.md` 与 `plan/exploration.md`。任务状态在 `plan/tasks.md`，决策在 `plan/decisions.md`；开始/完成跟踪任务时同步更新。
 

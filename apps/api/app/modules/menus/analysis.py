@@ -5,13 +5,12 @@ HTML：可见文本逐行匹配价格。图片：不提取，标记需人工/视
 每个 item 与 issue 都带证据位置（page/column/line/bbox 或行号），供人工核对。
 """
 
-import html as html_mod
 import re
 import statistics
 from dataclasses import dataclass, field
 from io import BytesIO
 
-RULES_VERSION = "0.2"
+RULES_VERSION = "0.4"
 PHONE_WIDTH_PX = 375.0
 SMALL_TEXT_PX = 9.0
 PRICE_RE = re.compile(r"(?P<sym>£|€|\$)?\s?(?P<num>\d{1,3}(?:\.\d{1,2})?)")
@@ -89,18 +88,35 @@ def _columns(words: list[dict], page_width: float) -> list[tuple[float, float]]:
     return cols or [(0.0, page_width)]
 
 
+GAP_SPLIT_PT = 14.0  # 同一行内词间距超过该值视为另一段（多栏/并排菜品）
+
+
 def _lines_in_column(words: list[dict], col: tuple[float, float]) -> list[dict]:
+    """把栏内的词按 top 聚成行，再按行内大间距切成段；每段是一个候选“名称 + 价格”行。"""
     ws = [w for w in words if w["x0"] >= col[0] - 1 and w["x0"] < col[1]]
     ws.sort(key=lambda w: (round(w["top"]), w["x0"]))
-    lines: list[dict] = []
+    rows: list[list[dict]] = []
     for w in ws:
-        if lines and abs(w["top"] - lines[-1]["top"]) <= 3:
-            ln = lines[-1]
-            ln["text"] += " " + w["text"]
-            ln["x1"] = max(ln["x1"], w["x1"])
-            ln["bottom"] = max(ln["bottom"], w["bottom"])
+        if rows and abs(w["top"] - rows[-1][0]["top"]) <= 3:
+            rows[-1].append(w)
         else:
-            lines.append({"text": w["text"], "top": w["top"], "x0": w["x0"], "x1": w["x1"], "bottom": w["bottom"]})
+            rows.append([w])
+    lines: list[dict] = []
+    for row in rows:
+        row.sort(key=lambda w: w["x0"])
+        seg: dict | None = None
+        for w in row:
+            if seg is not None and w["x0"] - seg["x1"] > GAP_SPLIT_PT:
+                lines.append(seg)
+                seg = None
+            if seg is None:
+                seg = {"text": w["text"], "top": w["top"], "x0": w["x0"], "x1": w["x1"], "bottom": w["bottom"]}
+            else:
+                seg["text"] += " " + w["text"]
+                seg["x1"] = max(seg["x1"], w["x1"])
+                seg["bottom"] = max(seg["bottom"], w["bottom"])
+        if seg is not None:
+            lines.append(seg)
     return lines
 
 
@@ -157,10 +173,12 @@ def analyze_pdf(data: bytes) -> RulesResult:
             res.issues.append(
                 _issue(
                     "mobile_text_small",
-                    f"整页缩放到 {int(PHONE_WIDTH_PX)}px 宽时，正文中位字号约 {med * scale:.1f}px"
-                    f"（页面宽 {page_sizes[0][0]}pt，正文 {med}pt）",
+                    f"When the full page is scaled to a {int(PHONE_WIDTH_PX)}px-wide phone screen, the body text "
+                    f"measures about {med * scale:.1f}px (page width {page_sizes[0][0]}pt, body text {med}pt)",
                     {"page": 1, "measure": "phone_equiv_px.median"},
                     "candidate",
+                    fact_zh=f"整页缩放到 {int(PHONE_WIDTH_PX)}px 宽时，正文中位字号约 {med * scale:.1f}px"
+                    f"（页面宽 {page_sizes[0][0]}pt，正文 {med}pt）",
                 )
             )
     if text_chars < 50 * max(len(page_sizes), 1):
@@ -168,9 +186,11 @@ def analyze_pdf(data: bytes) -> RulesResult:
         res.issues.append(
             _issue(
                 "pdf_no_text",
-                f"PDF 可提取文本仅 {text_chars} 字符，疑为扫描件或图片 PDF，需要人工或视觉处理",
+                f"The PDF contains only {text_chars} characters of extractable text; "
+                "it is likely a scanned or image-only PDF",
                 {"page": 1},
                 "blocking",
+                fact_zh=f"PDF 可提取文本仅 {text_chars} 字符，疑为扫描件或图片 PDF，需要人工或视觉处理",
             )
         )
     res.issues += _price_issues(res.items)
@@ -183,26 +203,44 @@ def analyze_pdf(data: bytes) -> RulesResult:
 # ---------- HTML ----------
 
 
-def analyze_html(data: bytes) -> RulesResult:
+def analyze_html(data: bytes, base_url: str | None = None) -> RulesResult:
+    from app.modules.menus import html_extract
+
     res = RulesResult()
     s = data.decode("utf-8", errors="ignore")
-    t = re.sub(r"<script.*?</script>|<style.*?</style>|<noscript.*?</noscript>", " ", s, flags=re.S | re.I)
-    t = html_mod.unescape(re.sub(r"<[^>]+>", "\n", t))
-    lines = [re.sub(r"\s+", " ", ln).strip() for ln in t.split("\n")]
-    lines = [ln for ln in lines if ln]
-    for lno, ln in enumerate(lines, 1):
-        res.items += _parse_line(ln, {"line": lno, "raw": ln})
-    pdf_links = sorted(set(re.findall(r'href="([^"]*\.pdf[^"]*)"', s, flags=re.I)))
+    ex = html_extract.extract(s, base_url)
+    res.items = ex["items"]
     res.measurements = {
         "kind": "html",
-        "text_chars": sum(len(x) for x in lines),
-        "lines": len(lines),
-        "pdf_links": pdf_links[:10],
+        "text_chars": ex["text_chars"],
+        "leaves": ex["leaves"],
+        "generator": ex["generator"],
+        "pdf_links": ex["pdf_links"],
+        "image_candidates": ex["image_candidates"],
+        "iframes": ex["iframes"],
     }
     res.issues += _price_issues(res.items)
     if not res.items:
         res.status = "needs_review"
-        res.note = "页面文本中未提取到菜品价格行；若菜单为 PDF/图片链接，请另行接入该文件"
+        hints = []
+        if ex["pdf_links"]:
+            hints.append(f"{len(ex['pdf_links'])} PDF link(s)")
+        if ex["image_candidates"]:
+            hints.append(f"{len(ex['image_candidates'])} image candidate(s)")
+        if ex["iframes"]:
+            hints.append(f"{len(ex['iframes'])} iframe(s)")
+        res.note = "页面正文未提取到菜品价格行；候选：" + (
+            "、".join(hints) if hints else "无（可能为前端渲染、图片或年龄门）"
+        )
+        res.issues.append(
+            _issue(
+                "menu_not_in_html",
+                "The menu is not present as text on this page; candidates: " + (", ".join(hints) or "none found"),
+                {"pdf_links": ex["pdf_links"][:5], "image_candidates": [i["src"] for i in ex["image_candidates"][:5]]},
+                "info",
+                fact_zh=res.note,
+            )
+        )
     return res
 
 
@@ -221,10 +259,12 @@ def analyze_image(data: bytes) -> RulesResult:
 # ---------- shared ----------
 
 
-def _issue(code: str, fact: str, evidence: dict, severity: str) -> dict:
+def _issue(code: str, fact: str, evidence: dict, severity: str, fact_zh: str | None = None) -> dict:
+    """fact 为英文事实（进入对外文案）；fact_zh 供操作者阅读。"""
     return {
         "issue_code": code,
         "fact": fact,
+        "fact_zh": fact_zh,
         "evidence": evidence,
         "severity": severity,
         "confirmed": None,
@@ -248,10 +288,13 @@ def _price_issues(items: list[dict]) -> list[dict]:
         out.append(
             _issue(
                 "price_format_mixed_decimals",
-                f"价格小数位写法混用：{', '.join(f'{k}位×{len(v)}' for k, v in sorted(decs.items()))}"
-                f"；例：{'、'.join(ex)}",
+                "Prices are written with inconsistent decimal places: "
+                + ", ".join(f"{len(v)} price(s) with {k} decimal(s)" for k, v in sorted(decs.items()))
+                + f"; e.g. {', '.join(ex)}",
                 {"examples": [v[0]["evidence"] for v in decs.values()]},
                 "candidate",
+                fact_zh=f"价格小数位写法混用：{', '.join(f'{k}位×{len(v)}' for k, v in sorted(decs.items()))}"
+                f"；例：{'、'.join(ex)}",
             )
         )
     if len(syms) > 1:
@@ -259,9 +302,12 @@ def _price_issues(items: list[dict]) -> list[dict]:
         out.append(
             _issue(
                 "price_format_mixed_symbol",
-                f"货币符号不一致：{', '.join(f'{k}×{len(v)}' for k, v in syms.items())}；例：{'、'.join(ex)}",
+                "Currency symbols are used inconsistently: "
+                + ", ".join(f"{len(v)} price(s) with '{k}'" for k, v in syms.items())
+                + f"; e.g. {', '.join(ex)}",
                 {"examples": [v[0]["evidence"] for v in syms.values()]},
                 "candidate",
+                fact_zh=f"货币符号不一致：{', '.join(f'{k}×{len(v)}' for k, v in syms.items())}；例：{'、'.join(ex)}",
             )
         )
     return out
@@ -272,11 +318,11 @@ def _loc(it: dict) -> str:
     return f"p{e['page']} c{e['column']} l{e['line']}" if "page" in e else f"l{e['line']}"
 
 
-def analyze(kind: str, data: bytes) -> RulesResult:
+def analyze(kind: str, data: bytes, base_url: str | None = None) -> RulesResult:
     if kind == "pdf":
         return analyze_pdf(data)
     if kind == "html":
-        return analyze_html(data)
+        return analyze_html(data, base_url)
     if kind == "image":
         return analyze_image(data)
     return RulesResult(status="needs_review", note=f"不支持的类型：{kind}")

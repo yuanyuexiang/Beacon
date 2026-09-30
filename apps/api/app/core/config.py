@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     bootstrap_password: str | None = None
     max_asset_bytes: int = 20 * 1024 * 1024
     fetch_timeout_seconds: int = 30
+    # 按解析出的 IP 阻断内网目标。若本机解析器把所有域名映射到代理地址（如 198.18.0.0/15），可显式关闭；
+    # 关闭后仍阻断字面量的本机/内网地址与非 http(s) 协议。
+    fetch_ip_check: bool = True
     fetch_user_agent: str = "Mozilla/5.0 (Macintosh) BeaconResearch/0.1 (+research use)"
     llm_provider: str = "fake"
     templates_dir: Path = Path(__file__).resolve().parents[4] / "templates"  # <repo>/templates

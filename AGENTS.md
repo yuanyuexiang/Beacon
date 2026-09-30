@@ -10,6 +10,7 @@ Beacon 是餐厅菜单销售线索工具。T0/T1 技术探索已完成（`plan/e
 - `plan/development.md`：开发任务、依赖关系与验收用例。
 - `plan/archive/`：历史方案，不作为当前执行指令。
 - `plan/exploration.md`：T0/T1 探索记录、可测量发现、复现命令。
+- `plan/validation-report-v1.md`：V 第一批 50 家的漏斗、提取质量、成本与工具问题。
 - `plan/tasks.md`、`plan/decisions.md`：任务进度与决策记录。
 - `scripts/`：抽样、抓取、探针、提取、样稿渲染脚本；`templates/`：样稿模板；`data/`：受控数据（gitignore）。
 - `reports/`：综合研究报告。

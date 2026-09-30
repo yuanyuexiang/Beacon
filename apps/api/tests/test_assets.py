@@ -40,12 +40,26 @@ def test_check_url_blocks_private_and_bad_targets(url):
         fetcher.check_url(url)
 
 
+def test_literal_private_blocked_even_without_dns_check():
+    for url in [
+        "http://127.0.0.1/x",
+        "http://10.1.1.1/x",
+        "http://localhost/x",
+        "http://[::1]/x",
+        "http://intranet/x",
+        "file:///etc/passwd",
+    ]:
+        with pytest.raises(FetchBlocked):
+            fetcher.check_url(url, resolve=False)
+    fetcher.check_url("http://example.com/menu.pdf", resolve=False)  # 不解析 DNS 也能通过
+
+
 def _transport(handler):
     return httpx.MockTransport(handler)
 
 
 def test_redirect_to_private_is_blocked(monkeypatch):
-    monkeypatch.setattr(fetcher, "_is_public_host", lambda h: h == "example.com")
+    monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: h == "example.com")
 
     def handler(req):
         if req.url.host == "example.com":
@@ -59,7 +73,7 @@ def test_redirect_to_private_is_blocked(monkeypatch):
 
 
 def test_size_limit_and_sniff(monkeypatch):
-    monkeypatch.setattr(fetcher, "_is_public_host", lambda h: True)
+    monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
     big = b"%PDF-1.4" + b"x" * 5000
     tr = _transport(lambda req: httpx.Response(200, content=big, headers={"content-type": "application/pdf"}))
     with pytest.raises(FetchBlocked, match="大小上限"):
@@ -73,7 +87,7 @@ def test_size_limit_and_sniff(monkeypatch):
 
 def test_add_url_records_failure_and_retry(client, db, monkeypatch):
     lead_id = setup_lead(client, db)
-    monkeypatch.setattr(fetcher, "_is_public_host", lambda h: True)
+    monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
     calls = {"n": 0}
 
     def handler(req):

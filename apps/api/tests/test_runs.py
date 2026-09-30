@@ -25,6 +25,27 @@ def _setup(client, db):
     return leads
 
 
+def test_fetch_then_analyze_in_same_run(client, db, monkeypatch):
+    """同一轮内抓取成功的文件也应被分析（抓取后重新规划）。"""
+    import httpx
+
+    from app.integrations import fetcher
+    from app.modules.menus import service as menu_service
+
+    leads = _setup(client, db)
+    monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
+    tr = httpx.MockTransport(
+        lambda req: httpx.Response(
+            200, content=(FIX / "two_col.pdf").read_bytes(), headers={"content-type": "application/pdf"}
+        )
+    )
+    orig = menu_service.fetch_asset
+    monkeypatch.setattr(menu_service, "fetch_asset", lambda db_, asset, transport=None: orig(db_, asset, transport=tr))
+    r = client.post("/api/batches/b1/runs", json={"steps": ["fetch", "analyze"]}).json()
+    c_jobs = [j for j in r["jobs"] if j["lead_id"] == leads["C"]]
+    assert {j["step"] for j in c_jobs} == {"fetch", "analyze"} and all(j["status"] == "succeeded" for j in c_jobs)
+
+
 def test_run_isolates_failures_and_resumes(client, db):
     leads = _setup(client, db)
     r = client.post("/api/batches/b1/runs", json={"steps": ["fetch", "analyze"]})
@@ -73,3 +94,13 @@ def test_new_run_after_completion_has_no_duplicate_work(client, db):
     assert r["totals"]["succeeded"] == 0 and r["totals"]["failed"] == 1  # 只剩失败的 B 需要重试；A 已有有效分析
     assert client.post("/api/batches/b1/runs", json={"steps": ["email"]}).status_code == 400
     assert len(client.get("/api/batches/b1/runs").json()) == 2  # 400 的请求不创建运行
+
+
+def test_rules_version_bump_replans_analysis(client, db, monkeypatch):
+    from app.modules.menus import analysis as rules
+
+    _setup(client, db)
+    client.post("/api/batches/b1/runs", json={"steps": ["analyze"]})
+    monkeypatch.setattr(rules, "RULES_VERSION", "test-bump")
+    r = client.post("/api/batches/b1/runs", json={"steps": ["analyze"]}).json()
+    assert r["totals"]["succeeded"] >= 1  # A 被重新分析

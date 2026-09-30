@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.core.models_base import Base, Timestamped, UUIDPk
 from app.modules.leads.models import Batch, BatchLead
+from app.modules.menus import analysis as rules
 from app.modules.menus import service as menu_service
 from app.modules.menus.models import AnalysisStatus, FetchStatus, MenuAsset
 
@@ -97,8 +98,13 @@ def plan_jobs(db: Session, run: BatchRun, batch: Batch) -> int:
                     added += 1
             if "analyze" in run.steps and a.fetch_status == FetchStatus.fetched:
                 latest = menu_service.latest_analysis(db, a.id)
-                if latest is not None and latest.status != AnalysisStatus.failed and latest.input_sha256 == a.sha256:
-                    continue
+                if (
+                    latest is not None
+                    and latest.status != AnalysisStatus.failed
+                    and latest.input_sha256 == a.sha256
+                    and not (latest.engine == "rules" and latest.engine_version != rules.RULES_VERSION)
+                ):
+                    continue  # 已有当前规则版本的有效结果（人工修正版本也保留）
                 key = (m.lead_id, "analyze", a.id)
                 if key not in existing:
                     db.add(
@@ -147,7 +153,17 @@ def resume_run(db: Session, run: BatchRun) -> int:
 
 
 def execute(db: Session, run: BatchRun, max_jobs: int | None = None) -> BatchRun:
-    """顺序执行 pending job。每个 job 单独提交状态，任何异常只影响该 job。"""
+    """顺序执行 pending job；抓取完成后重新规划一次，使同一轮里新抓到的文件也得到分析。"""
+    _execute_pending(db, run, max_jobs)
+    if "analyze" in run.steps and max_jobs is None:
+        batch = db.get(Batch, run.batch_id)
+        assert batch is not None
+        if plan_jobs(db, run, batch):
+            _execute_pending(db, run, None)
+    return _finalize(db, run)
+
+
+def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
     pending = db.scalars(
         select(BatchJob)
         .where(BatchJob.run_id == run.id, BatchJob.status == JobStatus.pending)
@@ -178,6 +194,9 @@ def execute(db: Session, run: BatchRun, max_jobs: int | None = None) -> BatchRun
             j.status, j.error = JobStatus.failed, f"{e.__class__.__name__}: {e}"[:2000]
         j.finished_at = datetime.now(UTC)
         db.commit()
+
+
+def _finalize(db: Session, run: BatchRun) -> BatchRun:
     jobs = db.scalars(select(BatchJob).where(BatchJob.run_id == run.id)).all()
     totals = {s.value: sum(1 for j in jobs if j.status == s) for s in JobStatus}
     run.totals = totals
