@@ -36,6 +36,41 @@ def list_batches(db: Session = Depends(get_db), op: Operator = Depends(current_o
     return list(db.scalars(select(Batch).order_by(Batch.created_at.desc())).all())
 
 
+@router.get("/batches/{batch_key}/delete-preview")
+def delete_batch_preview(
+    batch_key: str, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    """删除批次会影响什么：将删除与保留的门店数，以及随门店一起删除的各类记录数。只读。"""
+    from app.modules.leads import deletion
+
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "批次不存在")
+    return deletion.preview(db, batch)
+
+
+@router.delete("/batches/{batch_key}")
+def delete_batch(
+    batch_key: str, confirm: str = "", db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    """删除批次（不可恢复）。confirm 必须等于批次键。只属于本批次的门店及其全部数据一并删除；
+    属于其他批次或有抑制记录的门店保留。"""
+    from app.modules.leads import deletion
+
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "批次不存在")
+    if confirm != batch_key:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "confirm 必须等于批次键")
+    batch_id = batch.id
+    result = deletion.delete_batch(db, batch)
+    lead_ids = result.pop("deleted_lead_ids")
+    audit.record(db, op, "delete", "batch", batch_id, before=result)
+    db.commit()
+    result["file_dirs_removed"] = deletion.remove_files(lead_ids)
+    return result
+
+
 @router.post("/imports", response_model=ImportResult)
 async def import_leads(
     batch_key: str = Form(...),
