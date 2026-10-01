@@ -13,7 +13,7 @@ type Task = { id: string; lead_id: string; channel: string; status: string; stat
 type Event = { id: string; event_key: string; kind: string; channel: string | null; recorded_at: string; actions: { action: string }[] | null; duplicate?: boolean };
 type Sup = { id: string; lead_id: string | null; scope: string; contact_ref: string | null; reason: string; created_at: string };
 
-const CHANNELS = ["email", "whatsapp", "phone", "instagram", "contact_form", "post"];
+const CHANNELS = ["email", "whatsapp", "phone", "instagram", "facebook", "tiktok", "other_social", "contact_form", "post"];
 const TASK_COLORS: Record<string, string> = { pending: "blue", opened: "gold", sent_manual: "green", paused: "orange", cancelled: "default" };
 
 export default function TasksPage() {

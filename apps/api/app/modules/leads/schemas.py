@@ -41,6 +41,7 @@ class LeadOut(BaseModel):
     screening_class: ScreeningClass
     screening_reason: str | None
     entity_status: EntityStatus
+    entity_evidence: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}

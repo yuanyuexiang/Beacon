@@ -39,7 +39,7 @@ Docker 全套（已实测）：`cp infra/.env.example infra/.env && docker compo
 
 - `docker compose -f infra/docker-compose.yml up -d postgres`：只启动 PostgreSQL 16（端口 5433，开发库 `beacon`、测试库 `beacon_test`）。
 - `cd apps/api && uv sync`：安装依赖（Python 3.12，`.python-version`）。
-- `cp apps/api/.env.example apps/api/.env`：填写 `BEACON_*` 变量；`BEACON_DATA_DIR` 必须是绝对路径。模型转录需 `BEACON_LLM_PROVIDER=deepseek` 与 `BEACON_DEEPSEEK_API_KEY`（默认 fake，不调用模型；评测记录 `plan/model-eval-v1.md`）。
+- `cp apps/api/.env.example apps/api/.env`：填写 `BEACON_*` 变量；`BEACON_DATA_DIR` 必须是绝对路径。模型转录需 `BEACON_LLM_PROVIDER=deepseek` 与 `BEACON_DEEPSEEK_API_KEY`（默认 fake，不调用模型；评测记录 `plan/model-eval-v1.md`）。主体候选检索需 `BEACON_COMPANIES_HOUSE_API_KEY`（可选；只给候选，人工确认，见 D34/D35）。
 - `cd apps/api && uv run alembic upgrade head`：迁移；`uv run alembic revision --autogenerate -m "..."` 生成新迁移。
 - `cd apps/api && uv run uvicorn app.main:app --reload --port 8000`：启动 API（`/api/health`、`/api/health/db`）。
 - `cd apps/api && uv run pytest`：测试（自动对 `beacon_test` 做 upgrade/downgrade，不依赖网络与真实模型）。

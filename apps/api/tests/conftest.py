@@ -33,6 +33,7 @@ def pytest_configure() -> None:
         "BEACON_LLM_PROVIDER",
         "BEACON_DEEPSEEK_API_KEY",
         "BEACON_ANTHROPIC_API_KEY",
+        "BEACON_COMPANIES_HOUSE_API_KEY",
         "DEEPSEEK_API_KEY",
         "ANTHROPIC_API_KEY",
     ):

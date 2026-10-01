@@ -17,6 +17,9 @@ class Channel(enum.StrEnum):
     whatsapp = "whatsapp"
     phone = "phone"
     instagram = "instagram"
+    facebook = "facebook"
+    tiktok = "tiktok"
+    other_social = "other_social"  # X、LinkedIn、YouTube 等；contact_ref 为账号 URL
     contact_form = "contact_form"
     post = "post"
 

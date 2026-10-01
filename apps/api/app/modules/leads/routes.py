@@ -119,6 +119,28 @@ def patch_lead(
     return lead
 
 
+@router.get("/leads/{lead_id}/entity-candidates")
+def entity_candidates(
+    lead_id: uuid.UUID, q: str | None = None, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    """Companies House 主体候选，供人工核对。默认合并官网披露、注册邮编、店名检索三路；
+    传 q 则只按人工输入的公司名检索。只读：不修改线索的主体状态。"""
+    from app.modules.leads import entity
+
+    lead = db.get(Lead, lead_id)
+    if lead is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "线索不存在")
+    key = get_settings().companies_house_api_key
+    if not key:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "未配置 BEACON_COMPANIES_HOUSE_API_KEY")
+    try:
+        return entity.find_candidates(lead, key, (q or "").strip() or None)
+    except Exception as e:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Companies House 检索失败：{e.__class__.__name__}: {e}"
+        ) from e
+
+
 class RunIn(BaseModel):
     steps: list[str] = ["fetch", "analyze"]
     max_jobs: int | None = None

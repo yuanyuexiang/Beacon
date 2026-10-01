@@ -27,6 +27,18 @@ export const STATUS_LABEL: Record<string, string> = {
   invalid: "无效",
 };
 
+export const CHANNEL_LABEL: Record<string, string> = {
+  email: "邮件",
+  phone: "电话",
+  whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  facebook: "Facebook",
+  tiktok: "TikTok",
+  other_social: "其他社媒",
+  contact_form: "联系表单",
+  post: "邮寄",
+};
+
 export function label(s: string | null | undefined): string {
   if (!s) return "-";
   return STATUS_LABEL[s] ?? s;

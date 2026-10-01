@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,7 @@ from app.core.auth import current_operator
 from app.core.db import get_db
 from app.core.models import Operator
 from app.modules.leads.models import Batch, BatchLead, Lead
-from app.modules.sales import service, summary
+from app.modules.sales import contacts, service, summary
 from app.modules.sales.models import (
     Channel,
     ChannelEligibility,
@@ -155,6 +155,37 @@ def upsert_eligibility(
 def list_eligibility(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
     _lead(db, lead_id)
     return list(db.scalars(select(ChannelEligibility).where(ChannelEligibility.lead_id == lead_id)).all())
+
+
+class ContactItem(BaseModel):
+    channel: Channel
+    contact_ref: str = Field(min_length=1, max_length=256)
+    contact_source: str | None = Field(default=None, max_length=256)
+
+
+class ContactsIn(BaseModel):
+    items: list[ContactItem] = Field(min_length=1, max_length=50)
+
+
+@router.get("/leads/{lead_id}/contact-candidates")
+def contact_candidates(
+    lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    """从官网页面与已存的 Overture 数据找联系方式（邮箱、电话、WhatsApp、社媒、联系表单），供人工核对。只读。"""
+    return contacts.find_contacts(db, _lead(db, lead_id))
+
+
+@router.post("/leads/{lead_id}/contacts")
+def record_contacts(
+    lead_id: uuid.UUID, body: ContactsIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    """记录人工勾选的联系方式：可用性与准入均为 unknown；已存在的跳过，不覆盖审核结果。"""
+    _lead(db, lead_id)
+    items = [i.model_dump(mode="json") for i in body.items]
+    result = contacts.record_contacts(db, lead_id, items)
+    audit.record(db, op, "record_contacts", "lead", lead_id, after={**result, "items": items})
+    db.commit()
+    return result
 
 
 @router.post("/leads/{lead_id}/tasks", response_model=TaskOut, status_code=201)

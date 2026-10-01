@@ -100,4 +100,5 @@ def test_patch_lead_records_entity_reviewer(client, db):
     lead = client.get("/api/leads", params={"batch_key": "b1"}).json()[0]
     r = client.patch(f"/api/leads/{lead['id']}", json={"entity_status": "company", "entity_evidence": "CH 01234567"})
     assert r.status_code == 200 and r.json()["entity_status"] == "company"
+    assert r.json()["entity_evidence"] == "CH 01234567"
     assert client.get("/api/leads?screening_class=candidate").json() == []

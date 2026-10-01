@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None  # 或用环境变量 ANTHROPIC_API_KEY
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
+    companies_house_api_key: str | None = None  # 主体候选检索；未配置时该功能返回 503，其余功能不受影响
     templates_dir: Path = Path(__file__).resolve().parents[4] / "templates"  # <repo>/templates
     chrome_path: Path | None = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")  # 容器内设为空
 
