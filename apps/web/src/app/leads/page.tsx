@@ -9,7 +9,8 @@ import { HeroBand, SCREEN_ZH, ScreenTag, StatCard } from "@/components/ui";
 import { label } from "@/lib/format";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; candidate_count: number | null };
-type Lead = { id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string };
+type Lead = { id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
+type Run = { id: string; status: string; totals: { pending: number; running: number; succeeded: number; failed: number } | null };
 type Authority = { id: number; name: string; region: string | null; count: number | null };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
@@ -35,6 +36,7 @@ function LeadsInner() {
   const [fsaForm] = Form.useForm();
   // 新建批次后自动建名单的进度：step 为正在进行的步骤（3 = 全部完成）
   const [autoProg, setAutoProg] = useState<{ step: number; lines: string[]; error?: string } | null>(null);
+  const [contactProg, setContactProg] = useState<string | null>(null);
   const err = (e: Error) => message.error(e.message);
   // 地区取自 FSA 地方当局名录；接口不可用时退回手工输入
   const loadAuthorities = useCallback(() => {
@@ -57,6 +59,20 @@ function LeadsInner() {
     const match = authorities.find((a) => a.name === region);
     if (match && fsaForm.getFieldValue("authority_id") == null) fsaForm.setFieldsValue({ authority_id: match.id });  // 不覆盖手工选择
   }, [buildOpen, authorities, batches, batchKey, fsaForm, loadAuthorities]);
+
+  // 批量查找联系方式：每次请求只处理几家，循环续跑直到没有待处理的，避免单个请求过长
+  const collectContacts = async (key: string, onProgress: (text: string) => void): Promise<string> => {
+    const k = encodeURIComponent(key);
+    let r = await api<Run>(`/api/batches/${k}/runs`, json({ steps: ["contacts"], max_jobs: 5 }));
+    const total = (t: Run["totals"]) => (t ? t.pending + t.running + t.succeeded + t.failed : 0);
+    while (r.status === "running" && (r.totals?.pending ?? 0) > 0) {
+      onProgress(`已处理 ${(r.totals?.succeeded ?? 0) + (r.totals?.failed ?? 0)}/${total(r.totals)} 家`);
+      r = await api<Run>(`/api/runs/${r.id}/continue`, json({ max_jobs: 5 }));
+    }
+    const t = r.totals;
+    if (!total(t)) return "没有需要查找的门店（已排除、没有官网和 Overture 数据，或之前已查过）";
+    return `查找 ${total(t)} 家：成功 ${t?.succeeded ?? 0}${t?.failed ? `，失败 ${t.failed}` : ""}`;
+  };
 
   // 新建批次；勾选“创建后自动建名单”时依次跑 FSA 同步、Overture 补全、规则预筛，任一步失败即停并保留已完成的结果
   const createBatch = async (v: { batch_key: string; region: string; source_name: string; notes?: string; auto?: boolean; sample_n?: number | null; seed?: number | null }) => {
@@ -86,7 +102,10 @@ function LeadsInner() {
       setAutoProg({ step: (step = 2), lines: [...lines] });
       const sc = await api<{ counts: Record<string, number> }>(`/api/batches/${key}/screen`, { method: "POST" });
       lines.push(`预筛：${Object.entries(sc.counts).map(([k, n]) => `${SCREEN_ZH[k] ?? k} ${n}`).join("，")}`);
-      setAutoProg({ step: 3, lines: [...lines] });
+      setAutoProg({ step: (step = 3), lines: [...lines] });
+      const summary = await collectContacts(v.batch_key, (text) => setAutoProg({ step: 3, lines: [...lines, text] }));
+      lines.push(`联系方式：${summary}`);
+      setAutoProg({ step: 4, lines: [...lines] });
     } catch (e) {
       setAutoProg({ step, lines: [...lines], error: (e as Error).message });
     } finally {
@@ -126,7 +145,7 @@ function LeadsInner() {
           <Select style={{ width: 260 }} value={batchKey} onChange={setBatchKey} placeholder="选择批次" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
           <Button onClick={() => { setAutoProg(null); setNewOpen(true); loadAuthorities(); }}>新建批次</Button>
           <Button danger disabled={!batchKey} onClick={openDelete}>删除批次</Button>
-          <Button type="primary" icon={<CloudDownloadOutlined />} disabled={!batchKey} onClick={() => { fsaForm.resetFields(["authority_id"]); setBuildOpen(true); }}>自动建名单</Button>
+          <Button type="primary" icon={<CloudDownloadOutlined />} disabled={!batchKey} onClick={() => { fsaForm.resetFields(["authority_id"]); setContactProg(null); setBuildOpen(true); }}>自动建名单</Button>
         </>} />
 
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
@@ -152,21 +171,23 @@ function LeadsInner() {
             { title: "邮编", dataIndex: "postcode", width: 100 },
             { title: "官网", dataIndex: "website", ellipsis: true, render: (v) => (v ? <a href={v} target="_blank" rel="noreferrer"><GlobalOutlined style={{ marginRight: 6, color: "#d97706" }} />{v.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <Tag style={{ marginInlineEnd: 0 }}>无</Tag>) },
             { title: "筛选", dataIndex: "screening_class", width: 120, render: (v, r) => <ScreenTag value={v} reason={r.screening_reason} />, filters: SCREENING.map((s) => ({ text: SCREEN_ZH[s] ?? s, value: s })), onFilter: (val, r) => r.screening_class === val },
+            { title: "联系方式", dataIndex: "contact_count", width: 90, sorter: (a, b) => a.contact_count - b.contact_count, render: (v) => (v ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{v} 项</Tag> : <span style={{ color: "#9ca3af" }}>-</span>) },
             { title: "主体", dataIndex: "entity_status", width: 90, render: label },
           ]} />
       </Card>
 
-      <Modal title="新建批次" open={newOpen} onCancel={() => setNewOpen(false)} footer={null} destroyOnHidden maskClosable={false} closable={!autoProg || autoProg.step === 3 || !!autoProg.error}>
+      <Modal title="新建批次" open={newOpen} onCancel={() => setNewOpen(false)} footer={null} destroyOnHidden maskClosable={false} closable={!autoProg || autoProg.step === 4 || !!autoProg.error}>
         {autoProg ? (
           <>
-            <Steps direction="vertical" size="small" current={autoProg.step} status={autoProg.error ? "error" : autoProg.step === 3 ? "finish" : "process"} items={[
+            <Steps direction="vertical" size="small" current={autoProg.step} status={autoProg.error ? "error" : autoProg.step === 4 ? "finish" : "process"} items={[
               { title: "从 FSA 名录建立候选", description: autoProg.lines[0] },
-              { title: "Overture 补官网与电话（首次约 30 秒）", description: autoProg.lines[1] },
+              { title: "Overture 补官网与电话（首次下载约 1 分钟，范围大时更久）", description: autoProg.lines[1] },
               { title: "规则预筛", description: autoProg.lines[2] },
+              { title: "查找联系方式（未排除的门店，每家几秒）", description: autoProg.lines[3] },
             ]} />
             {autoProg.error && <Alert type="error" showIcon style={{ marginBottom: 12 }} message="这一步失败，批次已创建" description={`${autoProg.error}。可在「自动建名单」里从失败的一步继续，已完成的步骤不用重做。`} />}
-            {autoProg.step === 3 && <Alert type="success" showIcon style={{ marginBottom: 12 }} message="批次已创建，名单已建好" description="接下来在线索列表里人工确认“待筛选”的门店类型。" />}
-            <Button type="primary" block disabled={autoProg.step < 3 && !autoProg.error} loading={autoProg.step < 3 && !autoProg.error} onClick={() => setNewOpen(false)}>{autoProg.step === 3 || autoProg.error ? "完成" : "正在建名单…"}</Button>
+            {autoProg.step === 4 && <Alert type="success" showIcon style={{ marginBottom: 12 }} message="批次已创建，名单与联系方式已建好" description="接下来在线索列表里人工确认“待筛选”的门店类型。联系方式只是记录，准入仍需逐条核对。" />}
+            <Button type="primary" block disabled={autoProg.step < 4 && !autoProg.error} loading={autoProg.step < 4 && !autoProg.error} onClick={() => setNewOpen(false)}>{autoProg.step === 4 || autoProg.error ? "完成" : "正在建名单…"}</Button>
           </>
         ) : (
           <Form layout="vertical" initialValues={{ source_name: "fsa", auto: true, sample_n: 50, seed: Number(new Date().toISOString().slice(0, 10).replace(/-/g, "")) }} onFinish={createBatch}>
@@ -179,7 +200,7 @@ function LeadsInner() {
             <Form.Item name="source_name" label="来源"><Input /></Form.Item>
             <Form.Item name="notes" label="备注"><Input.TextArea rows={2} /></Form.Item>
             <Divider style={{ margin: "4px 0 12px" }} />
-            <Form.Item name="auto" label="创建后自动建名单" valuePropName="checked" extra={authFailed ? "FSA 名录不可用，无法自动建名单；创建后可在「自动建名单」里手动操作" : "依次执行：FSA 餐厅名录抽样 → Overture 补官网与电话 → 规则预筛"}>
+            <Form.Item name="auto" label="创建后自动建名单" valuePropName="checked" extra={authFailed ? "FSA 名录不可用，无法自动建名单；创建后可在「自动建名单」里手动操作" : "依次执行：FSA 餐厅名录抽样 → Overture 补官网与电话 → 规则预筛 → 查找联系方式"}>
               <Switch disabled={authFailed} />
             </Form.Item>
             <Form.Item noStyle shouldUpdate={(p, c) => p.auto !== c.auto}>
@@ -237,12 +258,17 @@ function LeadsInner() {
           </Form>
         </Card>
         <Card size="small" title="第 2 步：Overture 补官网与电话" style={{ marginBottom: 16 }}>
-          <p style={{ color: "#6b7280", marginTop: 0 }}>按批次坐标范围下载 Overture 地点（首次约 30 秒，之后复用缓存），只填空缺官网，来源与置信度记入线索。</p>
+          <p style={{ color: "#6b7280", marginTop: 0 }}>按批次坐标范围下载 Overture 地点（首次下载约 1 分钟，范围大时更久，之后复用缓存），只填空缺官网，来源与置信度记入线索。</p>
           <Button loading={busy === "ov"} block onClick={() => run("ov", api(`/api/batches/${batchKey}/enrich/overture`, json({})), (r: { leads: number; matched: number; website_set: number; phone_found: number; places: number }) => `Overture：${r.places} 个地点，匹配 ${r.matched}/${r.leads}，补官网 ${r.website_set}，有电话 ${r.phone_found}`)}>运行 Overture 补全</Button>
         </Card>
-        <Card size="small" title="第 3 步：规则预筛">
+        <Card size="small" title="第 3 步：规则预筛" style={{ marginBottom: 16 }}>
           <p style={{ color: "#6b7280", marginTop: 0 }}>连锁（含 Overture 品牌）、咖啡店、机构、酒吧标为排除并注明规则；其余保持“待筛选”交人工；人工改过的不覆盖。</p>
           <Button loading={busy === "screen"} block onClick={() => run("screen", api(`/api/batches/${batchKey}/screen`, { method: "POST" }), (r: { counts: Record<string, number> }) => `预筛：${Object.entries(r.counts).map(([k, v]) => `${k} ${v}`).join("，")}`)}>运行规则预筛</Button>
+        </Card>
+        <Card size="small" title="第 4 步：查找联系方式">
+          <p style={{ color: "#6b7280", marginTop: 0 }}>对未被排除的门店，从官网和 Overture 数据里找邮箱、电话、WhatsApp、社媒账号和联系表单并自动记录（准入保持未知，不放行）。每家几秒；已查过的不重复查；同类过多（疑似分店列表）的留给人工在详情页勾选。</p>
+          <Button loading={busy === "contacts"} block onClick={() => { if (!batchKey) return; setBusy("contacts"); setContactProg("开始…"); collectContacts(batchKey, setContactProg).then((t) => { message.success(t); setContactProg(t); loadLeads(batchKey); }).catch((e: Error) => { err(e); setContactProg(`中断：${e.message}。再点一次可从未完成的继续`); }).finally(() => setBusy(null)); }}>批量查找联系方式</Button>
+          {contactProg && <p style={{ color: "#6b7280", margin: "8px 0 0" }}>{contactProg}</p>}
         </Card>
       </Drawer>
     </>

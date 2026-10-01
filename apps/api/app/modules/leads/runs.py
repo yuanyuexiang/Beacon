@@ -10,13 +10,13 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.core.models_base import Base, Timestamped, UUIDPk
-from app.modules.leads.models import Batch, BatchLead
+from app.modules.leads.models import Batch, BatchLead, Lead
 from app.modules.menus import analysis as rules
 from app.modules.menus import service as menu_service
 from app.modules.menus.models import AnalysisStatus, FetchStatus, MenuAsset
 
 STALE_AFTER = timedelta(minutes=30)
-STEPS = ("fetch", "analyze")
+STEPS = ("fetch", "analyze", "contacts")
 
 
 class RunStatus(enum.StrEnum):
@@ -72,6 +72,20 @@ class RunError(ValueError):
     pass
 
 
+def _needs_contact_scan(lead: Lead | None) -> bool:
+    """批量查找联系方式的对象：未被筛选排除、有官网或 Overture 数据，且还没成功查过当前这个官网。"""
+    if lead is None or lead.screening_class.value.startswith("excluded"):
+        return False
+    raw = lead.raw or {}
+    if not lead.website and not (raw.get("overture") or {}).get("matched"):
+        return False
+    scan = raw.get("contacts_scan")
+    if not scan:
+        return True
+    # 官网换了，或上次一个页面都没读到：再查一次
+    return scan.get("website") != lead.website or bool(lead.website and not scan.get("pages_ok"))
+
+
 def plan_jobs(db: Session, run: BatchRun, batch: Batch) -> int:
     """按批次成员规划 job；已有相同 (lead, step, target) 的不重复创建。返回新增数。"""
     existing = {
@@ -79,6 +93,14 @@ def plan_jobs(db: Session, run: BatchRun, batch: Batch) -> int:
     }
     added = 0
     for m in db.scalars(select(BatchLead).where(BatchLead.batch_id == batch.id)).all():
+        if "contacts" in run.steps and _needs_contact_scan(db.get(Lead, m.lead_id)):
+            ckey = (m.lead_id, "contacts", None)
+            if ckey not in existing:
+                db.add(
+                    BatchJob(run_id=run.id, lead_id=m.lead_id, step="contacts", status=JobStatus.pending, attempts=0)
+                )
+                existing.add(ckey)
+                added += 1
         assets = db.scalars(select(MenuAsset).where(MenuAsset.lead_id == m.lead_id)).all()
         for a in assets:
             if "fetch" in run.steps and a.source_url and a.fetch_status != FetchStatus.fetched:
@@ -173,6 +195,11 @@ def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
         j.status, j.started_at, j.attempts = JobStatus.running, datetime.now(UTC), j.attempts + 1
         db.commit()
         try:
+            if j.step == "contacts":
+                _collect_contacts(db, run, j)
+                j.status, j.error, j.finished_at = JobStatus.succeeded, None, datetime.now(UTC)
+                db.commit()
+                continue
             asset = db.get(MenuAsset, j.target_id) if j.target_id else None
             if asset is None:
                 raise RunError("目标文件不存在")
@@ -194,6 +221,19 @@ def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
             j.status, j.error = JobStatus.failed, f"{e.__class__.__name__}: {e}"[:2000]
         j.finished_at = datetime.now(UTC)
         db.commit()
+
+
+def _collect_contacts(db: Session, run: BatchRun, j: BatchJob) -> None:
+    from app.core import audit
+    from app.modules.sales import contacts  # 延迟导入：sales 依赖 leads
+
+    lead = db.get(Lead, j.lead_id)
+    if lead is None:
+        raise RunError("门店不存在")
+    scan = contacts.collect(db, lead)
+    audit.record(
+        db, None, "record_contacts", "lead", lead.id, after={"run_id": str(run.id), "by": run.started_by, **scan}
+    )
 
 
 def _finalize(db: Session, run: BatchRun) -> BatchRun:

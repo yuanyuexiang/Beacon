@@ -105,3 +105,38 @@ def record_contacts(db: Session, lead_id: uuid.UUID, items: list[dict[str, Any]]
         db.flush()
         created += 1
     return {"created": created, "skipped": skipped}
+
+
+MAX_AUTO_PER_KIND = 5  # 官网上同一类型超过这个数，多半是分店列表或第三方信息，批量时不自动记录
+
+
+def collect(db: Session, lead: Lead) -> dict[str, Any]:
+    """批量模式：查找并自动记录联系方式（仍是 unknown/unknown，不放行）。跳过已记录与在抑制名单里的；
+    官网上同一类型候选过多时只记 Overture 也有的，其余留给人工在详情页勾选。结果摘要写入 lead.raw.contacts_scan。"""
+    found = find_contacts(db, lead)
+    by_kind: dict[str, int] = {}
+    for c in found["candidates"]:
+        by_kind[c["kind"]] = by_kind.get(c["kind"], 0) + 1
+    items, held = [], 0
+    for c in found["candidates"]:
+        if c["recorded"] or c["suppressed"]:
+            continue
+        types = [s["type"] for s in c["sources"]]
+        if by_kind[c["kind"]] > MAX_AUTO_PER_KIND and "overture" not in types:
+            held += 1
+            continue
+        source = "；".join(f"官网 {s['ref']}" if s["type"] == "website" else s["ref"] for s in c["sources"])
+        items.append({"channel": c["channel"], "contact_ref": c["value"], "contact_source": source})
+    result = record_contacts(db, lead.id, items) if items else {"created": 0, "skipped": 0}
+    pages = (found["website"] or {}).get("pages") or []
+    scan = {
+        "at": found["checked_at"],
+        "found": len(found["candidates"]),
+        "recorded": result["created"],
+        "held_for_review": held,
+        "pages_ok": sum(1 for p in pages if p["ok"]),
+        "pages_failed": sum(1 for p in pages if not p["ok"]),
+        "website": lead.website,
+    }
+    lead.raw = {**(lead.raw or {}), "contacts_scan": scan}
+    return scan

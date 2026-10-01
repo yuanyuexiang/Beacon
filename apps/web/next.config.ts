@@ -4,6 +4,8 @@ import type { NextConfig } from "next";
 const API = process.env.BEACON_API_URL ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {
+  // /api 代理默认 30 秒超时；Overture 首次下载、全量 FSA 同步、批量抓取都可能更久，超时后前端只会看到 Internal Server Error
+  experimental: { proxyTimeout: 10 * 60 * 1000 },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${API}/api/:path*` }];
   },

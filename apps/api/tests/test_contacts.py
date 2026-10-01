@@ -226,3 +226,70 @@ def test_contacts_endpoints_validate_and_require_login(client, db):
     assert client.post(f"/api/leads/{lead_id}/contacts", json={"items": []}).status_code == 422
     bad = {"items": [{"channel": "fax", "contact_ref": "x"}]}
     assert client.post(f"/api/leads/{lead_id}/contacts", json=bad).status_code == 422
+
+
+# ---------- 批量查找（批次运行的 contacts 步骤） ----------
+
+
+def test_batch_contacts_step_records_automatically_and_skips_excluded(client, db, monkeypatch):
+    from app.modules.leads import runs
+
+    monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
+    monkeypatch.setattr(
+        contacts, "find_contacts", functools.partial(contacts.find_contacts, web_transport=_web_transport())
+    )
+    lead_id = _lead_id(client, db)  # Vesper：有官网
+    other = next(x["id"] for x in client.get("/api/leads").json() if x["name"] == "Fish Central")
+    # Fish Central：有官网但已被筛选排除 → 不查
+    client.patch(f"/api/leads/{other}", json={"website": SITE, "screening_class": "excluded_chain"})
+    # 审核过的联系方式不被批量覆盖
+    client.post(
+        f"/api/leads/{lead_id}/eligibility",
+        json={"channel": "email", "contact_ref": "bookings@vesper.example", "eligibility": "blocked"},
+    )
+    r = client.post("/api/batches/b1/runs", json={"steps": ["contacts"], "max_jobs": 5})
+    assert r.status_code == 201, r.text
+    run = r.json()
+    assert [(j["lead_id"], j["step"], j["status"], j["error"]) for j in run["jobs"]] == [
+        (lead_id, "contacts", "succeeded", None)
+    ]
+    assert run["status"] == "completed"
+    rows = client.get(f"/api/leads/{lead_id}/eligibility").json()
+    by = {(e["channel"], e["contact_ref"]): e for e in rows}
+    assert by[("email", "bookings@vesper.example")]["eligibility"] == "blocked"  # 原审核结果保留
+    assert by[("instagram", "https://www.instagram.com/vesperlondon")]["eligibility"] == "unknown"
+    assert by[("phone", "+442079460123")]["contact_usable"] == "unknown" and len(rows) == 10
+    assert client.get(f"/api/leads/{other}/eligibility").json() == []
+    # 列表带出联系方式数量
+    counts = {x["name"]: x["contact_count"] for x in client.get("/api/leads", params={"batch_key": "b1"}).json()}
+    assert counts == {"Vesper": 10, "Fish Central": 0}
+    # 摘要写在门店上；再跑一次不重复查同一个官网
+    lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
+    db.refresh(lead)
+    scan = lead.raw["contacts_scan"]
+    assert (scan["found"], scan["recorded"], scan["pages_ok"], scan["website"]) == (10, 9, 2, SITE)
+    again = client.post("/api/batches/b1/runs", json={"steps": ["contacts"]}).json()
+    assert again["jobs"] == [] and runs.STEPS == ("fetch", "analyze", "contacts")
+
+
+def test_batch_contacts_holds_back_long_lists_and_continue_runs_in_chunks(client, db, monkeypatch):
+    monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
+    phones = " ".join(f"020 7946 01{i:02d}" for i in range(8))  # 分店列表：8 个电话
+    pages = {"/": f"<html><body><a href='mailto:info@vesper.example'>mail</a><p>{phones}</p></body></html>"}
+    monkeypatch.setattr(
+        contacts, "find_contacts", functools.partial(contacts.find_contacts, web_transport=_web_transport(pages))
+    )
+    lead_id = _lead_id(client, db, overture={"matched": True, "place_id": "ov-1", "phones": ["020 7946 0103"]})
+    other = next(x["id"] for x in client.get("/api/leads").json() if x["name"] == "Fish Central")
+    client.patch(f"/api/leads/{other}", json={"website": SITE})
+    run = client.post("/api/batches/b1/runs", json={"steps": ["contacts"], "max_jobs": 1}).json()
+    assert run["status"] == "running" and run["totals"]["pending"] == 1 and run["totals"]["succeeded"] == 1
+    run = client.post(f"/api/runs/{run['id']}/continue", json={"max_jobs": 1}).json()
+    assert run["status"] == "completed" and run["totals"]["succeeded"] == 2
+    assert client.post("/api/runs/00000000-0000-0000-0000-000000000000/continue", json={}).status_code == 404
+    # 电话超过 5 个：只自动记 Overture 也有的那一个，其余留给人工；邮箱照常记录
+    got = {(e["channel"], e["contact_ref"]) for e in client.get(f"/api/leads/{lead_id}/eligibility").json()}
+    assert got == {("email", "info@vesper.example"), ("phone", "+442079460103")}
+    lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
+    db.refresh(lead)
+    assert lead.raw["contacts_scan"]["held_for_review"] == 7

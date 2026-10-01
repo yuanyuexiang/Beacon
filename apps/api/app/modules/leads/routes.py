@@ -3,7 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core import audit
@@ -117,14 +117,29 @@ def list_leads(
     offset: int = 0,
     db: Session = Depends(get_db),
     op: Operator = Depends(current_operator),
-) -> list[Lead]:
+) -> list[LeadOut]:
     batch_id = None
     if batch_key:
         b = service.get_batch_by_key(db, batch_key)
         if b is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "批次不存在")
         batch_id = b.id
-    return list(service.list_leads(db, batch_id, screening_class, min(limit, 500), offset))
+    leads = list(service.list_leads(db, batch_id, screening_class, min(limit, 500), offset))
+    from app.modules.sales.models import ChannelEligibility  # 延迟导入：sales 依赖 leads
+
+    counts = dict(
+        db.execute(
+            select(ChannelEligibility.lead_id, func.count())
+            .where(ChannelEligibility.lead_id.in_([x.id for x in leads]))
+            .group_by(ChannelEligibility.lead_id)
+        ).all()
+    )
+    out = []
+    for lead in leads:
+        row = LeadOut.model_validate(lead)
+        row.contact_count = counts.get(lead.id, 0)
+        out.append(row)
+    return out
 
 
 @router.get("/leads/{lead_id}", response_model=LeadOut)
@@ -252,6 +267,22 @@ def resume_batch_run(
     audit.record(db, op, "resume_run", "batch_run", run.id)
     db.commit()
     run = runs.execute(db, run, body.max_jobs if body else None)
+    return _run_out(db, run)
+
+
+class ContinueIn(BaseModel):
+    max_jobs: int = 5
+
+
+@router.post("/runs/{run_id}/continue", response_model=RunOut)
+def continue_batch_run(
+    run_id: uuid.UUID, body: ContinueIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> RunOut:
+    """继续执行剩余的 pending job（分块执行长任务用）。不重置失败的 job；要重试失败用 resume。"""
+    run = db.get(runs.BatchRun, run_id)
+    if run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "运行不存在")
+    run = runs.execute(db, run, max(1, body.max_jobs))
     return _run_out(db, run)
 
 
