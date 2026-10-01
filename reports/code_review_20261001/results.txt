@@ -1,0 +1,73 @@
+FFFFFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+_______________________ test_untrusted_html_is_isolated ________________________
+../../reports/code_review_20261001/checks.py:22: in test_untrusted_html_is_isolated
+    assert 'sandbox' in page.headers.get('content-security-policy', '') or 'attachment' in page.headers.get('content-disposition', ''), dict(page.headers)
+E   AssertionError: {'content-type': 'text/html; charset=utf-8', 'accept-ranges': 'bytes', 'content-length': '70', 'last-modified': 'Wed, 30 Sep 2026 16:04:30 GMT', ...}
+E   assert ('sandbox' in '' or 'attachment' in '')
+E    +  where '' = get('content-security-policy', '')
+E    +    where get = Headers({'content-type': 'text/html; charset=utf-8', 'accept-ranges': 'bytes', 'content-length': '70', 'last-modified': 'Wed, 30 Sep 2026 16:04:30 GMT', 'etag': '"7feb945dda0e27e65974ebddfe6e882b"'}).get
+E    +      where Headers({'content-type': 'text/html; charset=utf-8', 'accept-ranges': 'bytes', 'content-length': '70', 'last-modified': 'Wed, 30 Sep 2026 16:04:30 GMT', 'etag': '"7feb945dda0e27e65974ebddfe6e882b"'}) = <Response [200 OK]>.headers
+E    +  and   '' = get('content-disposition', '')
+E    +    where get = Headers({'content-type': 'text/html; charset=utf-8', 'accept-ranges': 'bytes', 'content-length': '70', 'last-modified': 'Wed, 30 Sep 2026 16:04:30 GMT', 'etag': '"7feb945dda0e27e65974ebddfe6e882b"'}).get
+E    +      where Headers({'content-type': 'text/html; charset=utf-8', 'accept-ranges': 'bytes', 'content-length': '70', 'last-modified': 'Wed, 30 Sep 2026 16:04:30 GMT', 'etag': '"7feb945dda0e27e65974ebddfe6e882b"'}) = <Response [200 OK]>.headers
+---------------------------- Captured stderr setup -----------------------------
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 20bd574fd49e, initial schema
+INFO  [alembic.runtime.migration] Running upgrade 20bd574fd49e -> a54bba1f68ef, batch runs
+____________________ test_reply_prevents_new_followup_task _____________________
+../../reports/code_review_20261001/checks.py:30: in test_reply_prevents_new_followup_task
+    assert r.status_code == 409, f'new task allowed after unhandled reply: {r.status_code}'
+E   AssertionError: new task allowed after unhandled reply: 201
+E   assert 201 == 409
+E    +  where 201 = <Response [201 Created]>.status_code
+________________ test_content_cannot_use_another_leads_analysis ________________
+../../reports/code_review_20261001/checks.py:38: in test_content_cannot_use_another_leads_analysis
+    assert r.status_code in (400, 409), f'foreign restaurant analysis accepted: {r.status_code}'
+E   AssertionError: foreign restaurant analysis accepted: 201
+E   assert 201 in (400, 409)
+E    +  where 201 = <Response [201 Created]>.status_code
+_________________ test_refreshing_source_invalidates_approval __________________
+../../reports/code_review_20261001/checks.py:54: in test_refreshing_source_invalidates_approval
+    assert current['approval_valid'] is False, 'approval remains valid after source file changed'
+E   AssertionError: approval remains valid after source file changed
+E   assert True is False
+_______________ test_reused_event_key_cannot_swallow_unsubscribe _______________
+../../reports/code_review_20261001/checks.py:61: in test_reused_event_key_cannot_swallow_unsubscribe
+    assert r.status_code == 409, f'changed payload silently treated as duplicate: {r.status_code}, {r.json()["kind"]}'
+E   AssertionError: changed payload silently treated as duplicate: 200, note
+E   assert 200 == 409
+E    +  where 200 = <Response [200 OK]>.status_code
+_______________ test_expired_eligibility_not_counted_contactable _______________
+../../reports/code_review_20261001/checks.py:69: in test_expired_eligibility_not_counted_contactable
+    assert counts['E'] == 0, counts
+E   AssertionError: {'N': 1, 'M': 1, 'I': 1, 'E': 1, ...}
+E   assert 1 == 0
+______________ test_new_batch_does_not_inherit_previous_outreach _______________
+../../reports/code_review_20261001/checks.py:81: in test_new_batch_does_not_inherit_previous_outreach
+    assert s['counts']['S'] == 0, s['counts']
+E   AssertionError: {'N': 1, 'M': 1, 'I': 1, 'E': 0, ...}
+E   assert 1 == 0
+_______________ test_non_menu_html_not_counted_as_menu_obtained ________________
+../../reports/code_review_20261001/checks.py:91: in test_non_menu_html_not_counted_as_menu_obtained
+    assert counts['M'] == 0, counts
+E   AssertionError: {'N': 1, 'M': 1, 'I': 0, 'E': 0, ...}
+E   assert 1 == 0
+--------------------------- Captured stderr teardown ---------------------------
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade a54bba1f68ef -> 20bd574fd49e, batch runs
+INFO  [alembic.runtime.migration] Running downgrade 20bd574fd49e -> , initial schema
+=========================== short test summary info ============================
+FAILED ../../reports/code_review_20261001/checks.py::test_untrusted_html_is_isolated
+FAILED ../../reports/code_review_20261001/checks.py::test_reply_prevents_new_followup_task
+FAILED ../../reports/code_review_20261001/checks.py::test_content_cannot_use_another_leads_analysis
+FAILED ../../reports/code_review_20261001/checks.py::test_refreshing_source_invalidates_approval
+FAILED ../../reports/code_review_20261001/checks.py::test_reused_event_key_cannot_swallow_unsubscribe
+FAILED ../../reports/code_review_20261001/checks.py::test_expired_eligibility_not_counted_contactable
+FAILED ../../reports/code_review_20261001/checks.py::test_new_batch_does_not_inherit_previous_outreach
+FAILED ../../reports/code_review_20261001/checks.py::test_non_menu_html_not_counted_as_menu_obtained
+8 failed in 2.03s
