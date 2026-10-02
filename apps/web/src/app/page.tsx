@@ -57,9 +57,7 @@ export default function Dashboard() {
                 <Bars max={s.counts.N ?? 0} rows={STEPS.map((st) => ({ code: st.code, label: st.label, value: s.counts[st.code] ?? 0, ratio: ratioOf(st.code) }))} />
                 <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
                   {Object.entries(s.ratios).map(([k, r]) => (
-                    <div key={k} style={{ background: "#faf7f2", borderRadius: 6, padding: "8px 10px", fontSize: 12 }}>
-                      <div style={{ color: "#8a8a8a", fontFamily: "monospace" }}>{k}</div><div style={{ fontWeight: 600 }}>{formatRatio(r)}</div>
-                    </div>
+                    <div key={k} className="beacon-ratio"><span>{k}</span><b>{formatRatio(r)}</b></div>
                   ))}
                 </div>
               </Card>

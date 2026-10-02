@@ -4,17 +4,15 @@ import type { ReactNode } from "react";
 
 export const BRAND = { red: "#cf010e", gold: "#fab736", dark: "#1b1b1b", ink: "#1f1f1f" };
 
-/** 页面顶部品牌带：深色渐变 + 主视觉底纹 */
+/** 页面顶部品牌带：深色渐变，主视觉只作很淡的底纹（样式在 globals.css） */
 export function HeroBand({ title, subtitle, extra, kicker, children }: { title: ReactNode; subtitle?: ReactNode; extra?: ReactNode; kicker?: ReactNode; children?: ReactNode }) {
   return (
-    <div style={{ position: "relative", overflow: "hidden", borderRadius: 10, padding: "26px 28px", marginBottom: 20, color: "#fff",
-      backgroundImage: "linear-gradient(110deg, rgba(27,27,27,0.97) 0%, rgba(27,27,27,0.88) 60%, rgba(207,1,14,0.45) 100%), url(/brand/banner.jpg)", backgroundSize: "cover", backgroundPosition: "center 40%" }}>
-      <div style={{ position: "absolute", left: 0, top: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${BRAND.red}, ${BRAND.gold})` }} />
+    <div className="beacon-hero">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-        <div>
-          {kicker && <div style={{ color: BRAND.gold, fontSize: 12, letterSpacing: 2, marginBottom: 6 }}>{kicker}</div>}
-          <Typography.Title level={3} style={{ color: "#fff", margin: 0, fontWeight: 700 }}>{title}</Typography.Title>
-          {subtitle && <div style={{ color: "rgba(255,255,255,0.72)", marginTop: 6, fontSize: 13 }}>{subtitle}</div>}
+        <div style={{ minWidth: 0 }}>
+          {kicker && <div className="beacon-hero-kicker">{kicker}</div>}
+          <Typography.Title level={3} style={{ color: "#fff", margin: 0, fontWeight: 700, letterSpacing: 0.5 }}>{title}</Typography.Title>
+          {subtitle && <div className="beacon-hero-sub">{subtitle}</div>}
         </div>
         {extra && <Space wrap>{extra}</Space>}
       </div>
@@ -26,30 +24,32 @@ export function HeroBand({ title, subtitle, extra, kicker, children }: { title: 
 /** 指标卡：左侧色块图标 + 标题 + 数值 + 说明 */
 export function StatCard({ icon, color = BRAND.red, title, value, hint, onClick }: { icon: ReactNode; color?: string; title: ReactNode; value: ReactNode; hint?: ReactNode; onClick?: () => void }) {
   return (
-    <Card size="small" hoverable={!!onClick} onClick={onClick} styles={{ body: { padding: 16 } }} style={{ height: "100%" }}>
+    <Card className="beacon-stat" size="small" hoverable={!!onClick} onClick={onClick} styles={{ body: { padding: "16px 18px" } }} style={{ height: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <div style={{ width: 42, height: 42, borderRadius: 10, display: "grid", placeItems: "center", background: `${color}14`, color, fontSize: 20, flexShrink: 0 }}>{icon}</div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ color: "#8a8a8a", fontSize: 12 }}>{title}</div>
-          <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.2, color: BRAND.ink }}>{value}</div>
-          {hint && <div style={{ color: "#a3a3a3", fontSize: 11, marginTop: 2 }}>{hint}</div>}
+        <div style={{ width: 46, height: 46, borderRadius: 12, display: "grid", placeItems: "center", background: `linear-gradient(135deg, ${color}22, ${color}0d)`, color, fontSize: 21, flexShrink: 0 }}>{icon}</div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ color: "#8a8178", fontSize: 12 }}>{title}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <span className="beacon-stat-value" style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.25, color: BRAND.ink }}>{value}</span>
+            {hint && <span style={{ color: "#a39a90", fontSize: 12 }}>{hint}</span>}
+          </div>
         </div>
       </div>
     </Card>
   );
 }
 
-/** 横向条形：漏斗 */
+/** 横向条形：漏斗。数值为 0 时不画色条，避免看起来像有数据 */
 export function Bars({ rows, max }: { rows: { label: string; code: string; value: number; ratio?: string }[]; max: number }) {
   return (
-    <div style={{ display: "grid", gap: 10 }}>
+    <div style={{ display: "grid", gap: 12 }}>
       {rows.map((r) => (
-        <div key={r.code} style={{ display: "grid", gridTemplateColumns: "150px 1fr 120px", alignItems: "center", gap: 12, fontSize: 13 }}>
-          <div><span style={{ color: "#8a8a8a", marginRight: 6, fontFamily: "monospace" }}>{r.code}</span>{r.label}</div>
-          <div style={{ background: "#f1ede8", borderRadius: 4, height: 18, overflow: "hidden" }}>
-            <div style={{ width: `${max ? Math.max(2, (r.value / max) * 100) : 0}%`, height: "100%", background: `linear-gradient(90deg, ${BRAND.red}, #f05a5a)`, borderRadius: 4, transition: "width .3s" }} />
+        <div key={r.code} style={{ display: "grid", gridTemplateColumns: "150px 1fr 110px", alignItems: "center", gap: 12, fontSize: 13 }}>
+          <div><span style={{ display: "inline-block", width: 18, color: "#a39a90", fontFamily: "ui-monospace, Menlo, monospace" }}>{r.code}</span>{r.label}</div>
+          <div className="beacon-bar-track">
+            {r.value > 0 && <div className="beacon-bar-fill" style={{ width: `${max ? Math.max(2, (r.value / max) * 100) : 0}%` }} />}
           </div>
-          <div style={{ textAlign: "right" }}><b>{r.value}</b>{r.ratio && <span style={{ color: "#8a8a8a", marginLeft: 6, fontSize: 12 }}>{r.ratio}</span>}</div>
+          <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}><b>{r.value}</b>{r.ratio && <span style={{ color: "#a39a90", marginLeft: 6, fontSize: 12 }}>{r.ratio}</span>}</div>
         </div>
       ))}
     </div>

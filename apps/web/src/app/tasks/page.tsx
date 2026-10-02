@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { HeroBand } from "@/components/ui";
-import { label } from "@/lib/format";
+import { CHANNEL_LABEL, label } from "@/lib/format";
 
 type Lead = { id: string; name: string; source_key: string };
 type Elig = { id: string; channel: string; contact_ref: string | null; contact_usable: string; eligibility: string; rule_version: string | null; evidence: string | null; reviewed_by: string | null };
@@ -36,9 +36,9 @@ export default function TasksPage() {
   const taskTable = (
     <Table<Task> rowKey="id" size="small" pagination={{ pageSize: 20 }} dataSource={leadId ? tasks.filter((t) => t.lead_id === leadId) : tasks} columns={[
       { title: "门店", dataIndex: "lead_id", render: (v) => <a onClick={() => pick(v)}>{name(v)}</a> },
-      { title: "渠道", dataIndex: "channel", width: 110 },
+      { title: "渠道", dataIndex: "channel", width: 110, render: (v) => CHANNEL_LABEL[v] ?? v },
       { title: "状态", dataIndex: "status", width: 260, render: (v, t) => <><Tag color={TASK_COLORS[v]}>{label(v)}</Tag>{t.status_reason && <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t.status_reason}</Typography.Text>}</> },
-      { title: "发送", render: (_, t) => (t.sent_at ? `${t.sent_at.slice(0, 16)} · ${t.sent_by}` : "-") },
+      { title: "发送", render: (_, t) => (t.sent_at ? `${t.sent_at.slice(0, 16).replace("T", " ")} · ${t.sent_by}` : <span className="beacon-muted">-</span>) },
       { title: "操作", width: 420, render: (_, t) => (
         <Space wrap>
           {t.status === "pending" && <Button size="small" type="primary" onClick={() => api(`/api/tasks/${t.id}/open`, { method: "POST" }).then(() => reload(leadId)).catch(err)}>打开</Button>}
@@ -67,7 +67,7 @@ export default function TasksPage() {
           { key: "elig", label: "渠道准入", disabled: !leadId, children: leadId ? (
             <>
               <Form layout="inline" onFinish={(v) => api(`/api/leads/${leadId}/eligibility`, json(v)).then(() => reload(leadId)).catch(err)} style={{ marginBottom: 12, rowGap: 8 }}>
-                <Form.Item name="channel" rules={[{ required: true }]}><Select placeholder="渠道" style={{ width: 130 }} options={CHANNELS.map((c) => ({ value: c }))} /></Form.Item>
+                <Form.Item name="channel" rules={[{ required: true }]}><Select placeholder="渠道" style={{ width: 130 }} options={CHANNELS.map((c) => ({ value: c, label: CHANNEL_LABEL[c] ?? c }))} /></Form.Item>
                 <Form.Item name="contact_ref"><Input placeholder="联系值（规范化）" style={{ width: 200 }} /></Form.Item>
                 <Form.Item name="contact_source"><Input placeholder="来源" style={{ width: 140 }} /></Form.Item>
                 <Form.Item name="contact_usable" initialValue="unknown"><Select style={{ width: 100 }} options={["unknown", "valid", "invalid"].map((c) => ({ value: c, label: label(c) }))} /></Form.Item>
@@ -77,7 +77,7 @@ export default function TasksPage() {
                 <Button type="primary" htmlType="submit">保存</Button>
               </Form>
               <Table<Elig> rowKey="id" size="small" pagination={false} dataSource={eligs} columns={[
-                { title: "渠道", dataIndex: "channel" }, { title: "联系值", dataIndex: "contact_ref" },
+                { title: "渠道", dataIndex: "channel", render: (v) => CHANNEL_LABEL[v] ?? v }, { title: "联系值", dataIndex: "contact_ref" },
                 { title: "可用", dataIndex: "contact_usable", render: label },
                 { title: "准入", dataIndex: "eligibility", render: (v) => <Tag color={v === "allowed" ? "green" : v === "blocked" ? "red" : "default"}>{label(v)}</Tag> },
                 { title: "规则", dataIndex: "rule_version" }, { title: "证据", dataIndex: "evidence", ellipsis: true }, { title: "审核人", dataIndex: "reviewed_by" },
@@ -90,7 +90,7 @@ export default function TasksPage() {
               <Form layout="inline" onFinish={(v) => api<Event>(`/api/leads/${leadId}/events`, json({ ...v, payload: { intent: v.intent, contact_ref: v.contact_ref, summary: v.summary } })).then((e) => { if (e.duplicate) message.warning("重复事件，未重复执行"); reload(leadId); }).catch(err)} style={{ marginBottom: 12, rowGap: 8 }}>
                 <Form.Item name="event_key" rules={[{ required: true }]}><Input placeholder="事件键（如 mail:<id>）" style={{ width: 180 }} /></Form.Item>
                 <Form.Item name="kind" rules={[{ required: true }]}><Select placeholder="类型" style={{ width: 120 }} options={["reply", "reject", "unsubscribe", "bounce", "note"].map((k) => ({ value: k }))} /></Form.Item>
-                <Form.Item name="channel"><Select placeholder="渠道" style={{ width: 120 }} allowClear options={CHANNELS.map((c) => ({ value: c }))} /></Form.Item>
+                <Form.Item name="channel"><Select placeholder="渠道" style={{ width: 120 }} allowClear options={CHANNELS.map((c) => ({ value: c, label: CHANNEL_LABEL[c] ?? c }))} /></Form.Item>
                 <Form.Item name="intent"><Select placeholder="意向" style={{ width: 110 }} allowClear options={["positive", "quote", "later", "no", "unknown"].map((c) => ({ value: c }))} /></Form.Item>
                 <Form.Item name="contact_ref"><Input placeholder="联系值" style={{ width: 160 }} /></Form.Item>
                 <Form.Item name="summary"><Input placeholder="摘要（不存原文）" style={{ width: 200 }} /></Form.Item>

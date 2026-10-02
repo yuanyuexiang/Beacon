@@ -64,7 +64,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </div>
       </Layout.Sider>
       <Layout>
-        <Layout.Header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", borderBottom: "1px solid #e8e3dc", borderTop: "3px solid #cf010e", position: "sticky", top: 0, zIndex: 10 }}>
+        <Layout.Header className="beacon-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", borderBottom: "1px solid #e8e3dc", borderTop: "3px solid #cf010e", position: "sticky", top: 0, zIndex: 10 }}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <button type="button" className="beacon-fold" aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"} onClick={() => setCollapsed(!collapsed)}>
               {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}

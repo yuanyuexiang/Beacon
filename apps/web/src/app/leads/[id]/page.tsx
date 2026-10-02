@@ -1,5 +1,5 @@
 "use client";
-import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from "antd";
+import { Button, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from "antd";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
@@ -105,20 +105,22 @@ export default function LeadDetail() {
       <Card size="small" title="基本信息与人工判断" style={{ marginBottom: 16 }}>
         <Form
           form={form}
-          layout="inline"
+          layout="vertical"
+          className="beacon-form-grid"
           initialValues={lead}
-          style={{ rowGap: 8 }}
           onFinish={(v) => api(`/api/leads/${id}`, json(v, "PATCH")).then(() => { message.success("已保存"); reload(); }).catch(err)}
         >
-          <Form.Item name="website" label="官网"><Input style={{ width: 280 }} /></Form.Item>
-          <Form.Item name="screening_class" label="筛选"><Select style={{ width: 160 }} options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} /></Form.Item>
-          <Form.Item name="screening_reason" label="原因"><Input style={{ width: 240 }} /></Form.Item>
-          <Form.Item name="entity_status" label="主体"><Select style={{ width: 130 }} options={["unknown", "company", "sole_trader", "other"].map((s) => ({ value: s }))} /></Form.Item>
-          <Form.Item name="entity_evidence" label="主体证据"><Input style={{ width: 320 }} /></Form.Item>
-          <Space>
+          <Row gutter={16}>
+            <Col xs={24} md={9}><Form.Item name="website" label="官网"><Input placeholder="https://" /></Form.Item></Col>
+            <Col xs={24} md={5}><Form.Item name="screening_class" label="筛选分类"><Select options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} /></Form.Item></Col>
+            <Col xs={24} md={10}><Form.Item name="screening_reason" label="筛选原因"><Input /></Form.Item></Col>
+            <Col xs={24} md={5}><Form.Item name="entity_status" label="经营主体"><Select options={["unknown", "company", "sole_trader", "other"].map((s) => ({ value: s, label: label(s) }))} /></Form.Item></Col>
+            <Col xs={24} md={19}><Form.Item name="entity_evidence" label="主体证据"><Input placeholder="例如 Companies House 编号与来源；点右下“查 Companies House”可带出" /></Form.Item></Col>
+          </Row>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <Button onClick={() => searchEntity()}>查 Companies House</Button>
             <Button type="primary" htmlType="submit">保存</Button>
-          </Space>
+          </div>
         </Form>
       </Card>
       <Modal title="Companies House 主体候选" open={entityOpen} onCancel={() => setEntityOpen(false)} footer={null} width={1080}>
