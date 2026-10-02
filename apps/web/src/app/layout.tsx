@@ -1,10 +1,11 @@
+import "./globals.css";
 import type { Metadata } from "next";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { AdminShell } from "@/components/AdminShell";
 
-export const metadata: Metadata = { title: "小当家 · 菜单线索工作台", description: "餐厅菜单线索研究与人工联系记录", icons: { icon: "/brand/logo-64.png" } };
+export const metadata: Metadata = { title: "小当家 · 销售线索工作台", description: "餐厅菜单线索研究与人工联系记录", icons: { icon: "/brand/logo-64.png" } };
 
 // 品牌色取自客户官网：主红 #cf010e，金黄 #fab736 / #f6a508，深色底 #1b1b1b；字体微软雅黑
 const theme = {

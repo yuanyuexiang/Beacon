@@ -38,7 +38,7 @@ export default function LoginPage() {
         </div>
 
         <div style={{ maxWidth: 560 }}>
-          <div style={{ display: "inline-block", padding: "4px 10px", border: `1px solid ${GOLD}`, color: GOLD, borderRadius: 999, fontSize: 12, letterSpacing: 2, marginBottom: 18 }}>菜单线索工作台</div>
+          <div style={{ display: "inline-block", padding: "4px 10px", border: `1px solid ${GOLD}`, color: GOLD, borderRadius: 999, fontSize: 12, letterSpacing: 2, marginBottom: 18 }}>销售线索工作台</div>
           <Typography.Title className="brand-title" style={{ color: "#fff", margin: 0, fontSize: 40, lineHeight: 1.2, fontWeight: 800 }}>
             找到最需要<span style={{ color: GOLD }}>改版菜单</span>的餐厅，
             <br />把时间留给真正有意向的客户。
@@ -80,7 +80,7 @@ export default function LoginPage() {
           <div style={{ marginTop: 28, padding: "12px 14px", background: "#faf7f2", borderLeft: `3px solid ${GOLD}`, borderRadius: 4, fontSize: 12, color: "#6b6b6b", lineHeight: 1.7 }}>
             系统不发送任何消息；所有对外联系由销售确认后执行并回填。评分与排序不代表成交概率。
           </div>
-          <div style={{ marginTop: 36, fontSize: 12, color: "#9a9a9a", textAlign: "center" }}>© 南京小当家文化咨询有限公司 · 菜单线索工作台 验证版</div>
+          <div style={{ marginTop: 36, fontSize: 12, color: "#9a9a9a", textAlign: "center" }}>© 南京小当家文化咨询有限公司 · 销售线索工作台 验证版</div>
         </div>
       </section>
     </div>

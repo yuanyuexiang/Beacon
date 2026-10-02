@@ -1,0 +1,178 @@
+/* 侧边栏：深色底 + 品牌红金点缀。选中项用半透明红底与金色指示条，避免整块实心红过重。 */
+.beacon-sider.ant-layout-sider {
+  background: linear-gradient(180deg, #221d1c 0%, #171717 42%, #131313 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+.beacon-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+}
+
+.beacon-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 72px;
+  padding: 0 18px;
+  flex: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: radial-gradient(120% 140% at 0% 0%, rgba(207, 1, 14, 0.22) 0%, rgba(207, 1, 14, 0) 60%);
+}
+.beacon-brand img {
+  height: 38px;
+  width: auto;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+}
+.beacon-brand-name {
+  color: #fab736;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 2px;
+  line-height: 1.25;
+}
+.beacon-brand-sub {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+  letter-spacing: 1px;
+  line-height: 1.4;
+}
+.ant-layout-sider-collapsed .beacon-brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.beacon-sider .beacon-nav.ant-menu {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: transparent;
+  border-inline-end: 0;
+}
+.beacon-sider .beacon-nav.ant-menu .ant-menu-item-group-title {
+  padding: 14px 12px 6px;
+  color: rgba(255, 255, 255, 0.36);
+  font-size: 11px;
+  letter-spacing: 3px;
+}
+.beacon-sider .beacon-nav.ant-menu .ant-menu-item {
+  position: relative;
+  width: 100%;
+  height: 42px;
+  line-height: 42px;
+  margin: 3px 0;
+  border-radius: 9px;
+  color: rgba(255, 255, 255, 0.7);
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.beacon-sider .beacon-nav.ant-menu .ant-menu-item .anticon {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.55);
+  transition: color 0.18s ease;
+}
+.beacon-sider .beacon-nav.ant-menu .ant-menu-item:not(.ant-menu-item-selected):hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+.beacon-sider .beacon-nav.ant-menu .ant-menu-item:not(.ant-menu-item-selected):hover .anticon {
+  color: #fff;
+}
+.beacon-sider .beacon-nav.ant-menu .ant-menu-item-selected {
+  background: linear-gradient(90deg, rgba(207, 1, 14, 0.34) 0%, rgba(207, 1, 14, 0.1) 100%);
+  box-shadow: inset 0 0 0 1px rgba(207, 1, 14, 0.38);
+  color: #fff;
+  font-weight: 600;
+}
+.beacon-sider .beacon-nav.ant-menu .ant-menu-item-selected .anticon {
+  color: #fab736;
+}
+.beacon-sider .beacon-nav.ant-menu .ant-menu-item-selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, #fab736 0%, #cf010e 100%);
+}
+/* 收起时：分组标题变成一条细分隔线，图标居中 */
+.beacon-sider.ant-layout-sider-collapsed .beacon-nav.ant-menu {
+  padding: 10px 8px;
+}
+.beacon-sider.ant-layout-sider-collapsed .beacon-nav.ant-menu .ant-menu-item-group-title {
+  height: 1px;
+  margin: 10px 14px;
+  padding: 0;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0;
+}
+.beacon-sider.ant-layout-sider-collapsed .beacon-nav.ant-menu .ant-menu-item {
+  padding-inline: calc(50% - 9px);
+}
+.beacon-sider.ant-layout-sider-collapsed .beacon-nav.ant-menu .ant-menu-item .anticon {
+  font-size: 18px;
+}
+
+.beacon-sider-foot {
+  flex: none;
+  padding: 12px 14px 16px;
+}
+.beacon-sider-note {
+  display: flex;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(250, 183, 54, 0.22);
+  border-radius: 10px;
+  background: rgba(250, 183, 54, 0.06);
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.beacon-sider-note .anticon {
+  margin-top: 2px;
+  color: #fab736;
+  font-size: 16px;
+}
+.beacon-sider-note b {
+  display: block;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  font-weight: 600;
+}
+.beacon-sider-company {
+  margin-top: 12px;
+  color: rgba(255, 255, 255, 0.32);
+  font-size: 11px;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+.ant-layout-sider-collapsed .beacon-sider-foot {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 18px;
+}
+.ant-layout-sider-collapsed .beacon-sider-foot .anticon {
+  color: #fab736;
+  font-size: 18px;
+}
+
+.beacon-fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.beacon-fold:hover {
+  background: #f3efe9;
+  color: #cf010e;
+}
