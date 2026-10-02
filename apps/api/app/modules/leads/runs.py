@@ -3,7 +3,9 @@
 
 import enum
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -191,12 +193,14 @@ def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
         .where(BatchJob.run_id == run.id, BatchJob.status == JobStatus.pending)
         .order_by(BatchJob.step, BatchJob.lead_id)
     ).all()
-    for j in pending if max_jobs is None else pending[:max_jobs]:
+    chunk = pending if max_jobs is None else pending[:max_jobs]
+    scans = _prefetch_websites(db, chunk)  # 联系方式步骤：先并行读完这一块的官网，数据库写入仍逐条进行
+    for j in chunk:
         j.status, j.started_at, j.attempts = JobStatus.running, datetime.now(UTC), j.attempts + 1
         db.commit()
         try:
             if j.step == "contacts":
-                _collect_contacts(db, run, j)
+                _collect_contacts(db, run, j, scans)
                 j.status, j.error, j.finished_at = JobStatus.succeeded, None, datetime.now(UTC)
                 db.commit()
                 continue
@@ -223,14 +227,31 @@ def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
         db.commit()
 
 
-def _collect_contacts(db: Session, run: BatchRun, j: BatchJob) -> None:
+def _prefetch_websites(db: Session, jobs: Sequence[BatchJob]) -> dict[str, Any]:
+    """并行读取这一块 contacts job 涉及的官网（只有网络访问，在线程里不碰数据库会话）。"""
+    urls = []
+    for j in jobs:
+        lead = db.get(Lead, j.lead_id) if j.step == "contacts" else None
+        if lead is not None and lead.website:
+            urls.append(lead.website)
+    if not urls:
+        return {}
+    from app.modules.sales import contacts  # 延迟导入：sales 依赖 leads
+
+    return contacts.scan_websites(urls)
+
+
+def _collect_contacts(db: Session, run: BatchRun, j: BatchJob, scans: dict[str, Any]) -> None:
     from app.core import audit
     from app.modules.sales import contacts  # 延迟导入：sales 依赖 leads
 
     lead = db.get(Lead, j.lead_id)
     if lead is None:
         raise RunError("门店不存在")
-    scan = contacts.collect(db, lead)
+    website_scan = scans.get(lead.website) if lead.website else None
+    if isinstance(website_scan, Exception):
+        raise website_scan
+    scan = contacts.collect(db, lead, website_scan)
     audit.record(
         db, None, "record_contacts", "lead", lead.id, after={"run_id": str(run.id), "by": run.started_by, **scan}
     )

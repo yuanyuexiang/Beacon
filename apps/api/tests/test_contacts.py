@@ -60,7 +60,7 @@ def _lead_id(client, db, website=SITE, overture=None):
 def web(monkeypatch):
     monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
     monkeypatch.setattr(
-        contacts, "find_contacts", functools.partial(contacts.find_contacts, web_transport=_web_transport())
+        contacts, "scan_website", functools.partial(contacts.scan_website, web_transport=_web_transport())
     )
 
 
@@ -211,7 +211,7 @@ def test_no_website_uses_overture_only_and_fetch_failure_is_reported(client, db,
     assert j["website"] is None and [(c["kind"], c["value"]) for c in j["candidates"]] == [("phone", "+442079460123")]
     client.patch(f"/api/leads/{lead_id}", json={"website": SITE})
     monkeypatch.setattr(
-        contacts, "find_contacts", functools.partial(contacts.find_contacts, web_transport=_web_transport(pages={}))
+        contacts, "scan_website", functools.partial(contacts.scan_website, web_transport=_web_transport(pages={}))
     )
     j = client.get(f"/api/leads/{lead_id}/contact-candidates").json()
     assert j["website"]["pages"][0]["ok"] is False and len(j["candidates"]) == 1
@@ -236,7 +236,7 @@ def test_batch_contacts_step_records_automatically_and_skips_excluded(client, db
 
     monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
     monkeypatch.setattr(
-        contacts, "find_contacts", functools.partial(contacts.find_contacts, web_transport=_web_transport())
+        contacts, "scan_website", functools.partial(contacts.scan_website, web_transport=_web_transport())
     )
     lead_id = _lead_id(client, db)  # Vesper：有官网
     other = next(x["id"] for x in client.get("/api/leads").json() if x["name"] == "Fish Central")
@@ -277,7 +277,7 @@ def test_batch_contacts_holds_back_long_lists_and_continue_runs_in_chunks(client
     phones = " ".join(f"020 7946 01{i:02d}" for i in range(8))  # 分店列表：8 个电话
     pages = {"/": f"<html><body><a href='mailto:info@vesper.example'>mail</a><p>{phones}</p></body></html>"}
     monkeypatch.setattr(
-        contacts, "find_contacts", functools.partial(contacts.find_contacts, web_transport=_web_transport(pages))
+        contacts, "scan_website", functools.partial(contacts.scan_website, web_transport=_web_transport(pages))
     )
     lead_id = _lead_id(client, db, overture={"matched": True, "place_id": "ov-1", "phones": ["020 7946 0103"]})
     other = next(x["id"] for x in client.get("/api/leads").json() if x["name"] == "Fish Central")
@@ -293,3 +293,39 @@ def test_batch_contacts_holds_back_long_lists_and_continue_runs_in_chunks(client
     lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
     db.refresh(lead)
     assert lead.raw["contacts_scan"]["held_for_review"] == 7
+
+
+def test_scan_websites_runs_hosts_in_parallel_but_one_at_a_time_per_host(monkeypatch):
+    import threading
+    import time
+
+    lock = threading.Lock()
+    active: dict[str, int] = {}
+    peak = {"total": 0, "per_host": 0}
+    calls: list[str] = []
+
+    def fake_scan(url, web_transport=None):
+        host = url.split("/")[2]
+        with lock:
+            calls.append(url)
+            active[host] = active.get(host, 0) + 1
+            peak["total"] = max(peak["total"], sum(active.values()))
+            peak["per_host"] = max(peak["per_host"], active[host])
+        time.sleep(0.15)
+        with lock:
+            active[host] -= 1
+        if "broken" in url:
+            raise RuntimeError("boom")
+        return {"url": url, "pages": [], "contacts": []}
+
+    monkeypatch.setattr(contacts, "scan_website", fake_scan)
+    urls = [f"https://site{i}.example/" for i in range(6)] + ["https://site0.example/b", "https://broken.example/"]
+    started = time.monotonic()
+    out = contacts.scan_websites(urls + ["https://site1.example/"])  # 重复地址只读一次
+    elapsed = time.monotonic() - started
+    assert sorted(calls) == sorted(urls) and set(out) == set(urls)
+    assert peak["total"] > 1 and peak["per_host"] == 1  # 不同站点并行；同一主机不并发
+    assert elapsed < 0.15 * len(urls) * 0.6  # 明显快于逐个访问
+    assert isinstance(out["https://broken.example/"], RuntimeError)  # 单个站点出错不影响其余
+    assert out["https://site2.example/"] == {"url": "https://site2.example/", "pages": [], "contacts": []}
+    assert contacts.scan_websites([]) == {}

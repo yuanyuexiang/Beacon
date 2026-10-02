@@ -60,14 +60,14 @@ function LeadsInner() {
     if (match && fsaForm.getFieldValue("authority_id") == null) fsaForm.setFieldsValue({ authority_id: match.id });  // 不覆盖手工选择
   }, [buildOpen, authorities, batches, batchKey, fsaForm, loadAuthorities]);
 
-  // 批量查找联系方式：每次请求只处理几家，循环续跑直到没有待处理的，避免单个请求过长
+  // 批量查找联系方式：每次请求处理 20 家（后端并行读官网），循环续跑直到没有待处理的，避免单个请求过长
   const collectContacts = async (key: string, onProgress: (text: string) => void): Promise<string> => {
     const k = encodeURIComponent(key);
-    let r = await api<Run>(`/api/batches/${k}/runs`, json({ steps: ["contacts"], max_jobs: 5 }));
+    let r = await api<Run>(`/api/batches/${k}/runs`, json({ steps: ["contacts"], max_jobs: 20 }));
     const total = (t: Run["totals"]) => (t ? t.pending + t.running + t.succeeded + t.failed : 0);
     while (r.status === "running" && (r.totals?.pending ?? 0) > 0) {
       onProgress(`已处理 ${(r.totals?.succeeded ?? 0) + (r.totals?.failed ?? 0)}/${total(r.totals)} 家`);
-      r = await api<Run>(`/api/runs/${r.id}/continue`, json({ max_jobs: 5 }));
+      r = await api<Run>(`/api/runs/${r.id}/continue`, json({ max_jobs: 20 }));
     }
     const t = r.totals;
     if (!total(t)) return "没有需要查找的门店（已排除、没有官网和 Overture 数据，或之前已查过）";
