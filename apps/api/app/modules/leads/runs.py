@@ -84,8 +84,10 @@ def _needs_contact_scan(lead: Lead | None) -> bool:
     scan = raw.get("contacts_scan")
     if not scan:
         return True
-    # 官网换了，或上次一个页面都没读到：再查一次
-    return scan.get("website") != lead.website or bool(lead.website and not scan.get("pages_ok"))
+    # 官网换了、没有读到页面或部分页面失败：允许再次查找，已记录联系方式不会重复新增。
+    return scan.get("website") != lead.website or bool(
+        lead.website and (not scan.get("pages_ok") or scan.get("pages_failed"))
+    )
 
 
 def plan_jobs(db: Session, run: BatchRun, batch: Batch) -> int:
@@ -200,8 +202,13 @@ def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
         db.commit()
         try:
             if j.step == "contacts":
-                _collect_contacts(db, run, j, scans)
-                j.status, j.error, j.finished_at = JobStatus.succeeded, None, datetime.now(UTC)
+                scan = _collect_contacts(db, run, j, scans)
+                if scan["pages_failed"]:
+                    j.status = JobStatus.failed
+                    j.error = f"官网有 {scan['pages_failed']} 个页面抓取失败；已保留成功页面的联系方式，可重试"
+                else:
+                    j.status, j.error = JobStatus.succeeded, None
+                j.finished_at = datetime.now(UTC)
                 db.commit()
                 continue
             asset = db.get(MenuAsset, j.target_id) if j.target_id else None
@@ -241,7 +248,7 @@ def _prefetch_websites(db: Session, jobs: Sequence[BatchJob]) -> dict[str, Any]:
     return contacts.scan_websites(urls)
 
 
-def _collect_contacts(db: Session, run: BatchRun, j: BatchJob, scans: dict[str, Any]) -> None:
+def _collect_contacts(db: Session, run: BatchRun, j: BatchJob, scans: dict[str, Any]) -> dict[str, Any]:
     from app.core import audit
     from app.modules.sales import contacts  # 延迟导入：sales 依赖 leads
 
@@ -255,6 +262,7 @@ def _collect_contacts(db: Session, run: BatchRun, j: BatchJob, scans: dict[str, 
     audit.record(
         db, None, "record_contacts", "lead", lead.id, after={"run_id": str(run.id), "by": run.started_by, **scan}
     )
+    return scan
 
 
 def _finalize(db: Session, run: BatchRun) -> BatchRun:

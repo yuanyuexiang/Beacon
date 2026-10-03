@@ -329,3 +329,42 @@ def test_scan_websites_runs_hosts_in_parallel_but_one_at_a_time_per_host(monkeyp
     assert isinstance(out["https://broken.example/"], RuntimeError)  # 单个站点出错不影响其余
     assert out["https://site2.example/"] == {"url": "https://site2.example/", "pages": [], "contacts": []}
     assert contacts.scan_websites([]) == {}
+
+
+@pytest.mark.parametrize("path", ["channel/UCAbCdEfGh123", "c/VesperLondon", "user/VesperLondon", "@VesperLondon"])
+def test_youtube_account_path_preserves_case(path):
+    assert wc.classify_link(f"https://youtube.com/{path}") == ("youtube", f"https://www.youtube.com/{path}")
+
+
+@pytest.mark.parametrize("home_ok", [True, False])
+@pytest.mark.parametrize("retry_method", ["resume", "new_run"])
+def test_failed_contact_pages_are_retryable_and_keep_successful_contacts(
+    client, db, monkeypatch, home_ok, retry_method
+):
+    monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
+    lead_id = _lead_id(client, db)
+    pages = {"/": HOME} if home_ok else {}
+    monkeypatch.setattr(
+        contacts, "scan_website", functools.partial(contacts.scan_website, web_transport=_web_transport(pages))
+    )
+    run = client.post("/api/batches/b1/runs", json={"steps": ["contacts"]}).json()
+    assert run["status"] == "completed_with_failures"
+    assert run["jobs"][0]["status"] == "failed" and run["jobs"][0]["error"]
+    before = client.get(f"/api/leads/{lead_id}/eligibility").json()
+    assert bool(before) == home_ok  # 部分成功的联系方式即使 job 失败也要保留
+    monkeypatch.setattr(
+        contacts, "scan_website", functools.partial(contacts.scan_website, web_transport=_web_transport())
+    )
+    if retry_method == "resume":
+        retried = client.post(f"/api/runs/{run['id']}/resume", json={}).json()
+    else:
+        retried = client.post("/api/batches/b1/runs", json={"steps": ["contacts"]}).json()
+    assert retried["status"] == "completed" and len(retried["jobs"]) == 1
+    after = client.get(f"/api/leads/{lead_id}/eligibility").json()
+    values = {(e["channel"], e["contact_ref"]) for e in after}
+    assert ("email", "jane.smith@vesper.example") in values  # 补上联系页的邮箱
+    assert len(values) == len(after)  # 重试不重复写入首页已有的联系方式
+    assert {e["id"] for e in before} <= {e["id"] for e in after}
+    assert all(e["eligibility"] == "unknown" and e["contact_usable"] == "unknown" for e in after)
+    again = client.post("/api/batches/b1/runs", json={"steps": ["contacts"]}).json()
+    assert again["jobs"] == []  # 完整成功后不再重复查找

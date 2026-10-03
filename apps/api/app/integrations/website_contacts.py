@@ -204,7 +204,9 @@ def classify_link(href: str, base_url: str = "") -> tuple[str, str] | None:
         keep = 3
     if len(segs) < keep:
         return None
-    return kind, CANONICAL[kind] + "/".join(segs[:keep]).lower()
+    path = "/".join(segs[:keep])
+    # YouTube channel ID 等账号标识须保留原始大小写。
+    return kind, CANONICAL[kind] + (path if kind == "youtube" else path.lower())
 
 
 def extract_contacts(doc: dict[str, Any]) -> list[dict[str, Any]]:
