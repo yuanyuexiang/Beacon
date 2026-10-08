@@ -169,7 +169,7 @@ function LeadsInner() {
             { title: "门店", dataIndex: "name", render: (v, r) => <Link href={`/leads/${r.id}`} style={{ fontWeight: 600 }}>{v}</Link>, sorter: (a, b) => a.name.localeCompare(b.name) },
             { title: "来源键", dataIndex: "source_key", width: 120 },
             { title: "邮编", dataIndex: "postcode", width: 100 },
-            { title: "官网", dataIndex: "website", ellipsis: true, render: (v) => (v ? <a href={v} target="_blank" rel="noreferrer"><GlobalOutlined style={{ marginRight: 6, color: "#d97706" }} />{v.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <span className="beacon-muted">无官网</span>) },
+            { title: "官网", dataIndex: "website", ellipsis: true, render: (v, r) => (v ? <a href={v} target="_blank" rel="noreferrer"><GlobalOutlined style={{ marginRight: 6, color: "#d97706" }} />{v.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <Link href={`/leads/${r.id}`} title="进入详情页搜索并核对官网">搜索补官网</Link>) },
             { title: "筛选", dataIndex: "screening_class", width: 120, render: (v, r) => <ScreenTag value={v} reason={r.screening_reason} />, filters: SCREENING.map((s) => ({ text: SCREEN_ZH[s] ?? s, value: s })), onFilter: (val, r) => r.screening_class === val },
             { title: "联系方式", dataIndex: "contact_count", width: 90, sorter: (a, b) => a.contact_count - b.contact_count, render: (v) => (v ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{v} 项</Tag> : <span style={{ color: "#9ca3af" }}>-</span>) },
             { title: "主体", dataIndex: "entity_status", width: 90, render: (v) => (v === "unknown" ? <span className="beacon-muted">未知</span> : <Tag color="green" style={{ marginInlineEnd: 0 }}>{label(v)}</Tag>) },

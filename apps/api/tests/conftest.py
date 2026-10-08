@@ -34,6 +34,7 @@ def pytest_configure() -> None:
         "BEACON_DEEPSEEK_API_KEY",
         "BEACON_ANTHROPIC_API_KEY",
         "BEACON_COMPANIES_HOUSE_API_KEY",
+        "BEACON_EXA_API_KEY",
         "DEEPSEEK_API_KEY",
         "ANTHROPIC_API_KEY",
     ):

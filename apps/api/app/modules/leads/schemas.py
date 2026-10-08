@@ -38,6 +38,7 @@ class LeadOut(BaseModel):
     lat: float | None
     lng: float | None
     website: str | None
+    website_source: str | None
     screening_class: ScreeningClass
     screening_reason: str | None
     entity_status: EntityStatus

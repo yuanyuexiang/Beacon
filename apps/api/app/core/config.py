@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     companies_house_api_key: str | None = None  # 主体候选检索；未配置时该功能返回 503，其余功能不受影响
+    exa_api_key: str | None = None  # 可选；空值使用免费限流的 MCP 搜索，密钥只通过请求头发送
     templates_dir: Path = Path(__file__).resolve().parents[4] / "templates"  # <repo>/templates
     chrome_path: Path | None = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")  # 容器内设为空
 

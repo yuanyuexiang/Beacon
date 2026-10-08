@@ -6,8 +6,9 @@ import { api, json } from "@/lib/api";
 import { CHANNEL_LABEL, approvalText, label } from "@/lib/format";
 import { HeroBand, SCREEN_ZH, ScreenTag } from "@/components/ui";
 import { Steps } from "antd";
+import WebsiteSearch from "@/components/WebsiteSearch";
 
-type Lead = { id: string; name: string; source_key: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
+type Lead = { id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
 type Issue = { issue_code: string; fact: string; severity: string; confirmed: boolean | null; confirmed_by: string | null; note: string | null; deleted?: boolean; evidence: Record<string, unknown> };
@@ -111,13 +112,14 @@ export default function LeadDetail() {
           onFinish={(v) => api(`/api/leads/${id}`, json(v, "PATCH")).then(() => { message.success("已保存"); reload(); }).catch(err)}
         >
           <Row gutter={16}>
-            <Col xs={24} md={9}><Form.Item name="website" label="官网"><Input placeholder="https://" /></Form.Item></Col>
+            <Col xs={24} md={9}><Form.Item name="website" label="官网" extra={lead.website_source ? `来源：${lead.website_source}` : undefined}><Input placeholder="https://" /></Form.Item></Col>
             <Col xs={24} md={5}><Form.Item name="screening_class" label="筛选分类"><Select options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} /></Form.Item></Col>
             <Col xs={24} md={10}><Form.Item name="screening_reason" label="筛选原因"><Input /></Form.Item></Col>
             <Col xs={24} md={5}><Form.Item name="entity_status" label="经营主体"><Select options={["unknown", "company", "sole_trader", "other"].map((s) => ({ value: s, label: label(s) }))} /></Form.Item></Col>
             <Col xs={24} md={19}><Form.Item name="entity_evidence" label="主体证据"><Input placeholder="例如 Companies House 编号与来源；点右下“查 Companies House”可带出" /></Form.Item></Col>
           </Row>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <WebsiteSearch key={id} id={id} name={lead.name} address={lead.address} postcode={lead.postcode} website={lead.website} onConfirmed={(result) => { form.setFieldsValue({ website: result.website }); reload().catch(err); }} />
             <Button onClick={() => searchEntity()}>查 Companies House</Button>
             <Button type="primary" htmlType="submit">保存</Button>
           </div>
