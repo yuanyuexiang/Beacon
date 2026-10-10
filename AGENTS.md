@@ -13,7 +13,7 @@ Beacon 是餐厅菜单销售线索工具。T0/T1 技术探索已完成（`plan/e
 - `plan/validation-report-v1.md`：V 第一批 50 家的漏斗、提取质量、成本与工具问题。
 - `plan/model-eval-v1.md`：DeepSeek 转录评测（准确率、观察精确率、成本）。
 - `apps/web/public/brand/`：客户（南京小当家文化咨询有限公司）官网的 logo 与主视觉，仅用于客户自己的内部工作台；主题色红 #cf010e、金 #fab736 取自官网。
-- 名单来源：`app/integrations/fsa.py`（FSA API）、`app/integrations/overture.py`（Overture Places，缓存在数据目录）；不使用 Google Maps 抓取。
+- 名单来源：`app/integrations/fsa.py`（FSA API）、`app/integrations/overture.py`（Overture Places，缓存在数据目录）；不使用 Google Maps 抓取；Google Places 官方 API 作为单家人工确认后的可选实时补充（D41），只保存 Place ID 与审核元数据。
 - `plan/tasks.md`、`plan/decisions.md`：任务进度与决策记录。
 - `scripts/`：抽样、抓取、探针、提取、样稿渲染脚本；`templates/`：样稿模板；`data/`：受控数据（gitignore）。
 - `reports/`：综合研究报告。

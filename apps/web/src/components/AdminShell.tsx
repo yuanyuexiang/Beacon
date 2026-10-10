@@ -27,10 +27,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
-    if (path === "/login") return;
+    if (["/login", "/terms", "/privacy"].includes(path)) return;
     api<{ username: string }>("/api/auth/me").then((m) => setMe(m.username)).catch(() => router.replace("/login"));
   }, [path, router]);
-  if (path === "/login") return <>{children}</>;
+  if (["/login", "/terms", "/privacy"].includes(path)) return <>{children}</>;
   const section = path.startsWith("/leads") ? "/leads" : path.startsWith("/tasks") ? "/tasks" : path.startsWith("/settings") ? "/settings" : "/";
   const crumbs = [{ title: <Link href="/">首页</Link> }, { title: TITLES[section] }];
   if (path.startsWith("/leads/") && path !== "/leads") crumbs.push({ title: "线索详情" });

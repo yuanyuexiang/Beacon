@@ -35,6 +35,8 @@ def pytest_configure() -> None:
         "BEACON_ANTHROPIC_API_KEY",
         "BEACON_COMPANIES_HOUSE_API_KEY",
         "BEACON_EXA_API_KEY",
+        "BEACON_GOOGLE_PLACES_API_KEY",
+        "BEACON_GOOGLE_PLACES_PROXY",
         "DEEPSEEK_API_KEY",
         "ANTHROPIC_API_KEY",
     ):

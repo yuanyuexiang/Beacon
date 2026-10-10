@@ -31,7 +31,7 @@ export default function SettingsPage() {
         ))}
         <Col xs={24} md={12} xl={8}>
           <Card size="small" style={{ height: "100%", borderTop: `3px solid ${BRAND.red}` }} title="系统边界">
-            <Typography.Paragraph style={{ fontSize: 12, marginBottom: 0 }}>系统不调用任何发送接口。模型结果一律需人工核对；准入状态只能由操作者依据证据设置。评分与排序不代表成交概率。数据来源：FSA（OGL v3）、Overture Maps（CDLA-Permissive-2.0）；不使用 Google Maps 抓取。</Typography.Paragraph>
+            <Typography.Paragraph style={{ fontSize: 12, marginBottom: 0 }}>系统不调用任何发送接口。模型结果一律需人工核对；准入状态只能由操作者依据证据设置。数据来源：FSA（OGL v3）、Overture Maps（CDLA-Permissive-2.0）。Google Places 仅按需查看价格参考与地点照片，人工确认后保存地点 ID；不抓取 Google Maps 网页，不进行 Google 照片转录或样稿生成。</Typography.Paragraph>
           </Card>
         </Col>
       </Row>
