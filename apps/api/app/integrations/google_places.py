@@ -14,7 +14,9 @@ MAX_PHOTO_BYTES = 10 * 1024 * 1024
 PLACE_ID = re.compile(r"^[A-Za-z0-9_-]{1,256}\Z")
 PHOTO_NAME = re.compile(r"^places/([A-Za-z0-9_-]{1,256})/photos/[A-Za-z0-9_-]{1,2048}\Z")
 SEARCH_FIELDS = "places.id,places.displayName,places.formattedAddress,places.googleMapsUri,places.attributions"
-DETAIL_FIELDS = "id,displayName,formattedAddress,googleMapsUri,businessStatus,priceLevel,priceRange,photos,attributions"
+DETAIL_FIELDS = (
+    "id,displayName,formattedAddress,googleMapsUri,businessStatus,priceLevel,priceRange,photos,attributions,websiteUri"
+)
 
 
 class PlacesError(ValueError):
@@ -98,11 +100,28 @@ class Place(BaseModel):
     displayName: LocalizedText = Field(default_factory=LocalizedText)
     formattedAddress: str | None = None
     googleMapsUri: str | None = None
+    websiteUri: str | None = None
     businessStatus: str | None = None
     priceLevel: str | None = None
     priceRange: PriceRange | None = None
     photos: list[Photo] = Field(default_factory=list, max_length=10)
     attributions: list[ProviderAttribution] = Field(default_factory=list)
+
+    @field_validator("websiteUri")
+    @classmethod
+    def safe_website(cls, v: str | None) -> str | None:
+        if not v:
+            return None
+        from app.integrations.fetcher import FetchBlocked, check_url
+
+        try:
+            check_url(v, resolve=False)
+            u = urlsplit(v)
+            if u.username or u.password or len(v) > 512:
+                return None
+            return v
+        except (FetchBlocked, ValueError):
+            return None
 
     @field_validator("googleMapsUri")
     @classmethod

@@ -49,6 +49,7 @@ def health_db() -> dict:
 api.include_router(core_router)
 protected = APIRouter(prefix="/api", dependencies=[Depends(current_operator)])
 from app.modules.content.routes import router as content_router  # noqa: E402
+from app.modules.leads.auto_research import router as auto_research_router  # noqa: E402
 from app.modules.leads.google_places import router as google_places_router  # noqa: E402
 from app.modules.leads.routes import router as leads_router  # noqa: E402
 from app.modules.leads.website_search import router as website_search_router  # noqa: E402
@@ -56,6 +57,7 @@ from app.modules.menus.routes import router as menus_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
 protected.include_router(leads_router)
+protected.include_router(auto_research_router)
 protected.include_router(website_search_router)
 protected.include_router(google_places_router)
 protected.include_router(menus_router)

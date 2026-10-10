@@ -109,3 +109,13 @@ python3 scripts/render_sample.py data/records/sample_<FHRSID>.spec.json --out da
 | 演练库 | 完成后删除 |
 
 限制：演练在开发库上进行，数据量小；生产恢复需先停 API，并按 `docs/操作手册.md` 第 11 节执行。
+
+## D45 单家 AI 自动研究验收（2026-10-11）
+
+本轮以 THE COLLEGE BAR AND DELI（9 Alford Place, Aberdeen AB10 1YD）做探索，不改写真实门店记录。单家被重复用于调整提示和排除社媒候选，不能视为独立验收集。模型为已配置的 DeepSeek `deepseek-flash`，证据提示版本 `research-2`；Google 价格与照片未送模型。
+
+最终隔离数据库运行 `0b1db81dddf94009b4cb2d22f4cf4744` 从 `http://www.pbdevco.com` 起步，通过集团场馆页发现 `https://www.thecollegebar.co.uk/`，核对同页完整门牌/街道、邮编与引用后自动采用。发现 6 个菜单候选：饮品 PDF 和 Buffet PDF 自动确认、保存及分析；优惠 PDF 与优惠网页因日期不明留复核；菜单索引页没有实际菜单内容留复核；一张图片转录证据不足记失败。2/6 自动接入不能当成菜单覆盖率：分母含索引页、图片及重复类型。饮品规则结果 22 条、Buffet 2 条，均 needs_review，不能宣称提取完整。
+
+该最终运行约 80.2 秒，记录 9 次模型响应/转录用量：输入 29,864 token、输出 1,946 token（含一次视觉证据转录及引用修正）；现金费用未计算，以模型平台账单为准。早期探索调用另计，不纳入此单次结果。运行 JSON 与菜单文件保存在受控数据目录 `records/college-ai-2026-10-11/`；隔离数据库已删除，真实门店未被写入。
+
+界面用另一隔离库和模拟 Places/判断器验证：一键启动、运行进度、官网与编辑框刷新、自动 PDF 获取和分析、复核理由展示。此界面验证不能代替真实模型质量验证。后端 209 测试通过，Ruff 格式/检查与 mypy 通过，前端类型检查、5 测试与生产构建通过，Docker api/web 重建。10 家冻结样本及批量入口尚未完成。

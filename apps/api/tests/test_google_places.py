@@ -259,3 +259,59 @@ def test_photo_bytes_no_store_and_no_disk(client, db, monkeypatch, tmp_path):
     assert r.status_code == 200 and r.content == b"synthetic-image"
     assert "no-store" in r.headers["cache-control"] and "image/jpeg" in r.headers["content-type"]
     assert not list(tmp_path.iterdir())
+
+
+def test_google_website_requires_review_and_preserves_history(client, db, monkeypatch):
+    monkeypatch.setitem(PLACE, "websiteUri", "https://new-restaurant.example/menu")
+    lead_id = setup(client, db, monkeypatch)
+    client.patch(f"/api/leads/{lead_id}", json={"website": "https://old.example", "website_source": "Overture"})
+    lead = db.get(Lead, lead_id)
+    lead.raw = {**lead.raw, "contacts_scan": {"website": "https://old.example"}}
+    db.commit()
+    assert confirm(client, lead_id, search(client, lead_id)).status_code == 200
+    token = client.post(f"/api/leads/{lead_id}/google-places/details").json()["website_token"]
+    db.expire_all()
+    assert db.get(Lead, lead_id).website == "https://old.example"
+    body = {
+        "token": token,
+        "address_checked": True,
+        "official_checked": True,
+        "evidence": "Address and operator checked",
+    }
+    url = f"/api/leads/{lead_id}/google-places/website-confirm"
+    assert client.post(url, json={**body, "official_checked": False}).status_code == 400
+    assert client.post(url, json={**body, "evidence": " "}).status_code == 400
+    assert client.post(url, json={**body, "token": token + "x"}).status_code == 409
+    r = client.post(url, json=body)
+    assert r.status_code == 200 and r.json()["refresh_required"] == ["menus", "contacts"]
+    db.expire_all()
+    lead = db.get(Lead, lead_id)
+    assert lead.website == "https://new-restaurant.example/menu"
+    assert lead.raw["website_confirmation"]["old_website"] == "https://old.example"
+    assert lead.raw["existing"] == "kept" and "contacts_scan" not in lead.raw
+    assert client.post(url, json=body).status_code == 409
+
+
+@pytest.mark.parametrize("change", ["website", "expiry", "unlink"])
+def test_google_website_rejects_stale_state(client, db, monkeypatch, change):
+    monkeypatch.setitem(PLACE, "websiteUri", "https://new.example")
+    lead_id = setup(client, db, monkeypatch)
+    link = confirm(client, lead_id, search(client, lead_id)).json()
+    token = client.post(f"/api/leads/{lead_id}/google-places/details").json()["website_token"]
+    if change == "website":
+        client.patch(f"/api/leads/{lead_id}", json={"website": "https://edited.example"})
+    elif change == "expiry":
+        future = time.time() + 1000
+        monkeypatch.setattr(routes.time, "time", lambda: future)
+    else:
+        client.post(f"/api/leads/{lead_id}/google-places/unlink", json={"expected_version": link["version"]})
+    r = client.post(
+        f"/api/leads/{lead_id}/google-places/website-confirm",
+        json={"token": token, "address_checked": True, "official_checked": True, "evidence": "checked"},
+    )
+    assert r.status_code == 409
+
+
+@pytest.mark.parametrize("url", ["http://127.0.0.1", "javascript:alert(1)", "https://user:password@restaurant.example"])
+def test_google_website_disallows_private_and_credentials(url):
+    assert google.Place.model_validate({**PLACE, "websiteUri": url}).websiteUri is None

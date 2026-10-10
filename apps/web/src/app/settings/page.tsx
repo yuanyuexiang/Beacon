@@ -5,7 +5,7 @@ import { BRAND, HeroBand } from "@/components/ui";
 
 const FLOW = [
   { icon: <ShopOutlined />, title: "建名单", text: "批次与线索 → 新建批次 → 从 FSA 建立候选（地方当局、抽样数、种子）→ Overture 补官网 → 规则预筛。" },
-  { icon: <FileProtectOutlined />, title: "菜单证据", text: "线索详情 → 抓取菜单 URL 或上传文件 → 规则分析 / 模型转录 → 逐条核对、确认问题 → 完成审核。" },
+  { icon: <FileProtectOutlined />, title: "菜单证据", text: "线索详情 → AI 自动补全官网与菜单（异常复核），或手动抓取 / 上传 → 分析 → 逐条核对名称价格、确认问题 → 完成审核。" },
   { icon: <AuditOutlined />, title: "样稿与文案", text: "生成局部样稿与短文案（只引用已确认问题）→ 审批；内容或源数据变化会使审批失效。" },
   { icon: <SafetyCertificateOutlined />, title: "准入与任务", text: "记录渠道准入（allowed 必须有证据与规则版本）→ 创建任务 → 打开 → 人工发送后回填。" },
   { icon: <SendOutlined />, title: "回复与抑制", text: "回复事件按 event_key 幂等；回复暂停任务，拒绝/退订进入抑制名单并取消任务。" },
@@ -31,7 +31,7 @@ export default function SettingsPage() {
         ))}
         <Col xs={24} md={12} xl={8}>
           <Card size="small" style={{ height: "100%", borderTop: `3px solid ${BRAND.red}` }} title="系统边界">
-            <Typography.Paragraph style={{ fontSize: 12, marginBottom: 0 }}>系统不调用任何发送接口。模型结果一律需人工核对；准入状态只能由操作者依据证据设置。数据来源：FSA（OGL v3）、Overture Maps（CDLA-Permissive-2.0）。Google Places 仅按需查看价格参考与地点照片，人工确认后保存地点 ID；不抓取 Google Maps 网页，不进行 Google 照片转录或样稿生成。</Typography.Paragraph>
+            <Typography.Paragraph style={{ fontSize: 12, marginBottom: 0 }}>系统不调用任何发送接口。官网与菜单来源可由 AI + 程序证据校验自动处理；菜单名称、价格和问题仍需人工核对；准入状态只能由操作者依据证据设置。数据来源：FSA（OGL v3）、Overture Maps（CDLA-Permissive-2.0）。Google Places 按需补充官网候选、价格参考与地点照片；门店关联人工确认，官网可经 AI + 程序校验采用；不抓取 Google Maps 网页，不进行 Google 照片转录或样稿生成。</Typography.Paragraph>
           </Card>
         </Col>
       </Row>

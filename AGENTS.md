@@ -13,7 +13,7 @@ Beacon 是餐厅菜单销售线索工具。T0/T1 技术探索已完成（`plan/e
 - `plan/validation-report-v1.md`：V 第一批 50 家的漏斗、提取质量、成本与工具问题。
 - `plan/model-eval-v1.md`：DeepSeek 转录评测（准确率、观察精确率、成本）。
 - `apps/web/public/brand/`：客户（南京小当家文化咨询有限公司）官网的 logo 与主视觉，仅用于客户自己的内部工作台；主题色红 #cf010e、金 #fab736 取自官网。
-- 名单来源：`app/integrations/fsa.py`（FSA API）、`app/integrations/overture.py`（Overture Places，缓存在数据目录）；不使用 Google Maps 抓取；Google Places 官方 API 作为单家人工确认后的可选实时补充（D41），只保存 Place ID 与审核元数据。
+- 名单来源：`app/integrations/fsa.py`（FSA API）、`app/integrations/overture.py`（Overture Places，缓存在数据目录）；不使用 Google Maps 抓取；Google Places 官方 API 作为单家人工确认后的可选实时补充（D41），价格与照片不持久化；D44 允许经人工核对采用官网 URL，官网菜单发现复用现有抓取与分析，不依赖 Google 登录。
 - `plan/tasks.md`、`plan/decisions.md`：任务进度与决策记录。
 - `scripts/`：抽样、抓取、探针、提取、样稿渲染脚本；`templates/`：样稿模板；`data/`：受控数据（gitignore）。
 - `reports/`：综合研究报告。
@@ -83,3 +83,5 @@ Docker 全套（已实测）：`cp infra/.env.example infra/.env && docker compo
 开展功能工作前，阅读 `CLAUDE.md`、产品方案和路线图。开始或完成跟踪任务时，更新任务复选框与进度；确定的设计选择记录到 `plan/decisions.md`。
 
 先做技术探索，再开发工具；销售验证独立推进。流程获认可不代表获准联系潜在客户。保留工作区中与当前任务无关的改动。
+
+D45：单家 AI 自动补全允许真实 DeepSeek + 程序证据校验自动采用官网、导入菜单并生成待审核分析，异常才人工复核；Fake 不允许自动采用。原人工路径保留，Google 价格/照片不送模型，渠道与内容审批不变。API 后台任务首版仅支持单 worker；重启后手动重跑，hash 去重与既有审核保留。

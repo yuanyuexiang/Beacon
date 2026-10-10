@@ -75,6 +75,14 @@ class PlacesDetailsOut(BaseModel):
     photos: list[PlacesPhotoOut]
     fetched_at: str
     expires_at: str
+    website_token: str | None = None
+
+
+class PlacesWebsiteIn(BaseModel):
+    token: str = Field(min_length=1, max_length=8192)
+    address_checked: bool
+    official_checked: bool
+    evidence: str = Field(min_length=1, max_length=1500)
 
 
 class PlacesTokenIn(BaseModel):
@@ -297,7 +305,64 @@ def details(
     # 不将原始照片资源名纳入输出 place；短期引用只随当前响应返回。
     place.photos = []
     fetched, expires = _freshness()
-    return {"place": place, "photos": photos, "fetched_at": fetched, "expires_at": expires}
+    return {
+        "place": place,
+        "photos": photos,
+        "fetched_at": fetched,
+        "expires_at": expires,
+        "website_token": _token(
+            lead, op, "website", json.dumps({"url": place.websiteUri, "expected_website": lead.website})
+        )
+        if place.websiteUri
+        else None,
+    }
+
+
+@router.post("/leads/{lead_id}/google-places/website-confirm")
+def confirm_website(
+    lead_id: uuid.UUID, body: PlacesWebsiteIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    if not body.address_checked or not body.official_checked or not body.evidence.strip():
+        raise HTTPException(400, "须核对门店地址、商家运营方并填写依据", headers=NO_STORE)
+    lead = _lead(db, lead_id, lock=True)
+    value = json.loads(_parse(body.token, lead, op, "website"))
+    link = _link(lead)
+    if not link:
+        raise HTTPException(409, "Google 关联已解除", headers=NO_STORE)
+    if lead.website != value["expected_website"]:
+        raise HTTPException(409, "官网已被修改，请重新查看 Google 信息并核对", headers=NO_STORE)
+    before = {"website": lead.website, "website_source": lead.website_source}
+    lead.website = value["url"]
+    lead.website_source = "Google Places，人工核对"
+    raw = dict(lead.raw or {})
+    raw.pop("contacts_scan", None)
+    raw["website_confirmation"] = {
+        "provider": "google_places",
+        "place_id": link["place_id"],
+        "old_website": before["website"],
+        "candidate_url": lead.website,
+        "reviewed_by": op.username,
+        "reviewed_at": datetime.now(UTC).isoformat(),
+        "evidence": body.evidence.strip(),
+        "address_checked": True,
+        "official_checked": True,
+    }
+    lead.raw = raw
+    audit.record(
+        db,
+        op,
+        "confirm_website",
+        "lead",
+        lead_id,
+        before=before,
+        after={
+            "website": lead.website,
+            "website_source": lead.website_source,
+            "confirmation": raw["website_confirmation"],
+        },
+    )
+    db.commit()
+    return {"website": lead.website, "refresh_required": ["menus", "contacts"]}
 
 
 @router.post("/leads/{lead_id}/google-places/photo")

@@ -49,7 +49,7 @@ function GooglePhoto({ leadId, photo, expired }: { leadId: string; photo: Places
   </Card>;
 }
 
-export default function GooglePlaces({ id, name, address, postcode }: { id: string; name: string; address: string | null; postcode: string | null }) {
+export default function GooglePlaces({ id, name, address, postcode, website, onWebsiteChanged }: { id: string; name: string; address: string | null; postcode: string | null; website: string | null; onWebsiteChanged: () => Promise<void> }) {
   const [state, setState] = useState<PlacesState | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
@@ -60,6 +60,10 @@ export default function GooglePlaces({ id, name, address, postcode }: { id: stri
   const [picked, setPicked] = useState<PlacesCandidate | null>(null);
   const [addressChecked, setAddressChecked] = useState(false);
   const [branchChecked, setBranchChecked] = useState(false);
+  const [websiteOpen, setWebsiteOpen] = useState(false);
+  const [officialChecked, setOfficialChecked] = useState(false);
+  const [websiteAddressChecked, setWebsiteAddressChecked] = useState(false);
+  const [websiteEvidence, setWebsiteEvidence] = useState("");
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     let active = true;
@@ -99,6 +103,13 @@ export default function GooglePlaces({ id, name, address, postcode }: { id: stri
     await api(`/api/leads/${id}/google-places/unlink`, json({ expected_version: state?.link?.version }));
     setState((s) => s && { ...s, link: null }); setDetails(null); setLookup(null);
   });
+  const adoptWebsite = () => run(async () => {
+    if (!details?.website_token) return;
+    await api(`/api/leads/${id}/google-places/website-confirm`, json({ token: details.website_token, address_checked: websiteAddressChecked, official_checked: officialChecked, evidence: websiteEvidence }));
+    setWebsiteOpen(false); setDetails(null);
+    await onWebsiteChanged();
+    message.success("官网已更新，请重新查找官网菜单和联系方式");
+  });
   const searchExpired = !!lookup && new Date(lookup.expires_at).getTime() <= now;
   const photoExpired = !!details && new Date(details.expires_at).getTime() <= now;
   const p = details?.place;
@@ -112,7 +123,18 @@ export default function GooglePlaces({ id, name, address, postcode }: { id: stri
       {state?.link && <><Button loading={busy} disabled={!state.configured} onClick={view}>查看最新信息</Button><Popconfirm title="解除 Google 门店关联？" onConfirm={unlink}><Button disabled={busy}>解除关联</Button></Popconfirm></>}
     </Space>
     {state?.link && <Typography.Paragraph type="secondary" style={{ marginTop: 10, marginBottom: 0 }}>已关联 · {state.link.reviewed_by} 于 {new Date(state.link.reviewed_at).toLocaleString("zh-CN")} 核对</Typography.Paragraph>}
+    <Modal title="确认采用 Google 返回的官网" open={websiteOpen} onCancel={() => setWebsiteOpen(false)} onOk={adoptWebsite} confirmLoading={busy} okText="采用官网" okButtonProps={{ disabled: !officialChecked || !websiteAddressChecked || !websiteEvidence.trim() || photoExpired }}>
+      <Typography.Paragraph>原官网：{website || "未登记"}</Typography.Paragraph>
+      <Typography.Paragraph>候选：<a href={p?.websiteUri || undefined} target="_blank" rel="noreferrer">{p?.websiteUri}</a></Typography.Paragraph>
+      <Space direction="vertical">
+        <Checkbox checked={websiteAddressChecked} onChange={(e) => setWebsiteAddressChecked(e.target.checked)}>我已核对门店地址及分店</Checkbox>
+        <Checkbox checked={officialChecked} onChange={(e) => setOfficialChecked(e.target.checked)}>我已确认页面由该商家运营</Checkbox>
+        <Input.TextArea value={websiteEvidence} onChange={(e) => setWebsiteEvidence(e.target.value)} maxLength={1500} placeholder="填写地址、门店或经营者核对依据" />
+      </Space>
+    </Modal>
     {p && <div style={{ padding: 16, marginTop: 16, border: "1px solid #dadce0", borderRadius: 8, background: "#fff" }}>
+      <Typography.Paragraph>当前官网：{website ? <a href={website} target="_blank" rel="noreferrer">{website}</a> : "未登记"}</Typography.Paragraph>
+      <Typography.Paragraph>Google 官网候选：{p.websiteUri ? <Space wrap><a href={p.websiteUri} target="_blank" rel="noreferrer">{p.websiteUri}</a>{p.websiteUri !== website ? <Button disabled={busy || photoExpired} onClick={() => { setOfficialChecked(false); setWebsiteAddressChecked(false); setWebsiteEvidence(""); setWebsiteOpen(true); }}>核对并采用官网</Button> : <Typography.Text type="secondary">与当前官网一致</Typography.Text>}</Space> : "未提供"}</Typography.Paragraph>
       <Descriptions size="small" column={{ xs: 1, md: 2 }} items={[
         { key: "name", label: "Google 门店", children: p.displayName?.text ?? "未知" },
         { key: "address", label: "地址", children: p.formattedAddress ?? "未知" },

@@ -10,7 +10,9 @@ from app.core import audit
 from app.core.auth import current_operator
 from app.core.db import get_db
 from app.core.models import Operator
+from app.integrations import website_menus
 from app.integrations.llm import ProviderUnavailable
+from app.modules.leads.entity import site_fetch
 from app.modules.leads.models import Lead
 from app.modules.menus import review, service
 from app.modules.menus.models import MenuAnalysis, MenuAsset
@@ -28,6 +30,21 @@ def _lead_or_404(db: Session, lead_id: uuid.UUID) -> Lead:
     if lead is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "线索不存在")
     return lead
+
+
+@router.post("/leads/{lead_id}/menu-candidates")
+def menu_candidates(
+    lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    lead = _lead_or_404(db, lead_id)
+    website = lead.website
+    if not website:
+        raise HTTPException(400, "请先确认餐厅官网")
+    result = website_menus.discover(website, site_fetch())
+    db.refresh(lead)
+    if lead.website != website:
+        raise HTTPException(409, "官网已改变，请重新查找菜单")
+    return result
 
 
 @router.post("/leads/{lead_id}/assets", response_model=AssetOut, status_code=201)

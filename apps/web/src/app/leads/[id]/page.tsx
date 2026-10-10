@@ -7,6 +7,8 @@ import { channelLabel, approvalText, label } from "@/lib/format";
 import { HeroBand, SCREEN_ZH, ScreenTag } from "@/components/ui";
 import { Steps } from "antd";
 import WebsiteSearch from "@/components/WebsiteSearch";
+import AutoResearch from "@/components/AutoResearch";
+import WebsiteMenus from "@/components/WebsiteMenus";
 import GooglePlaces from "@/components/GooglePlaces";
 
 type Lead = { id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
@@ -126,7 +128,8 @@ export default function LeadDetail() {
           </div>
         </Form>
       </Card>
-      <GooglePlaces key={id} id={id} name={lead.name} address={lead.address} postcode={lead.postcode} />
+      <AutoResearch key={`auto-${id}`} id={id} onFinished={async () => { const updated = await api<Lead>(`/api/leads/${id}`); form.setFieldsValue({ website: updated.website }); setContactLookup(null); setContactPicked([]); await reload(); }} />
+      <GooglePlaces key={id} id={id} name={lead.name} address={lead.address} postcode={lead.postcode} website={lead.website} onWebsiteChanged={async () => { setContactLookup(null); setContactPicked([]); const updated = await api<Lead>(`/api/leads/${id}`); form.setFieldsValue({ website: updated.website }); await reload(); }} />
       <Modal title="Companies House 主体候选" open={entityOpen} onCancel={() => setEntityOpen(false)} footer={null} width={1080}>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>{entityLookup?.notice ?? "候选仅供人工核对。"}采用后只填入表单，核对后点“保存”才生效。</Typography.Paragraph>
         <Input.Search key={entityLookup?.query ?? lead.name} defaultValue={entityLookup?.query ?? lead.name} placeholder="店名，或官网页脚 / 隐私政策里的公司名" enterButton="按名称检索" loading={entityLoading} onSearch={(v) => v.trim() && searchEntity(v.trim())} style={{ marginBottom: 12 }} />
@@ -199,6 +202,7 @@ export default function LeadDetail() {
 
       <Card size="small" title="菜单文件" style={{ marginBottom: 16 }} extra={
         <Space>
+          <WebsiteMenus id={id} website={lead.website} onAdded={reload} />
           <Form layout="inline" onFinish={(v) => api(`/api/leads/${id}/assets`, json(v)).then(reload).catch(err)}>
             <Form.Item name="url" rules={[{ required: true }]}><Input placeholder="人工核对过的菜单 URL" style={{ width: 320 }} /></Form.Item>
             <Button htmlType="submit">抓取</Button>
