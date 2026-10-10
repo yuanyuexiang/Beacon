@@ -37,10 +37,24 @@ export const CHANNEL_LABEL: Record<string, string> = {
   instagram: "Instagram",
   facebook: "Facebook",
   tiktok: "TikTok",
-  other_social: "其他社媒",
+  other_social: "社交平台",
   contact_form: "联系表单",
   post: "邮寄",
 };
+
+export function channelLabel(channel: string, contactRef?: string | null): string {
+  if (channel !== "other_social") return CHANNEL_LABEL[channel] ?? channel;
+  try {
+    const host = new URL(contactRef ?? "").hostname.toLowerCase().replace(/^www\./, "");
+    const platforms: Record<string, string> = { "x.com": "X", "twitter.com": "X", "linkedin.com": "LinkedIn", "youtube.com": "YouTube", "youtu.be": "YouTube" };
+    for (const [domain, name] of Object.entries(platforms)) {
+      if (host === domain || host.endsWith(`.${domain}`)) return name;
+    }
+    return host || "平台待确认";
+  } catch {
+    return "平台待确认";
+  }
+}
 
 export function label(s: string | null | undefined): string {
   if (!s) return "-";

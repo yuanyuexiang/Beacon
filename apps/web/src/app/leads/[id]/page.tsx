@@ -3,7 +3,7 @@ import { Button, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popco
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
-import { CHANNEL_LABEL, approvalText, label } from "@/lib/format";
+import { channelLabel, approvalText, label } from "@/lib/format";
 import { HeroBand, SCREEN_ZH, ScreenTag } from "@/components/ui";
 import { Steps } from "antd";
 import WebsiteSearch from "@/components/WebsiteSearch";
@@ -164,8 +164,9 @@ export default function LeadDetail() {
       </Modal>
 
       <Card size="small" title="联系方式" style={{ marginBottom: 16 }} extra={<Button onClick={searchContacts}>查找联系方式</Button>}>
+        {!eligs.some((e) => e.channel === "email") && <Typography.Paragraph type="secondary">尚未记录邮箱，不代表官网没有邮箱。点击“查找联系方式”查看邮箱候选并勾选记录；同一类型超过 5 项时，批量查找会留待人工核对。</Typography.Paragraph>}
         <Table<Elig> rowKey="id" size="small" pagination={false} dataSource={eligs} locale={{ emptyText: "尚未记录联系方式。点“查找联系方式”从官网和 Overture 数据里找" }} columns={[
-          { title: "渠道", width: 110, render: (_, e) => CHANNEL_LABEL[e.channel] ?? e.channel },
+          { title: "渠道", width: 110, render: (_, e) => channelLabel(e.channel, e.contact_ref) },
           { title: "联系值", render: (_, e) => e.contact_ref ? (contactHref(e.channel, e.contact_ref) ? <a href={contactHref(e.channel, e.contact_ref)} target="_blank" rel="noreferrer">{e.contact_ref}</a> : e.contact_ref) : "-" },
           { title: "来源", dataIndex: "contact_source", ellipsis: true },
           { title: "可用", width: 80, render: (_, e) => label(e.contact_usable) },
@@ -178,7 +179,7 @@ export default function LeadDetail() {
         {contactLookup && !contactLoading && (() => {
           const web = contactLookup.website;
           const okPages = web?.pages.filter((p) => p.ok).length ?? 0;
-          return <Typography.Paragraph style={{ marginBottom: 8 }} type={web && !okPages ? "warning" : undefined}>官网：{web ? (okPages ? `读取 ${okPages} 个页面` : `抓取失败（${web.pages[0]?.error ?? "无页面"}）`) : "未登记"}；共找到 {contactLookup.candidates.length} 项</Typography.Paragraph>;
+          return <Typography.Paragraph style={{ marginBottom: 8 }} type={web && !okPages ? "warning" : undefined}>官网：{web ? (okPages ? `读取 ${okPages} 个页面` : `抓取失败（${web.pages[0]?.error ?? "无页面"}）`) : "未登记"}；共找到 {contactLookup.candidates.length} 项，其中邮箱 {contactLookup.candidates.filter((c) => c.kind === "email").length} 项。勾选后点击“记录所选”才会加入下方渠道表。</Typography.Paragraph>;
         })()}
         <Table<ContactCandidate> rowKey={contactKey} size="small" pagination={false} loading={contactLoading} dataSource={contactLookup?.candidates ?? []} scroll={{ y: 420 }}
           locale={{ emptyText: "没有找到联系方式" }}

@@ -368,3 +368,40 @@ def test_failed_contact_pages_are_retryable_and_keep_successful_contacts(
     assert all(e["eligibility"] == "unknown" and e["contact_usable"] == "unknown" for e in after)
     again = client.post("/api/batches/b1/runs", json={"steps": ["contacts"]}).json()
     assert again["jobs"] == []  # 完整成功后不再重复查找
+
+
+def test_long_email_list_selects_homepage_general_contact(client, db):
+    import uuid
+
+    lead_id = _lead_id(client, db)
+    lead = db.get(Lead, uuid.UUID(lead_id))
+    entries = [
+        {"kind": "email", "value": "enquiries@vesper.example", "page_url": SITE},
+        {"kind": "email", "value": "press@vesper.example", "page_url": SITE},
+        {"kind": "email", "value": "info@other.example", "page_url": SITE},
+        *[
+            {"kind": "email", "value": f"media{i}@vesper.example", "page_url": SITE + "/contact/media"}
+            for i in range(6)
+        ],
+    ]
+    scan = {"url": SITE, "pages": [{"url": SITE, "ok": True}], "contacts": entries}
+    result = contacts.collect(db, lead, scan)
+    db.commit()
+    rows = client.get(f"/api/leads/{lead_id}/eligibility").json()
+    assert [(r["channel"], r["contact_ref"], r["eligibility"]) for r in rows] == [
+        ("email", "enquiries@vesper.example", "unknown")
+    ]
+    assert result["held_for_review"] == 8
+    assert (
+        contacts.homepage_emails(
+            [
+                {
+                    "kind": "email",
+                    "value": "info@vesper.example",
+                    "sources": [{"type": "website", "ref": SITE + "/media"}],
+                }
+            ],
+            SITE,
+        )
+        == set()
+    )

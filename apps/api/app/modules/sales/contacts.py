@@ -140,6 +140,45 @@ def record_contacts(db: Session, lead_id: uuid.UUID, items: list[dict[str, Any]]
 MAX_AUTO_PER_KIND = 5  # 官网上同一类型超过这个数，多半是分店列表或第三方信息，批量时不自动记录
 
 
+def homepage_emails(candidates: list[dict[str, Any]], website: str | None) -> set[str]:
+    """长列表中优先选官网首页直接公开的通用联系邮箱，不采用媒体/其他机构邮箱。"""
+    if not website:
+        return set()
+    home = urlparse(website)
+    host = (home.hostname or "").removeprefix("www.")
+    generic = {
+        "info",
+        "hello",
+        "contact",
+        "enquiries",
+        "enquiry",
+        "inquiries",
+        "bookings",
+        "booking",
+        "reservations",
+        "reservation",
+        "office",
+        "restaurant",
+    }
+    selected = set()
+    for c in candidates:
+        if c["kind"] != "email":
+            continue
+        local, _, domain = c["value"].partition("@")
+        if local not in generic or domain != host:
+            continue
+        for source in c["sources"]:
+            page = urlparse(source["ref"])
+            if (
+                source["type"] == "website"
+                and (page.hostname or "").removeprefix("www.") == host
+                and page.path.rstrip("/") == home.path.rstrip("/")
+                and page.query == home.query
+            ):
+                selected.add(c["value"])
+    return selected if len(selected) <= MAX_AUTO_PER_KIND else set()
+
+
 def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None) -> dict[str, Any]:
     """批量模式：查找并自动记录联系方式（仍是 unknown/unknown，不放行）。跳过已记录与在抑制名单里的；
     官网上同一类型候选过多时只记 Overture 也有的，其余留给人工在详情页勾选。结果摘要写入 lead.raw.contacts_scan。"""
@@ -147,12 +186,14 @@ def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None)
     by_kind: dict[str, int] = {}
     for c in found["candidates"]:
         by_kind[c["kind"]] = by_kind.get(c["kind"], 0) + 1
+    preferred_emails = homepage_emails(found["candidates"], lead.website)
     items, held = [], 0
     for c in found["candidates"]:
         if c["recorded"] or c["suppressed"]:
             continue
         types = [s["type"] for s in c["sources"]]
-        if by_kind[c["kind"]] > MAX_AUTO_PER_KIND and "overture" not in types:
+        preferred = c["kind"] == "email" and c["value"] in preferred_emails
+        if by_kind[c["kind"]] > MAX_AUTO_PER_KIND and "overture" not in types and not preferred:
             held += 1
             continue
         source = "；".join(f"官网 {s['ref']}" if s["type"] == "website" else s["ref"] for s in c["sources"])
