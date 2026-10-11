@@ -55,7 +55,7 @@ export default function LoginPage() {
 
         <div className="brand-foot" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, fontSize: 12, color: "rgba(255,255,255,0.6)" }}>
           <div>全球业务分布：{REGIONS.join(" · ")}</div>
-          <div>数据来源 FSA（OGL v3）· Overture Maps · 不使用地图抓取</div>
+          <div>名单来源 FSA（OGL v3）· Overture Maps · 菜单来源另行记录</div>
         </div>
       </section>
 

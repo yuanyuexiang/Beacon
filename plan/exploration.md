@@ -119,3 +119,24 @@ python3 scripts/render_sample.py data/records/sample_<FHRSID>.spec.json --out da
 该最终运行约 80.2 秒，记录 9 次模型响应/转录用量：输入 29,864 token、输出 1,946 token（含一次视觉证据转录及引用修正）；现金费用未计算，以模型平台账单为准。早期探索调用另计，不纳入此单次结果。运行 JSON 与菜单文件保存在受控数据目录 `records/college-ai-2026-10-11/`；隔离数据库已删除，真实门店未被写入。
 
 界面用另一隔离库和模拟 Places/判断器验证：一键启动、运行进度、官网与编辑框刷新、自动 PDF 获取和分析、复核理由展示。此界面验证不能代替真实模型质量验证。后端 209 测试通过，Ruff 格式/检查与 mypy 通过，前端类型检查、5 测试与生产构建通过，Docker api/web 重建。10 家冻结样本及批量入口尚未完成。
+
+## D46 单家 Maps 工作台验收（2026-10-11）
+
+从工作台按钮真实执行，独立随机 QA 数据库中建立 College Bar 公开门店夹具，使用本机专用 profile 和真实 Maps/DeepSeek；未写真实线索。运行 f0de9c19080642a2b2297ed4b22dc470 成功获取 1 张 2976×3968 的菜单图片（455,188 bytes），真实转录 19 条候选、7 个未审核问题，状态 needs_review。模型输入 1,335 / 输出 1,248 tokens，cache hit 128；现金费用以服务商账单为准。图片仅当前菜单区一张，不宣称完整覆盖或准确率。产物在受控 data/records/maps-ui-qa-2026-10-11/report.json 及 evidence 目录。
+
+真实页面地址显示“9 Alford Pl”，登记为“9 Alford Place”，最初安全拒收；补上常见街道缩写等价后验证通过，并用 9/99 门牌号负例防止子串误匹配。界面已验证：按钮可见、等待/运行状态、来源原图、日期未知、去重结果及待审核分析自动刷新。未点击完成审核，未发送任何联系。已配置本机执行器密钥并部署 API/web；专用执行器需保持运行，电脑重启后重新启动。
+
+会话验证：用户在专用自动化 Chrome 的 Google 登录被拒，随后未登录却能看到菜单；复用该 profile 的有界面模式成功。全新 profile 的有界面与无头模式均为有限视图（0 张），所以不能以当前成功推出登录必要性或服务器成功率。官方说明列出自动化控制浏览器可能被拒绝登录：[Google 账号帮助](https://support.google.com/accounts/answer/7675428?hl=en)。
+
+后端 225 测试、Ruff 与 mypy 通过；前端 5 测试、类型检查、生产构建通过（2 个已有 img lint 警告）。普通测试无网络/真实模型；真实 UI 验证另跑，隔离 QA 数据库验证后删除，受控报告和文件保留。服务器新会话、多家、多图覆盖率仍待评测。
+
+### D46 门店不一致诊断修正
+
+复现两项真实失败：Your Love Rara 的登记地址为 25 Castle Street / AB11 5BG，Maps 显示 12–14 Justice St / AB11 5HR；Second Home Studio + Cafe CIC 的登记为 Shop, 1 Gaelic Lane / AB10 1JF，Maps 名称为 Gaelic Lane Cafe + Bar、同一街道与邮编。前者实际地址不同，后者品牌名不同，现有证据不足以断言搬迁/更名。补上公司后缀与 Shop 前缀规范化并保留这些真实冲突；失败也记录观测名称/地址、界面显示逐项对照。测试加入以上两个真实文本反例及失败结果记录验证。
+
+上述两次失败任务已在核对 run_id 与当前门店快照后回填本次真实观测及诊断审计；没有改变门店名称/地址/关联、没有导入冲突图片。后端 227 测试与 Ruff/mypy、前端类型检查/构建通过，执行器已重启载入修正。
+
+
+### D46 来源并存实测（2026-10-11）
+
+Your Love Rara 已确认 Place ID `ChIJ8-BNAJkPhEgRDTrJpEscwW8`：原线索地址 25 Castle Street / AB11 5BG 保留；Maps 观测名称 Your Love Rara、地址 12–14 Justice St / AB11 5HR、官网 https://www.yourloveraracic.com/ 独立保存。新流程未因地址差异阻止；本次浏览器返回 menu_unavailable（没有菜单页签），获取 0 张图片，不把缺菜单误判为错店。

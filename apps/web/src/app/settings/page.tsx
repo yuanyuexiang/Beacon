@@ -31,7 +31,7 @@ export default function SettingsPage() {
         ))}
         <Col xs={24} md={12} xl={8}>
           <Card size="small" style={{ height: "100%", borderTop: `3px solid ${BRAND.red}` }} title="系统边界">
-            <Typography.Paragraph style={{ fontSize: 12, marginBottom: 0 }}>系统不调用任何发送接口。官网与菜单来源可由 AI + 程序证据校验自动处理；菜单名称、价格和问题仍需人工核对；准入状态只能由操作者依据证据设置。数据来源：FSA（OGL v3）、Overture Maps（CDLA-Permissive-2.0）。Google Places 按需补充官网候选、价格参考与地点照片；门店关联人工确认，官网可经 AI + 程序校验采用；不抓取 Google Maps 网页，不进行 Google 照片转录或样稿生成。</Typography.Paragraph>
+            <Typography.Paragraph style={{ fontSize: 12, marginBottom: 0 }}>系统不调用任何发送接口。官网与菜单来源可由 AI + 程序证据校验自动处理；菜单名称、价格和问题仍需人工核对；准入状态只能由操作者依据证据设置。数据来源：FSA（OGL v3）、Overture Maps（CDLA-Permissive-2.0）。Google Places 按需补充官网候选、价格参考与地点照片；门店关联人工确认，官网可经 AI + 程序校验采用；测试阶段支持单家从 Google Maps 菜单区获取图片并转录；专用浏览器会话可用性需逐次验证，菜单日期未知时保持未知。</Typography.Paragraph>
           </Card>
         </Col>
       </Row>

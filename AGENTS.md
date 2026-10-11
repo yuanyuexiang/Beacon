@@ -85,3 +85,5 @@ Docker 全套（已实测）：`cp infra/.env.example infra/.env && docker compo
 先做技术探索，再开发工具；销售验证独立推进。流程获认可不代表获准联系潜在客户。保留工作区中与当前任务无关的改动。
 
 D45：单家 AI 自动补全允许真实 DeepSeek + 程序证据校验自动采用官网、导入菜单并生成待审核分析，异常才人工复核；Fake 不允许自动采用。原人工路径保留，Google 价格/照片不送模型，渠道与内容审批不变。API 后台任务首版仅支持单 worker；重启后手动重跑，hash 去重与既有审核保留。
+
+D46（2026-10-11 用户授权例外）：工作台支持单家 Maps 菜单浏览器获取、受控资产及待审核 AI 转录。名单仍来自 FSA/Overture；专用会话不复制日常 Chrome、不自动登录、不批量抓取。执行器命令：`python3 scripts/configure_maps_worker.py` 后重建 API，再运行 `uv run --project apps/api --extra maps-worker python scripts/maps_menu_worker.py --token-file data/browser-profiles/maps-worker.token`。配置、服务器与有限视图限制见 [手册](docs/操作手册.md#google-maps-菜单获取d46)。

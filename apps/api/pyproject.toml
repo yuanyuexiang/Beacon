@@ -19,6 +19,9 @@ dependencies = [
   "pyarrow>=25.0.1",
 ]
 
+[project.optional-dependencies]
+maps-worker = ["playwright==1.63.0"]
+
 [dependency-groups]
 dev = [
   "pytest>=8.3",

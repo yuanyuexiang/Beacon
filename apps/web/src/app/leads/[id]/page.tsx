@@ -9,6 +9,7 @@ import { Steps } from "antd";
 import WebsiteSearch from "@/components/WebsiteSearch";
 import AutoResearch from "@/components/AutoResearch";
 import WebsiteMenus from "@/components/WebsiteMenus";
+import MapsMenu from "@/components/MapsMenu";
 import GooglePlaces from "@/components/GooglePlaces";
 
 type Lead = { id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
@@ -201,7 +202,8 @@ export default function LeadDetail() {
       </Modal>
 
       <Card size="small" title="菜单文件" style={{ marginBottom: 16 }} extra={
-        <Space>
+        <Space wrap>
+          <MapsMenu key={`maps-${id}`} id={id} onAdded={reload} />
           <WebsiteMenus id={id} website={lead.website} onAdded={reload} />
           <Form layout="inline" onFinish={(v) => api(`/api/leads/${id}/assets`, json(v)).then(reload).catch(err)}>
             <Form.Item name="url" rules={[{ required: true }]}><Input placeholder="人工核对过的菜单 URL" style={{ width: 320 }} /></Form.Item>

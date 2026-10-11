@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     google_places_api_key: str | None = Field(default=None, repr=False)
     google_places_proxy: str | None = None  # 显式代理；为空直连，不读取进程代理变量
     google_places_daily_limit: int = Field(default=200, ge=1, le=10000)  # 项目内调用尝试上限，不是费用承诺
+    maps_worker_token: str | None = Field(default=None, min_length=32, repr=False)
     templates_dir: Path = Path(__file__).resolve().parents[4] / "templates"  # <repo>/templates
     chrome_path: Path | None = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")  # 容器内设为空
 

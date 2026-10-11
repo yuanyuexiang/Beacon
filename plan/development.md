@@ -127,3 +127,13 @@ Google Maps 菜单测试例外（D43，2026-10-10 用户明确授权）：单家
 - 证据引用必须是原文子串；错误引用允许 1 次 AI 修正，仍错就失败。模型不得把 PDF 表格列拼成“原文”，不得把文件名/链接元数据当正文日期。菜单自动导入还要求实际文件中的菜单引用及至少两处带 £/€/$ 前缀的价格；优惠日期不明留复核。缺日期不宣称当前有效。
 - 运行间采用文件 hash 去重；已有资产/分析复用，已人工审核的版本保持原审核。新分析一律 needs_review。官网、身份资料及 Google 关联在写入前复核；不持有网络请求期间的门店行锁。
 - 本次不开放批量，不处理 Maps 登录抓取，不改渠道准入，不触达客户。真实模型使用既有 DeepSeek 配置；Fake 不允许生产自动采用。
+
+## D46：工作台 Maps 菜单按钮（2026-10-11）
+
+用户授权将 D43 探针接入单家工作台。菜单文件区增加“从 Google Maps 获取菜单”，弹窗显示进度、来源、日期未知、结果与重试。专用本机执行器主动轮询 API，不对外暴露浏览器控制端口；随机执行器密钥独立于用户登录和 Google API Key。任务在 lead.raw 保存，领取有数据库锁和随机租约，门店名称/地址/邮编/Google 关联改变时阻断导入；单次前 5 张、每张 15 MB，逐张入库并按 hash 去重。执行器断开超过 15 分钟可重试，部分文件保留。
+
+流程：打开 Maps → 核对名称与完整街道/邮编（兼容 THE/AND DELI 与 Pl/Place）→ 语义菜单页签 → 菜单区缩略图 → 大图查看器资源 → 下载 → 服务端再次检查来源与门店 → 入库。仅读取已定位菜单区，不宣称扫描图库全部图片。配置真实 DeepSeek 时，新图片自动转录为 needs_review；已有资产/审核保持原样，未配置时只入库。日期不从文件采集时间推断。当前不开放批量，不执行自动登录或绕过验证码。
+
+Docker API 与宿主机浏览器解耦；Mac 默认复用 data/browser-profiles/maps-menu-test。服务器可运行同一执行器（HTTPS API、Chrome、独立持久化 profile、有界面环境），全新会话/无头模式仍可能有限视图，尚未证明服务器成功率。使用单 API worker：执行器在线心跳为进程内状态；任务及租约持久化，API 重启后执行器重新连接即可领取未开始任务，过期在读取/领取时标记中断。自动分析用 BackgroundTasks，API 中断分析后需重试，已有文件保留。
+
+依赖：可选 maps-worker extra 固定 Playwright 1.63.0（Apache-2.0）；pyee 13.0.1（MIT）、greenlet 3.5.6（MIT/Python Software Foundation 派生说明）。API 容器不安装浏览器。上游许可证：[Playwright](https://github.com/microsoft/playwright-python/blob/v1.63.0/LICENSE)、[pyee](https://github.com/jfhbrook/pyee/blob/main/LICENSE)、[greenlet](https://github.com/python-greenlet/greenlet/blob/master/LICENSE)。

@@ -28,7 +28,7 @@ api = APIRouter(prefix="/api")
 @app.middleware("http")
 async def places_no_store(request: Request, call_next):
     response = await call_next(request)
-    if "/google-places" in request.url.path:
+    if "/google-places" in request.url.path or "/maps-menu" in request.url.path:
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -53,6 +53,8 @@ from app.modules.leads.auto_research import router as auto_research_router  # no
 from app.modules.leads.google_places import router as google_places_router  # noqa: E402
 from app.modules.leads.routes import router as leads_router  # noqa: E402
 from app.modules.leads.website_search import router as website_search_router  # noqa: E402
+from app.modules.menus.maps import router as maps_menu_router  # noqa: E402
+from app.modules.menus.maps import worker_router as maps_worker_router  # noqa: E402
 from app.modules.menus.routes import router as menus_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
@@ -61,6 +63,7 @@ protected.include_router(auto_research_router)
 protected.include_router(website_search_router)
 protected.include_router(google_places_router)
 protected.include_router(menus_router)
+protected.include_router(maps_menu_router)
 protected.include_router(content_router)
 protected.include_router(sales_router)
 
@@ -68,6 +71,7 @@ protected.include_router(sales_router)
 def include_module_routers() -> None:
     app.include_router(api)
     app.include_router(protected)
+    app.include_router(maps_worker_router)
 
 
 include_module_routers()
