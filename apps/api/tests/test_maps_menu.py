@@ -332,3 +332,17 @@ def test_confirmed_place_does_not_require_old_address(client, db, setup):
     db.commit()
     _, job = start_claim(client, setup)
     assert job["confirmed_place"]
+
+
+@pytest.mark.parametrize(
+    "body,headless", [(None, True), ({}, True), ({"show_browser": True}, False), ({"show_browser": False}, True)]
+)
+def test_browser_mode_is_saved_and_delivered(client, setup, body, headless):
+    response = client.post(f"/api/leads/{setup}/maps-menu", **({"json": body} if body is not None else {}))
+    assert response.status_code == 202, response.text
+    assert response.json()["headless"] is headless
+    # 活跃任务复用原模式，开关不改变已经启动的浏览器。
+    repeated = client.post(f"/api/leads/{setup}/maps-menu", json={"show_browser": headless})
+    assert repeated.json()["headless"] is headless
+    job = client.post("/api/internal/maps-menu/claim", headers=AUTH).json()["job"]
+    assert job["headless"] is headless

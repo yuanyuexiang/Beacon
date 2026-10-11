@@ -27,7 +27,7 @@ def execute(client, job, args):
         response.raise_for_status()
 
     with tempfile.TemporaryDirectory(prefix="maps-menu-", dir=args.temp_dir) as directory:
-        report = capture(job, Path(args.profile), Path(directory), args.proxy, args.headless, progress)
+        report = capture(job, Path(args.profile), Path(directory), args.proxy, job.get("headless", True) or args.headless, progress)
         for image in report["images"]:
             progress("上传菜单图片")
             with Path(image["file"]).open("rb") as file:
@@ -66,7 +66,7 @@ def main():
     parser.add_argument("--profile", default="data/browser-profiles/maps-menu-test")
     parser.add_argument("--temp-dir", default="data/maps-worker-tmp")
     parser.add_argument("--proxy", default="socks5h://127.0.0.1:7890")
-    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--headless", action="store_true", help="强制无头运行，忽略工作台显示浏览器开关")
     parser.add_argument("--once", action="store_true", help="领取并执行一项任务后退出，用于验证")
     args = parser.parse_args()
     target = urlsplit(args.api_base)

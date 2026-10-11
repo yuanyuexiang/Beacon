@@ -142,8 +142,17 @@ def state(lead_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
     return result
 
 
+class StartIn(BaseModel):
+    show_browser: bool = False
+
+
 @router.post("/leads/{lead_id}/maps-menu", status_code=202)
-def start(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> dict:
+def start(
+    lead_id: uuid.UUID,
+    body: StartIn = StartIn(),
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+) -> dict:
     if not get_settings().maps_worker_token or time.monotonic() - HEARTBEAT >= 90:
         raise HTTPException(503, "Maps 浏览器执行器未连接，请启动执行器后重试")
     lead = locked(db, lead_id)
@@ -171,6 +180,7 @@ def start(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depe
         "maps_url": url,
         "images": [],
         "capture_status": None,
+        "headless": not body.show_browser,
     }
     write(lead, run)
     audit.record(db, op, "start_maps_menu", "lead", lead.id, after={"run_id": run["id"], "maps_url": url})
@@ -216,6 +226,7 @@ def claim(db: Session = Depends(get_db)) -> dict:
             "address": lead.address,
             "postcode": lead.postcode,
             "confirmed_place": confirmed_place(run),
+            "headless": run.get("headless", True),
         }
     }
 
