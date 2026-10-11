@@ -69,6 +69,7 @@ def write(lead: Lead, run: dict) -> None:
         history = copy.deepcopy(raw.get("maps_menu_observations") or {})
         history[run["id"]] = {
             "source": "google_maps",
+            "capture_attempts": copy.deepcopy(run.get("capture_attempts", [])),
             "observed_at": run.get("observed_at") or run["updated_at"],
             "place_id": ((run.get("snapshot") or {}).get("google_places_link") or {}).get("place_id"),
             "name": run.get("observed_name"),
@@ -143,7 +144,7 @@ def state(lead_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
 
 
 class StartIn(BaseModel):
-    show_browser: bool = False
+    show_browser: bool = True
 
 
 @router.post("/leads/{lead_id}/maps-menu", status_code=202)
@@ -226,7 +227,7 @@ def claim(db: Session = Depends(get_db)) -> dict:
             "address": lead.address,
             "postcode": lead.postcode,
             "confirmed_place": confirmed_place(run),
-            "headless": run.get("headless", True),
+            "headless": run.get("headless", False),
         }
     }
 
@@ -333,9 +334,19 @@ async def import_image(
     return result
 
 
+class CaptureAttempt(BaseModel):
+    headless: bool
+    status: str = Field(max_length=64)
+    observed_name: str | None = Field(default=None, max_length=256)
+    observed_address: str | None = Field(default=None, max_length=2048)
+    observed_website: str | None = Field(default=None, max_length=2048)
+
+
 class FinishIn(BaseModel):
     lease: str = Field(max_length=128)
     capture_status: str = Field(max_length=64)
+    capture_attempts: list[CaptureAttempt] = Field(default_factory=list, max_length=2)
+    actual_headless: bool | None = None
     thumbnail_count: int = Field(default=0, ge=0, le=10000)
     observed_name: str | None = Field(default=None, max_length=256)
     observed_address: str | None = Field(default=None, max_length=2048)
@@ -365,6 +376,8 @@ def finish(
         updated_at=now(),
         capture_status=capture_status,
         thumbnail_count=body.thumbnail_count,
+        capture_attempts=[item.model_dump() for item in body.capture_attempts],
+        actual_headless=body.actual_headless,
         message=browser.MESSAGES[capture_status],
     )
     if body.observed_name or body.observed_address:

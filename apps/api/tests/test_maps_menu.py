@@ -335,7 +335,7 @@ def test_confirmed_place_does_not_require_old_address(client, db, setup):
 
 
 @pytest.mark.parametrize(
-    "body,headless", [(None, True), ({}, True), ({"show_browser": True}, False), ({"show_browser": False}, True)]
+    "body,headless", [(None, False), ({}, False), ({"show_browser": True}, False), ({"show_browser": False}, True)]
 )
 def test_browser_mode_is_saved_and_delivered(client, setup, body, headless):
     response = client.post(f"/api/leads/{setup}/maps-menu", **({"json": body} if body is not None else {}))
@@ -346,3 +346,48 @@ def test_browser_mode_is_saved_and_delivered(client, setup, body, headless):
     assert repeated.json()["headless"] is headless
     job = client.post("/api/internal/maps-menu/claim", headers=AUTH).json()["job"]
     assert job["headless"] is headless
+
+
+@pytest.mark.parametrize(
+    "status,retries",
+    [
+        ("limited_view", True),
+        ("menu_unavailable", True),
+        ("timeout", True),
+        ("captcha", False),
+        ("place_mismatch", False),
+        ("downloaded", False),
+    ],
+)
+def test_headless_fallback_is_bounded_and_keeps_attempts(monkeypatch, tmp_path, status, retries):
+    calls = []
+
+    def fake_capture(job, profile, out, proxy, headless, progress):
+        calls.append(headless)
+        return {
+            "status": status if headless else "downloaded",
+            "images": [] if headless else [{"sha256": "test"}],
+            "observed_name": "Observed",
+        }
+
+    monkeypatch.setattr(browser, "capture", fake_capture)
+    report = browser.capture_with_fallback({"headless": True}, tmp_path, tmp_path, "")
+    assert calls == ([True, False] if retries else [True])
+    assert len(report["attempts"]) == (2 if retries else 1)
+    assert report["attempts"][0]["observed_name"] == "Observed"
+    assert report["actual_headless"] is (not retries)
+
+
+def test_force_headless_never_opens_window_and_partial_images_are_kept(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_capture(job, profile, out, proxy, headless, progress):
+        calls.append(headless)
+        return {"status": "timeout", "images": [{"sha256": "partial"}]}
+
+    monkeypatch.setattr(browser, "capture", fake_capture)
+    report = browser.capture_with_fallback({"headless": True}, tmp_path, tmp_path, "")
+    assert calls == [True] and report["images"] == [{"sha256": "partial"}]
+    calls.clear()
+    report = browser.capture_with_fallback({}, tmp_path, tmp_path, "", force_headless=True)
+    assert calls == [True] and report["actual_headless"]

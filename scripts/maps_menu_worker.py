@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "apps/api"))
-from app.integrations.maps_menu_browser import capture  # noqa: E402
+from app.integrations.maps_menu_browser import capture_with_fallback  # noqa: E402
 
 
 def execute(client, job, args):
@@ -27,7 +27,7 @@ def execute(client, job, args):
         response.raise_for_status()
 
     with tempfile.TemporaryDirectory(prefix="maps-menu-", dir=args.temp_dir) as directory:
-        report = capture(job, Path(args.profile), Path(directory), args.proxy, job.get("headless", True) or args.headless, progress)
+        report = capture_with_fallback(job, Path(args.profile), Path(directory), args.proxy, args.headless, progress)
         for image in report["images"]:
             progress("上传菜单图片")
             with Path(image["file"]).open("rb") as file:
@@ -49,6 +49,8 @@ def execute(client, job, args):
             json={
                 "lease": job["lease"],
                 "capture_status": report["status"],
+                "capture_attempts": report["attempts"],
+                "actual_headless": report["actual_headless"],
                 "thumbnail_count": report.get("thumbnail_count", 0),
                 "observed_name": report.get("observed_name"),
                 "observed_address": report.get("observed_address"),

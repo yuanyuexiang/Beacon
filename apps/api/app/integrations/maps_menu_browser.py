@@ -194,3 +194,46 @@ def capture(
     except (BrowserError, httpx.HTTPError, ValueError):
         report["status"] = "failed"
     return report
+
+
+def capture_with_fallback(
+    job: dict,
+    profile: Path,
+    out: Path,
+    proxy: str,
+    force_headless: bool = False,
+    progress: Callable[[str], None] = lambda _: None,
+) -> dict:
+    headless = job.get("headless", False) or force_headless
+    report = capture(job, profile, out, proxy, headless, progress)
+    attempts = [
+        {
+            "headless": headless,
+            "status": report["status"],
+            "observed_name": report.get("observed_name"),
+            "observed_address": report.get("observed_address"),
+            "observed_website": report.get("observed_website"),
+        }
+    ]
+    # 仅无图片的视图/加载失败回退；验证码和目标不匹配不自动重试。
+    if (
+        headless
+        and not force_headless
+        and not report["images"]
+        and report["status"] in {"limited_view", "menu_unavailable", "images_unavailable", "timeout", "failed"}
+    ):
+        progress("无头模式未获取菜单，使用显示浏览器模式重试一次")
+        retry = capture(job, profile, out, proxy, False, progress)
+        attempts.append(
+            {
+                "headless": False,
+                "status": retry["status"],
+                "observed_name": retry.get("observed_name"),
+                "observed_address": retry.get("observed_address"),
+                "observed_website": retry.get("observed_website"),
+            }
+        )
+        report = retry
+    report["attempts"] = attempts
+    report["actual_headless"] = attempts[-1]["headless"]
+    return report
