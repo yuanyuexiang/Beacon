@@ -189,4 +189,4 @@
 - [x] main 自动测试、构建 GHCR 与部署工作流已实现；PR 仅测试，不设发布审批。
 - [x] 独立 Traefik 与服务器业务 Compose、固定数据卷、单次迁移、健康验证及兼容回滚。
 - [x] 已配置服务器受限部署身份、固定主机密钥、GitHub Secrets／Variables 和短期 GHCR 凭据。
-- [ ] 完成部署脚本失败路径测试、静态检查、真实首次流水线与 HTTPS 验收。
+- [x] 部署脚本失败路径与实际 Compose 参数校验通过（15 个测试），270 后端、两个 provider 各 11 测试、8 前端测试及构建通过；首次真实 [Actions 发布](https://github.com/yuanyuexiang/Beacon/actions/runs/38281693112) 成功，HTTPS、Web／API SHA 和健康检查通过（2026-10-13）。

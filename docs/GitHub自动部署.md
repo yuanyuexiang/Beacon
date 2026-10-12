@@ -93,3 +93,8 @@ actionlint .github/workflows/ci-cd.yml
 后端、前端及 provider 使用各自现有命令。提交触发后在 [GitHub Actions](https://github.com/yuanyuexiang/Beacon/actions) 查看结果；流水线失败时先看失败阶段，再核对服务器发布状态。
 
 参考：[GHCR 认证与仓库权限](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)、[GitHub Actions 安全实践](https://docs.github.com/en/actions/reference/security/secure-use)、[Docker 构建来源与 SBOM](https://docs.docker.com/build/ci/github-actions/attestations/)、[Traefik Dashboard 安全](https://doc.traefik.io/traefik/operations/dashboard/)。
+
+
+## 实际验收记录
+
+2026-10-13：提交 `3acfcb7` 的 [GitHub Actions](https://github.com/yuanyuexiang/Beacon/actions/runs/38281693112) 全流程成功。270 后端、两个 provider 各 11 测试、15 个部署测试及 8 前端测试通过；四个镜像推送 GHCR 后，服务器完成一致性备份、迁移、应用健康检查、公网 HTTPS 与双端提交版本验证，再启动两个 worker。首次调试的两次 create 参数失败均发生在迁移之前，已验证初始库无迁移后归档失败记录，并加入实际 CLI 参数校验。
