@@ -40,3 +40,7 @@ docs/餐饮销售线索智能分析与管理系统开发合同.pdf
 .DS_Store
 Beacon.pem
 docs/餐饮销售线索智能分析与管理系统开发合同-正式版.pdf
+
+# Gmail service secrets are provisioned locally, never committed.
+infra/secrets/
+services/gmail/.venv/

@@ -17,6 +17,7 @@ export const STATUS_LABEL: Record<string, string> = {
   approved: "已审批",
   rejected: "已驳回",
   opened: "已打开",
+  sent_email: "已通过 Gmail 发送",
   sent_manual: "已人工发送",
   paused: "已暂停",
   cancelled: "已取消",

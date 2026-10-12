@@ -1,5 +1,6 @@
 """FastAPI 入口。业务路由挂在 /api 下并要求登录；健康检查不要求登录。"""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI, Request
@@ -9,6 +10,21 @@ from app.core.auth import bootstrap_operator, current_operator
 from app.core.config import get_settings
 from app.core.db import get_engine, get_sessionmaker
 from app.core.routes import router as core_router
+
+
+class OAuthAccessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Uvicorn 默认日志包含 OAuth 授权码查询参数，仅记录回调路径。
+        if isinstance(record.args, tuple) and len(record.args) >= 3:
+            path = record.args[2]
+            if isinstance(path, str) and path.startswith("/api/gmail/oauth/callback"):
+                args = list(record.args)
+                args[2] = "/api/gmail/oauth/callback"
+                record.args = tuple(args)
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(OAuthAccessFilter())
 
 
 @asynccontextmanager
@@ -28,7 +44,7 @@ api = APIRouter(prefix="/api")
 @app.middleware("http")
 async def places_no_store(request: Request, call_next):
     response = await call_next(request)
-    if "/google-places" in request.url.path or "/maps-menu" in request.url.path:
+    if "/google-places" in request.url.path or "/maps-menu" in request.url.path or "/gmail" in request.url.path:
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -49,6 +65,8 @@ def health_db() -> dict:
 api.include_router(core_router)
 protected = APIRouter(prefix="/api", dependencies=[Depends(current_operator)])
 from app.modules.content.routes import router as content_router  # noqa: E402
+from app.modules.gmail.routes import callback_router as gmail_callback_router  # noqa: E402
+from app.modules.gmail.routes import router as gmail_router  # noqa: E402
 from app.modules.leads.auto_research import router as auto_research_router  # noqa: E402
 from app.modules.leads.google_places import router as google_places_router  # noqa: E402
 from app.modules.leads.routes import router as leads_router  # noqa: E402
@@ -58,6 +76,7 @@ from app.modules.menus.maps import worker_router as maps_worker_router  # noqa: 
 from app.modules.menus.routes import router as menus_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
+protected.include_router(gmail_router)
 protected.include_router(leads_router)
 protected.include_router(auto_research_router)
 protected.include_router(website_search_router)
@@ -72,6 +91,7 @@ def include_module_routers() -> None:
     app.include_router(api)
     app.include_router(protected)
     app.include_router(maps_worker_router)
+    app.include_router(gmail_callback_router)
 
 
 include_module_routers()

@@ -3,6 +3,7 @@ import { Badge, Button, Card, DatePicker, Form, Input, Select, Space, Table, Tab
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
+import GmailOutreach from "@/components/GmailOutreach";
 import { HeroBand } from "@/components/ui";
 import { CHANNEL_LABEL, channelLabel, label } from "@/lib/format";
 
@@ -14,7 +15,7 @@ type Event = { id: string; event_key: string; kind: string; channel: string | nu
 type Sup = { id: string; lead_id: string | null; scope: string; contact_ref: string | null; reason: string; created_at: string };
 
 const CHANNELS = ["email", "whatsapp", "phone", "instagram", "facebook", "tiktok", "other_social", "contact_form", "post"];
-const TASK_COLORS: Record<string, string> = { pending: "blue", opened: "gold", sent_manual: "green", paused: "orange", cancelled: "default" };
+const TASK_COLORS: Record<string, string> = { pending: "blue", opened: "gold", sent_manual: "green", sent_email: "green", paused: "orange", cancelled: "default" };
 
 export default function TasksPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -48,7 +49,7 @@ export default function TasksPage() {
             <Button size="small" type="primary" htmlType="submit">记录已人工发送</Button>
           </Form>}
           {t.status === "paused" && <Button size="small" onClick={() => api(`/api/tasks/${t.id}/resume`, json({ reason: "负责人确认继续" })).then(() => reload(leadId)).catch(err)}>恢复</Button>}
-          {!["sent_manual", "cancelled"].includes(t.status) && <Button size="small" danger onClick={() => api(`/api/tasks/${t.id}/cancel`, json({ reason: "人工取消" })).then(() => reload(leadId)).catch(err)}>取消</Button>}
+          {!["sent_manual", "sent_email", "cancelled"].includes(t.status) && <Button size="small" danger onClick={() => api(`/api/tasks/${t.id}/cancel`, json({ reason: "人工取消" })).then(() => reload(leadId)).catch(err)}>取消</Button>}
         </Space>
       ) },
     ]} />
@@ -56,7 +57,7 @@ export default function TasksPage() {
 
   return (
     <>
-      <HeroBand kicker="MANUAL OUTREACH" title="人工任务与回复" subtitle="系统不发送消息。准入、审批、抑制在创建、打开、记录发送三个时点都会复核。"
+      <HeroBand kicker="MANUAL OUTREACH" title="触达任务与回复" subtitle="Gmail 支持预览确认后发送与回复同步；其他渠道人工回填。执行前重新复核准入、审批和抑制。"
         extra={<>
           <Select showSearch style={{ width: 320 }} placeholder="选择门店以管理准入与回填" optionFilterProp="label" value={leadId} onChange={pick} options={leads.map((l) => ({ value: l.id, label: `${l.name}（${l.source_key}）` }))} />
           {leadId && <Link href={`/leads/${leadId}`}><Button>查看详情</Button></Link>}
@@ -64,6 +65,7 @@ export default function TasksPage() {
       <Card size="small">
         <Tabs items={[
           { key: "tasks", label: <span>任务 <Badge count={(leadId ? tasks.filter((t) => t.lead_id === leadId) : tasks).length} showZero color="#cf010e" /></span>, children: taskTable },
+          { key: "gmail", label: "Gmail 邮件", children: <GmailOutreach tasks={leadId ? tasks.filter((t) => t.lead_id === leadId) : tasks} name={name} onChanged={() => reload(leadId)} /> },
           { key: "elig", label: "渠道准入", disabled: !leadId, children: leadId ? (
             <>
               <Form layout="inline" onFinish={(v) => api(`/api/leads/${leadId}/eligibility`, json(v)).then(() => reload(leadId)).catch(err)} style={{ marginBottom: 12, rowGap: 8 }}>

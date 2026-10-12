@@ -2,6 +2,8 @@ export default function TermsPage() {
   return <main style={{ maxWidth: 760, margin: "40px auto", padding: 24, lineHeight: 1.8 }}>
     <h1>工作台使用说明</h1>
     <p>本工作台用于餐厅线索研究、菜单证据审核和人工联系记录。操作者应核对门店归属、素材来源和渠道准入；消费价格参考不能代表采购预算。</p>
+    <h2>邮件触达</h2>
+    <p>Gmail 支持已审批邮箱任务的最终预览、确认发送与回复同步；发送前复核准入、审批及抑制。批量队列默认暂停，每封邮件独立执行。开启或暂停队列不能撤回已经提交的邮件；其他渠道仍由操作者人工联系。</p>
     <h2>Google Maps 内容</h2>
     <p>Google 查询由操作者按需发起。使用 Google Maps 功能及内容须遵守 <a href="https://maps.google.com/help/terms_maps/" target="_blank" rel="noreferrer">Google Maps / Google Earth 附加服务条款</a>。</p>
     <p>工作台保存人工确认的地点 ID 和关联审核记录；官网 URL 可经人工核对或 AI 判断与程序证据校验后采用，并保留来源和依据。Google Places API 返回的名称、地址、价格信息与照片用于当前页面实时查看，不提供这些内容的批量导出、菜单转录或样稿生成。</p>

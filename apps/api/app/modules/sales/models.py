@@ -40,6 +40,7 @@ class TaskStatus(enum.StrEnum):
     pending = "pending"
     opened = "opened"
     sent_manual = "sent_manual"
+    sent_email = "sent_email"
     paused = "paused"
     cancelled = "cancelled"
 

@@ -56,3 +56,8 @@ D44（2026-10-11）：Places websiteUri 经人工核对后采用；官网菜单�
 D45（2026-10-11）：单家 AI 自动补全官网与菜单已接入。真实 DeepSeek 判断 + 程序原文/地址检查，错误引用修正至多一次；匹配明确自动采用与导入，异常复核，新分析 needs_review。任务使用单 API worker 的 BackgroundTasks，状态在 lead.raw，重启后需重跑；hash 去重并保留已有审核。Google 价格/照片仍不送模型，批量未开放。见 [实施与限制](plan/development.md#d45ai-自动补全官网与菜单施工计划2026-10-11)。
 
 D46（2026-10-11，用户授权）：单家 Maps 菜单探针已接工作台按钮、受控资产与真实模型转录，扩展 D43/D44 例外。专用执行器主动连接 API，核对名称/地址/邮编、菜单区前 5 张、hash 去重、异常提示；已有审核保留。未登录已有会话可获取，全新有界面/无头会话仍受限。运行命令见 [操作手册](docs/操作手册.md#google-maps-菜单获取d46)，不开放批量、不自动登录。
+
+
+D47（2026-10-12 用户授权实施）：扩展此前“系统不发送”边界，Gmail 独立容器支持凭据管理、完整邮件预览确认、单家发送回填、已发送线程回复头同步及审批后批量队列；其他渠道仍人工。发送和批量队列默认暂停，执行前复核准入/审批/抑制，未知结果不自动重试。施工步骤见 [Gmail 服务计划](plan/gmail-service.md)。本次开发不授权向客户发送测试邮件。
+
+Gmail 服务配置：首次 Compose 启动前运行 `python3 scripts/configure_gmail_service.py`；启动后可用 `python3 scripts/configure_gmail_service.py --import-opc` 导入本机已有授权（不发送邮件）。新增验证命令 `cd services/gmail && uv sync --python 3.12 && uv run pytest -q && uv run ruff check gmail_service tests`。详细步骤见 [Gmail 服务操作](docs/Gmail邮件服务.md)。

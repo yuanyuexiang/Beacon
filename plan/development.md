@@ -137,3 +137,8 @@ Google Maps 菜单测试例外（D43，2026-10-10 用户明确授权）：单家
 Docker API 与宿主机浏览器解耦；Mac 默认复用 data/browser-profiles/maps-menu-test。服务器可运行同一执行器（HTTPS API、Chrome、独立持久化 profile、有界面环境），全新会话/无头模式仍可能有限视图，尚未证明服务器成功率。使用单 API worker：执行器在线心跳为进程内状态；任务及租约持久化，API 重启后执行器重新连接即可领取未开始任务，过期在读取/领取时标记中断。自动分析用 BackgroundTasks，API 中断分析后需重试，已有文件保留。
 
 依赖：可选 maps-worker extra 固定 Playwright 1.63.0（Apache-2.0）；pyee 13.0.1（MIT）、greenlet 3.5.6（MIT/Python Software Foundation 派生说明）。API 容器不安装浏览器。上游许可证：[Playwright](https://github.com/microsoft/playwright-python/blob/v1.63.0/LICENSE)、[pyee](https://github.com/jfhbrook/pyee/blob/main/LICENSE)、[greenlet](https://github.com/python-greenlet/greenlet/blob/master/LICENSE)。
+
+
+## D47：Gmail 独立容器与发送链路
+
+按用户授权逐步扩展发送能力，见 [实施步骤](gmail-service.md) 和 [操作说明](../docs/Gmail邮件服务.md)。HTTP/MCP 共用服务，完整预览后明确确认，执行前再次复核；队列持久化、回复头同步和未知结果对账，其他渠道仍人工。

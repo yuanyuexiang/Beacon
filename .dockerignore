@@ -13,3 +13,5 @@ apps/api/.env
 plan/archive/
 research_notes/
 汇报/
+
+infra/secrets/

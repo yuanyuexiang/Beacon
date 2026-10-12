@@ -87,3 +87,8 @@ Docker 全套（已实测）：`cp infra/.env.example infra/.env && docker compo
 D45：单家 AI 自动补全允许真实 DeepSeek + 程序证据校验自动采用官网、导入菜单并生成待审核分析，异常才人工复核；Fake 不允许自动采用。原人工路径保留，Google 价格/照片不送模型，渠道与内容审批不变。API 后台任务首版仅支持单 worker；重启后手动重跑，hash 去重与既有审核保留。
 
 D46（2026-10-11 用户授权例外）：工作台支持单家 Maps 菜单浏览器获取、受控资产及待审核 AI 转录。名单仍来自 FSA/Overture；专用会话不复制日常 Chrome、不自动登录、不批量抓取。执行器命令：`python3 scripts/configure_maps_worker.py` 后重建 API，再运行 `uv run --project apps/api --extra maps-worker python scripts/maps_menu_worker.py --token-file data/browser-profiles/maps-worker.token`。配置、服务器与有限视图限制见 [手册](docs/操作手册.md#google-maps-菜单获取d46)。
+
+
+D47（2026-10-12 用户授权实施）：扩展此前“系统不发送”边界，Gmail 独立容器支持凭据管理、完整邮件预览确认、单家发送回填、已发送线程回复头同步及审批后批量队列；其他渠道仍人工。发送和批量队列默认暂停，执行前复核准入/审批/抑制，未知结果不自动重试。施工步骤见 [Gmail 服务计划](plan/gmail-service.md)。本次开发不授权向客户发送测试邮件。
+
+Gmail 服务配置：首次 Compose 启动前运行 `python3 scripts/configure_gmail_service.py`；启动后可用 `python3 scripts/configure_gmail_service.py --import-opc` 导入本机已有授权（不发送邮件）。新增验证命令 `cd services/gmail && uv sync --python 3.12 && uv run pytest -q && uv run ruff check gmail_service tests`。详细步骤见 [Gmail 服务操作](docs/Gmail邮件服务.md)。

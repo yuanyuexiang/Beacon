@@ -78,7 +78,7 @@ export default function LoginPage() {
             <Button type="primary" htmlType="submit" block loading={loading} style={{ height: 46, fontSize: 15, fontWeight: 600, boxShadow: "0 8px 20px rgba(207,1,14,0.25)" }}>登 录</Button>
           </Form>
           <div style={{ marginTop: 28, padding: "12px 14px", background: "#faf7f2", borderLeft: `3px solid ${GOLD}`, borderRadius: 4, fontSize: 12, color: "#6b6b6b", lineHeight: 1.7 }}>
-            系统不发送任何消息；所有对外联系由销售确认后执行并回填。评分与排序不代表成交概率。
+            Gmail 邮件经预览确认后发送；其他渠道由销售执行并回填。评分与排序不代表成交概率。
           </div>
           <div style={{ marginTop: 36, fontSize: 12, color: "#9a9a9a", textAlign: "center" }}>© 南京小当家文化咨询有限公司 · 销售线索工作台 验证版</div>
         </div>

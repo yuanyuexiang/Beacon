@@ -234,7 +234,7 @@ function LeadsInner() {
               { key: "k", label: "导入与运行记录", children: delPreview.import_runs + delPreview.batch_runs },
               { key: "l", label: "成本记录", children: delPreview.cost_entries },
             ]} />
-            {delPreview.tasks_sent > 0 && <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={`有 ${delPreview.tasks_sent} 个任务已人工发送，真实联系记录会一并删除`} />}
+            {delPreview.tasks_sent > 0 && <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={`有 ${delPreview.tasks_sent} 个任务已发送，真实联系记录会一并删除`} />}
             {delPreview.leads_kept_suppressed > 0 && <Alert type="info" showIcon style={{ marginBottom: 12 }} message="有拒收 / 退订记录的门店不会删除，以保证抑制继续生效；它们会脱离本批次" />}
             <p style={{ marginBottom: 6 }}>输入批次键 <b>{batchKey}</b> 以确认：</p>
             <Input value={delConfirm} onChange={(e) => setDelConfirm(e.target.value)} placeholder={batchKey} />

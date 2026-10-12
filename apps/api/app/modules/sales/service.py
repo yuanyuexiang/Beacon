@@ -147,6 +147,8 @@ def _recheck_or_pause(db: Session, t: ManualTask) -> None:
 
 
 def open_task(db: Session, t: ManualTask, by: str) -> ManualTask:
+    db.refresh(t, with_for_update=True)
+    check_gmail_in_flight(db, t)
     if t.status not in (TaskStatus.pending, TaskStatus.opened):
         raise SalesError(f"任务状态为 {t.status}，不能打开")
     _recheck_or_pause(db, t)
@@ -158,7 +160,17 @@ def open_task(db: Session, t: ManualTask, by: str) -> ManualTask:
     return t
 
 
+def check_gmail_in_flight(db: Session, t: ManualTask) -> None:
+    from app.modules.gmail.models import EmailDelivery
+
+    row = db.scalar(select(EmailDelivery).where(EmailDelivery.task_id == t.id))
+    if row and row.status in {"ready", "queued", "sending", "unknown", "sent"}:
+        raise SalesError("已有 Gmail 邮件排队、发送中或结果待确认；请在邮件记录中处理")
+
+
 def record_sent(db: Session, t: ManualTask, sent_at: datetime, by: str, notes: str | None) -> ManualTask:
+    db.refresh(t, with_for_update=True)
+    check_gmail_in_flight(db, t)
     if t.status != TaskStatus.opened:
         raise SalesError(f"任务状态为 {t.status}，只有已打开的任务可记录发送")
     if sent_at > now():
@@ -175,7 +187,9 @@ def record_sent(db: Session, t: ManualTask, sent_at: datetime, by: str, notes: s
 
 
 def cancel_task(db: Session, t: ManualTask, reason: str) -> ManualTask:
-    if t.status == TaskStatus.sent_manual:
+    db.refresh(t, with_for_update=True)
+    check_gmail_in_flight(db, t)
+    if t.status in (TaskStatus.sent_manual, TaskStatus.sent_email):
         raise SalesError("已记录发送的任务不能取消")
     t.status = TaskStatus.cancelled
     t.status_reason = reason
@@ -200,6 +214,9 @@ def resume_task(db: Session, t: ManualTask, by: str, reason: str) -> ManualTask:
 
 
 def record_event(db: Session, lead_id: uuid.UUID, data: dict, by: str) -> tuple[Event, bool]:
+    from app.modules.leads.models import Lead
+
+    db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
     existing = db.scalar(select(Event).where(Event.event_key == data["event_key"]))
     if existing is not None:
         return existing, False

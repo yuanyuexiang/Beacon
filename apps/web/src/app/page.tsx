@@ -15,7 +15,7 @@ const STEPS: { code: string; label: string; icon: React.ReactNode; color: string
   { code: "M", label: "取得菜单", icon: <FileSearchOutlined />, color: "#d97706" },
   { code: "I", label: "确认问题", icon: <TagsOutlined />, color: "#b45309" },
   { code: "E", label: "可联系", icon: <CheckCircleOutlined />, color: "#15803d" },
-  { code: "S", label: "已人工发送", icon: <PhoneOutlined />, color: "#0369a1" },
+  { code: "S", label: "已发送", icon: <PhoneOutlined />, color: "#0369a1" },
   { code: "R", label: "收到回复", icon: <MessageOutlined />, color: "#7c3aed" },
   { code: "P", label: "正向意向", icon: <StarOutlined />, color: BRAND.gold },
   { code: "Q", label: "请求报价", icon: <DollarOutlined />, color: "#be123c" },
@@ -64,7 +64,7 @@ export default function Dashboard() {
             </Col>
             <Col xs={24} lg={10}>
               <Card title="分渠道（发送 / 回复，按门店）" size="small" style={{ marginBottom: 16 }}>
-                {Object.keys(s.by_channel).length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无人工发送记录" /> : (
+                {Object.keys(s.by_channel).length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无发送记录" /> : (
                   <Table size="small" pagination={false} rowKey="ch" dataSource={Object.entries(s.by_channel).map(([ch, v]) => ({ ch, ...v }))}
                     columns={[{ title: "渠道", dataIndex: "ch" }, { title: "发送", dataIndex: "sent" }, { title: "回复", dataIndex: "replied" }]} />
                 )}

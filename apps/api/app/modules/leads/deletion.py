@@ -49,7 +49,11 @@ def preview(db: Session, batch: Batch) -> dict[str, Any]:
         "content_pieces": n(ContentPiece, ContentPiece.lead_id.in_(doomed)),
         "contacts": n(ChannelEligibility, ChannelEligibility.lead_id.in_(doomed)),
         "tasks": n(ManualTask, ManualTask.lead_id.in_(doomed)),
-        "tasks_sent": n(ManualTask, ManualTask.lead_id.in_(doomed), ManualTask.status == TaskStatus.sent_manual),
+        "tasks_sent": n(
+            ManualTask,
+            ManualTask.lead_id.in_(doomed),
+            ManualTask.status.in_([TaskStatus.sent_manual, TaskStatus.sent_email]),
+        ),
         "events": n(Event, Event.lead_id.in_(doomed)),
         "import_runs": n(ImportRun, ImportRun.batch_id == batch.id),
         "batch_runs": n(BatchRun, BatchRun.batch_id == batch.id),

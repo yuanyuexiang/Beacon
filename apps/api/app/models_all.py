@@ -3,6 +3,7 @@
 from app.core.models import AuditLog, Operator  # noqa: F401
 from app.core.models_base import Base
 from app.modules.content.models import Approval, ContentPiece  # noqa: F401
+from app.modules.gmail.models import EmailDelivery  # noqa: F401
 from app.modules.leads.models import Batch, BatchLead, ImportRun, Lead  # noqa: F401
 from app.modules.leads.runs import BatchJob, BatchRun  # noqa: F401
 from app.modules.menus.models import AnalysisCorrection, MenuAnalysis, MenuAsset  # noqa: F401

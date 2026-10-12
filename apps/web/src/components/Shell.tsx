@@ -26,7 +26,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           selectedKeys={[path.startsWith("/tasks") ? "/tasks" : "/"]}
           items={[
             { key: "/", label: <Link href="/">线索与批次</Link> },
-            { key: "/tasks", label: <Link href="/tasks">人工任务与回复</Link> },
+            { key: "/tasks", label: <Link href="/tasks">触达任务与回复</Link> },
           ]}
           style={{ flex: 1 }}
         />

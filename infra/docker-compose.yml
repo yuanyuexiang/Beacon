@@ -43,6 +43,10 @@ services:
       BEACON_BOOTSTRAP_OPERATOR: ${BEACON_BOOTSTRAP_OPERATOR:-admin}
       BEACON_BOOTSTRAP_PASSWORD: ${BEACON_BOOTSTRAP_PASSWORD:-admin-dev-password}
       BEACON_CHROME_PATH: ""
+      BEACON_GMAIL_SERVICE_URL: http://gmail-service:8090
+      BEACON_GMAIL_SERVICE_TOKEN_FILE: /run/secrets/gmail_service_token
+    secrets:
+      - gmail_service_token
     ports:
       - "8000:8000"
     volumes:
@@ -68,6 +72,49 @@ services:
     ports:
       - "3000:3000"
 
+  gmail-service:
+    build:
+      context: ..
+      dockerfile: services/gmail/Dockerfile
+    container_name: beacon-gmail
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      GMAIL_SERVICE_TOKEN_FILE: /run/secrets/gmail_service_token
+      GMAIL_REDIRECT_URI: ${BEACON_GMAIL_REDIRECT_URI:-http://localhost:3000/api/gmail/oauth/callback}
+      HTTPS_PROXY: ${BEACON_GMAIL_PROXY:-}
+    secrets:
+      - gmail_service_token
+    volumes:
+      - beacon-gmail-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  gmail-worker:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: beacon-gmail-worker
+    depends_on:
+      api:
+        condition: service_healthy
+      gmail-service:
+        condition: service_healthy
+    environment:
+      BEACON_DATABASE_URL: postgresql+psycopg://beacon:beacon@postgres:5432/beacon
+      BEACON_DATA_DIR: /data
+      BEACON_SECRET_KEY: ${BEACON_SECRET_KEY:-dev-only-secret-key-please-change-0123456789abcdef}
+      BEACON_GMAIL_SERVICE_URL: http://gmail-service:8090
+      BEACON_GMAIL_SERVICE_TOKEN_FILE: /run/secrets/gmail_service_token
+    secrets:
+      - gmail_service_token
+    command: ["uv", "run", "--no-sync", "python", "-m", "app.modules.gmail.worker"]
+    restart: unless-stopped
+
   # 在容器里跑后端测试（使用同一 postgres 的 beacon_test 库）
   api-test:
     profiles: ["test"]
@@ -88,3 +135,8 @@ services:
 volumes:
   beacon-pgdata:
   beacon-data:
+  beacon-gmail-data:
+
+secrets:
+  gmail_service_token:
+    file: ./secrets/gmail-service-token
