@@ -110,3 +110,7 @@ D47（2026-10-12 用户授权实施）：扩展此前“系统不发送”边界
 ### 社媒接入调研归档（2026-10-12）
 
 用户要求保存 TK、FB、INS、LIN 调研以指导后续开发，见 [社媒渠道开发指南](social-channel-integration.md)。建议保留 Gmail 独立服务，Meta 共用容器但分别适配 FB／INS，TikTok 先验证资质，LinkedIn 先人工辅助并评估可选 provider。公开主页与 API 收件人身份分开，执行同时检查业务准入和平台消息条件。以上为后续设计建议，不代表已实施或获得客户发送授权。
+
+### D48 Meta 首期开发授权（2026-10-12）
+
+用户同意先开发统一渠道框架及 Facebook／Instagram，授权配置后补。采用内部 Meta HTTP 容器＋API PostgreSQL 队列；账号凭据不进入业务表，身份、会话关联和内容版本参与执行复核。Gmail 继续原服务；LinkedIn 增加独立渠道，TK／LIN 自动消息后续决定。默认暂停，首期只做已入站会话内的普通文字回复；未验证的窗口外例外不启用。OAuth 浏览器接入先支持 Facebook Login，Instagram Login 可导入已有 Token。实现范围与未完成的真实账号验收见 [操作说明](../docs/社媒渠道服务.md)。本次未获准向客户发送测试消息。

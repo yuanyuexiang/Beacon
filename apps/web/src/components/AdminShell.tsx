@@ -51,12 +51,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           items={NAV_GROUPS.map((g) => ({ key: g.key, type: "group" as const, label: g.label, children: g.items.map((n) => ({ key: n.key, icon: n.icon, label: <Link href={n.key}>{n.label}</Link> })) }))} />
         <div className="beacon-sider-foot">
           {collapsed ? (
-            <Tooltip placement="right" title="Gmail 邮件预览确认后发送，其他渠道人工触达"><SafetyCertificateOutlined /></Tooltip>
+            <Tooltip placement="right" title="邮件与已连接社媒会话预览确认后发送，其余渠道人工触达"><SafetyCertificateOutlined /></Tooltip>
           ) : (
             <>
               <div className="beacon-sider-note">
                 <SafetyCertificateOutlined />
-                <div><b>触达需确认</b>Gmail 邮件预览确认后发送，其他渠道人工触达。</div>
+                <div><b>触达需确认</b>邮件与已连接社媒会话预览确认后发送，其余渠道人工触达。</div>
               </div>
               <div className="beacon-sider-company">南京小当家文化咨询有限公司</div>
             </>

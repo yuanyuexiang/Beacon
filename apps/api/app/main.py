@@ -4,6 +4,8 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.core.auth import bootstrap_operator, current_operator
@@ -17,9 +19,11 @@ class OAuthAccessFilter(logging.Filter):
         # Uvicorn 默认日志包含 OAuth 授权码查询参数，仅记录回调路径。
         if isinstance(record.args, tuple) and len(record.args) >= 3:
             path = record.args[2]
-            if isinstance(path, str) and path.startswith("/api/gmail/oauth/callback"):
+            if isinstance(path, str) and path.startswith(
+                ("/api/gmail/oauth/callback", "/api/outreach/oauth/callback", "/api/outreach/webhook")
+            ):
                 args = list(record.args)
-                args[2] = "/api/gmail/oauth/callback"
+                args[2] = path.split("?", 1)[0]
                 record.args = tuple(args)
         return True
 
@@ -44,7 +48,12 @@ api = APIRouter(prefix="/api")
 @app.middleware("http")
 async def places_no_store(request: Request, call_next):
     response = await call_next(request)
-    if "/google-places" in request.url.path or "/maps-menu" in request.url.path or "/gmail" in request.url.path:
+    if (
+        "/google-places" in request.url.path
+        or "/maps-menu" in request.url.path
+        or "/gmail" in request.url.path
+        or "/outreach" in request.url.path
+    ):
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -74,8 +83,11 @@ from app.modules.leads.website_search import router as website_search_router  # 
 from app.modules.menus.maps import router as maps_menu_router  # noqa: E402
 from app.modules.menus.maps import worker_router as maps_worker_router  # noqa: E402
 from app.modules.menus.routes import router as menus_router  # noqa: E402
+from app.modules.outreach.routes import public_router as outreach_public_router  # noqa: E402
+from app.modules.outreach.routes import router as outreach_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
+protected.include_router(outreach_router)
 protected.include_router(gmail_router)
 protected.include_router(leads_router)
 protected.include_router(auto_research_router)
@@ -92,6 +104,16 @@ def include_module_routers() -> None:
     app.include_router(protected)
     app.include_router(maps_worker_router)
     app.include_router(gmail_callback_router)
+    app.include_router(outreach_public_router)
 
 
 include_module_routers()
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/outreach"):
+        return JSONResponse(status_code=422, content={"detail": "配置格式无效，请核对字段及账号类型"})
+    from fastapi.exception_handlers import request_validation_exception_handler
+
+    return await request_validation_exception_handler(request, exc)

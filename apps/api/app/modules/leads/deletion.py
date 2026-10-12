@@ -52,7 +52,7 @@ def preview(db: Session, batch: Batch) -> dict[str, Any]:
         "tasks_sent": n(
             ManualTask,
             ManualTask.lead_id.in_(doomed),
-            ManualTask.status.in_([TaskStatus.sent_manual, TaskStatus.sent_email]),
+            ManualTask.status.in_([TaskStatus.sent_manual, TaskStatus.sent_email, TaskStatus.sent_social]),
         ),
         "events": n(Event, Event.lead_id.in_(doomed)),
         "import_runs": n(ImportRun, ImportRun.batch_id == batch.id),

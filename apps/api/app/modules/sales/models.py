@@ -19,7 +19,8 @@ class Channel(enum.StrEnum):
     instagram = "instagram"
     facebook = "facebook"
     tiktok = "tiktok"
-    other_social = "other_social"  # X、LinkedIn、YouTube 等；contact_ref 为账号 URL
+    linkedin = "linkedin"
+    other_social = "other_social"  # X、YouTube 等；contact_ref 为账号 URL
     contact_form = "contact_form"
     post = "post"
 
@@ -41,6 +42,7 @@ class TaskStatus(enum.StrEnum):
     opened = "opened"
     sent_manual = "sent_manual"
     sent_email = "sent_email"
+    sent_social = "sent_social"
     paused = "paused"
     cancelled = "cancelled"
 

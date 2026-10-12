@@ -112,4 +112,6 @@ D47（2026-10-12 用户授权实施）：扩展此前“系统不发送”边界
 
 ## 社媒渠道后续接入
 
-TK、FB、INS、LIN 的能力、认证条件与建议顺序见 [社媒渠道接入与后续开发指南](social-channel-integration.md)。先统一账号与能力，再验证 Meta 会话闭环；TikTok 先验证资质，LinkedIn 保留人工辅助及可选 provider 试点。当前为研究规划，尚未实施社媒发送。
+TK、FB、INS、LIN 的能力、认证条件与建议顺序见 [社媒渠道接入与后续开发指南](social-channel-integration.md)。Meta 首期框架已按 D48 实施，真实会话闭环待授权后验收；TikTok 先验证资质，LinkedIn 保留人工辅助及可选 provider 试点。
+
+D48（2026-10-12 用户授权）：先实现统一渠道账号与会话执行框架、Meta 独立服务和 FB／INS 普通文字回复，授权配置后补。设置与任务页面已接入，真实账号验收待配置；TK 资质探针及 LIN 消息 provider 继续后续推进。见 [操作说明](../docs/社媒渠道服务.md)。

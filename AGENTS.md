@@ -92,3 +92,5 @@ D46（2026-10-11 用户授权例外）：工作台支持单家 Maps 菜单浏览
 D47（2026-10-12 用户授权实施）：扩展此前“系统不发送”边界，Gmail 独立容器支持凭据管理、完整邮件预览确认、单家发送回填、已发送线程回复头同步及审批后批量队列；其他渠道仍人工。发送和批量队列默认暂停，执行前复核准入/审批/抑制，未知结果不自动重试。施工步骤见 [Gmail 服务计划](plan/gmail-service.md)。本次开发不授权向客户发送测试邮件。
 
 Gmail 服务配置：首次 Compose 启动前运行 `python3 scripts/configure_gmail_service.py`；启动后可用 `python3 scripts/configure_gmail_service.py --import-opc` 导入本机已有授权（不发送邮件）。新增验证命令 `cd services/gmail && uv sync --python 3.12 && uv run pytest -q && uv run ruff check gmail_service tests`。详细步骤见 [Gmail 服务操作](docs/Gmail邮件服务.md)。
+
+D48 社媒服务：首次 Compose 启动前另运行 `python3 scripts/configure_meta_service.py`。FB／INS 独立 HTTP 服务与持久化队列已实现，默认暂停，凭据待用户配置；真实权限、Webhook 订阅及收发另行验收。操作见 [社媒渠道服务](docs/社媒渠道服务.md)，开发前读 [接入指南](plan/social-channel-integration.md)。服务测试：`cd services/meta && uv sync --python 3.12 && uv run pytest -q && uv run ruff check meta_service tests entrypoint.py`。

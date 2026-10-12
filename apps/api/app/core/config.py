@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     google_places_daily_limit: int = Field(default=200, ge=1, le=10000)  # 项目内调用尝试上限，不是费用承诺
     gmail_service_url: str | None = None
     gmail_service_token_file: Path | None = None
+    meta_service_url: str | None = None
+    meta_service_token_file: Path | None = None
     maps_worker_token: str | None = Field(default=None, min_length=32, repr=False)
     templates_dir: Path = Path(__file__).resolve().parents[4] / "templates"  # <repo>/templates
     chrome_path: Path | None = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")  # 容器内设为空

@@ -44,9 +44,12 @@ services:
       BEACON_BOOTSTRAP_PASSWORD: ${BEACON_BOOTSTRAP_PASSWORD:-admin-dev-password}
       BEACON_CHROME_PATH: ""
       BEACON_GMAIL_SERVICE_URL: http://gmail-service:8090
+      BEACON_META_SERVICE_URL: http://meta-service:8091
+      BEACON_META_SERVICE_TOKEN_FILE: /run/secrets/meta_service_token
       BEACON_GMAIL_SERVICE_TOKEN_FILE: /run/secrets/gmail_service_token
     secrets:
       - gmail_service_token
+      - meta_service_token
     ports:
       - "8000:8000"
     volumes:
@@ -115,6 +118,48 @@ services:
     command: ["uv", "run", "--no-sync", "python", "-m", "app.modules.gmail.worker"]
     restart: unless-stopped
 
+  meta-service:
+    build:
+      context: ..
+      dockerfile: services/meta/Dockerfile
+    container_name: beacon-meta
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      META_SERVICE_TOKEN_FILE: /run/secrets/meta_service_token
+      HTTPS_PROXY: ${BEACON_META_PROXY:-}
+    secrets:
+      - meta_service_token
+    volumes:
+      - beacon-meta-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8091/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  outreach-worker:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: beacon-outreach-worker
+    depends_on:
+      api:
+        condition: service_healthy
+      meta-service:
+        condition: service_healthy
+    environment:
+      BEACON_DATABASE_URL: postgresql+psycopg://beacon:beacon@postgres:5432/beacon
+      BEACON_DATA_DIR: /data
+      BEACON_SECRET_KEY: ${BEACON_SECRET_KEY:-dev-only-secret-key-please-change-0123456789abcdef}
+      BEACON_META_SERVICE_URL: http://meta-service:8091
+      BEACON_META_SERVICE_TOKEN_FILE: /run/secrets/meta_service_token
+    secrets:
+      - meta_service_token
+    command: ["uv", "run", "--no-sync", "python", "-m", "app.modules.outreach.worker"]
+    restart: unless-stopped
+
   # 在容器里跑后端测试（使用同一 postgres 的 beacon_test 库）
   api-test:
     profiles: ["test"]
@@ -136,7 +181,10 @@ volumes:
   beacon-pgdata:
   beacon-data:
   beacon-gmail-data:
+  beacon-meta-data:
 
 secrets:
   gmail_service_token:
     file: ./secrets/gmail-service-token
+  meta_service_token:
+    file: ./secrets/meta-service-token

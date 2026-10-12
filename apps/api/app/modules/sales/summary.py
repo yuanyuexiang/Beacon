@@ -105,10 +105,16 @@ def per_lead_rows(db: Session, batch: Batch) -> list[dict]:
                 and lead.screening_class == ScreeningClass.candidate
                 and bool(allowed)
                 and not suppressed,
-                "sent": any(t.status in (TaskStatus.sent_manual, TaskStatus.sent_email) for t in tasks),
+                "sent": any(
+                    t.status in (TaskStatus.sent_manual, TaskStatus.sent_email, TaskStatus.sent_social) for t in tasks
+                ),
                 "sent_channels": ",".join(
                     sorted(
-                        {t.channel.value for t in tasks if t.status in (TaskStatus.sent_manual, TaskStatus.sent_email)}
+                        {
+                            t.channel.value
+                            for t in tasks
+                            if t.status in (TaskStatus.sent_manual, TaskStatus.sent_email, TaskStatus.sent_social)
+                        }
                     )
                 ),
                 "replied": bool(replies),

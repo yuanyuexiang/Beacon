@@ -162,6 +162,11 @@ def open_task(db: Session, t: ManualTask, by: str) -> ManualTask:
 
 def check_gmail_in_flight(db: Session, t: ManualTask) -> None:
     from app.modules.gmail.models import EmailDelivery
+    from app.modules.outreach.models import OutreachDelivery
+
+    social = db.scalar(select(OutreachDelivery).where(OutreachDelivery.task_id == t.id))
+    if social and social.status in {"ready", "queued", "sending", "unknown", "sent"}:
+        raise SalesError("已有社媒消息排队、发送中或结果待确认；请在社媒记录中处理")
 
     row = db.scalar(select(EmailDelivery).where(EmailDelivery.task_id == t.id))
     if row and row.status in {"ready", "queued", "sending", "unknown", "sent"}:
@@ -189,7 +194,7 @@ def record_sent(db: Session, t: ManualTask, sent_at: datetime, by: str, notes: s
 def cancel_task(db: Session, t: ManualTask, reason: str) -> ManualTask:
     db.refresh(t, with_for_update=True)
     check_gmail_in_flight(db, t)
-    if t.status in (TaskStatus.sent_manual, TaskStatus.sent_email):
+    if t.status in (TaskStatus.sent_manual, TaskStatus.sent_email, TaskStatus.sent_social):
         raise SalesError("已记录发送的任务不能取消")
     t.status = TaskStatus.cancelled
     t.status_reason = reason

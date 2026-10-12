@@ -25,7 +25,7 @@ KIND_CHANNEL = {
     "facebook": Channel.facebook,
     "tiktok": Channel.tiktok,
     "x": Channel.other_social,
-    "linkedin": Channel.other_social,
+    "linkedin": Channel.linkedin,
     "youtube": Channel.other_social,
     "contact_form": Channel.contact_form,
 }
