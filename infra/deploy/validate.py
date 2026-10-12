@@ -3,6 +3,7 @@
 
 import ast
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -36,6 +37,11 @@ def migration_head(root):
 
 def main():
     root = Path.cwd()
+    spec = importlib.util.spec_from_file_location("deploy_gateway", root / "infra/deploy/gateway.py")
+    assert spec and spec.loader
+    gateway = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gateway)
+    subprocess.run(["docker", "compose", "create", *gateway.CREATE_ARGS, "--help"], capture_output=True, check=True)
     compatibility = json.loads((root / "infra/deploy/compatibility.json").read_text())
     if compatibility["migration_head"] != migration_head(root):
         raise ValueError("新增迁移后需更新 compatibility.json，并明确回滚兼容范围")

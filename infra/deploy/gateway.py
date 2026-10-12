@@ -25,6 +25,7 @@ APP_SERVICES = ["api", "web", "gmail-service", "meta-service"]
 WORKERS = ["gmail-worker", "outreach-worker"]
 VOLUMES = ["beacon-data", "beacon-gmail-data", "beacon-meta-data"]
 MAX_REQUEST = 32768
+CREATE_ARGS = ["--no-build", "--pull", "never"]
 
 
 class DeploymentError(RuntimeError):
