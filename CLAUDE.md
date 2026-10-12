@@ -61,3 +61,6 @@ D46（2026-10-11，用户授权）：单家 Maps 菜单探针已接工作台按�
 D47（2026-10-12 用户授权实施）：扩展此前“系统不发送”边界，Gmail 独立容器支持凭据管理、完整邮件预览确认、单家发送回填、已发送线程回复头同步及审批后批量队列；其他渠道仍人工。发送和批量队列默认暂停，执行前复核准入/审批/抑制，未知结果不自动重试。施工步骤见 [Gmail 服务计划](plan/gmail-service.md)。本次开发不授权向客户发送测试邮件。
 
 Gmail 服务配置：首次 Compose 启动前运行 `python3 scripts/configure_gmail_service.py`；启动后可用 `python3 scripts/configure_gmail_service.py --import-opc` 导入本机已有授权（不发送邮件）。新增验证命令 `cd services/gmail && uv sync --python 3.12 && uv run pytest -q && uv run ruff check gmail_service tests`。详细步骤见 [Gmail 服务操作](docs/Gmail邮件服务.md)。
+
+
+后续 TK、FB、INS、LIN 渠道开发先阅读 [社媒渠道接入与后续开发指南](plan/social-channel-integration.md)。该文档为调研与架构建议；社媒适配器尚未实现，公开主页 URL 不等于 API 收件人，平台消息权限与业务准入分别检查。

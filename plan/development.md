@@ -142,3 +142,8 @@ Docker API 与宿主机浏览器解耦；Mac 默认复用 data/browser-profiles/
 ## D47：Gmail 独立容器与发送链路
 
 按用户授权逐步扩展发送能力，见 [实施步骤](gmail-service.md) 和 [操作说明](../docs/Gmail邮件服务.md)。HTTP/MCP 共用服务，完整预览后明确确认，执行前再次复核；队列持久化、回复头同步和未知结果对账，其他渠道仍人工。
+
+
+## 社媒渠道开发指导
+
+后续接入 TK、FB、INS、LIN 前阅读 [开发指南](social-channel-integration.md)，按平台身份、动作能力与会话条件设计，复用 Gmail 的审批和未知结果处理。账号模型、适配器契约、部署及验收见该文档；正式实施范围另行确定。
