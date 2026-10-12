@@ -204,3 +204,13 @@ def test_runtime_secret_quoting_preserves_dollars_backslashes_and_quotes():
 
     value = "secret$literal\\path'quote"
     assert dotenv_values(stream=StringIO("TOKEN=" + env_quote(value) + "\n"))["TOKEN"] == value
+
+
+def test_actual_create_command_is_accepted_by_compose_cli(tmp_path):
+    import subprocess
+
+    g = FakeGateway(tmp_path)
+    g.deploy(g.body())
+    command = next(command for command in g.calls if "create" in command)
+    options = command[command.index("create") + 1 :]
+    subprocess.run(["docker", "compose", "create", *options, "--help"], capture_output=True, check=True)

@@ -413,7 +413,7 @@ class Gateway:
                 self.compose(
                     release,
                     "create",
-                    "--no-deps",
+                    *CREATE_ARGS,
                     "api",
                     "gmail-service",
                     "meta-service",
