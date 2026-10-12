@@ -1,0 +1,41 @@
+# 基础建设
+services:
+  traefik:
+    image: traefik:v3.6.5
+    container_name: traefik
+    restart: unless-stopped
+    environment:
+      AWS_REGION: eu-west-2
+      AWS_HOSTED_ZONE_ID: Z03256952JZ7EAAUQN35A
+      TZ: Asia/Shanghai
+    command:
+      - "--log.level=DEBUG"
+      - "--api.insecure=false"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=matrix-network"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entryPoint.permanent=true"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.route53.acme.email=matrix_net@126.com"
+      - "--certificatesresolvers.route53.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.route53.acme.dnschallenge.provider=route53"
+      - "--certificatesresolvers.route53.acme.dnschallenge.delayBeforeCheck=90s"
+      - "--certificatesresolvers.route53.acme.dnschallenge.resolvers=8.8.8.8:53,8.8.4.4:53"
+    volumes:
+      - "./data/traefik/letsencrypt:/letsencrypt"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`traefik.ai-onestep.com`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=route53"
+      - "traefik.http.routers.api.service=api@internal"
+    ports:
+      - "80:80"
+      #- "8080:8080"
+      - "443:443"
+
