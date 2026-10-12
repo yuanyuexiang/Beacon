@@ -1,0 +1,95 @@
+# GitHub 自动部署操作说明
+
+## 部署范围
+
+测试阶段，向 `main` 提交自动执行 CI、构建 GHCR 镜像、发布到 `18.175.156.130`，不设人工发布审批。PR 只检查；失败的测试不发布。访问域名为 `https://beacon.ai-onestep.com`。Traefik 是独立基础设施，应用发布不重启它。
+
+仓库：`yuanyuexiang/Beacon`。流水线入口是 [ci-cd.yml](../.github/workflows/ci-cd.yml)。构建与发布都在 GitHub 托管 runner 上运行，服务器不安装 runner、不现场编译源码。
+
+## 文件与服务器布局
+
+| 文件 | 用途 |
+|---|---|
+| [docker-compose-traefik.yaml](../infra/docker-compose-traefik.yaml) | 基础 HTTPS 入口及共享 `matrix-network`；公网 Dashboard 默认关闭 |
+| [docker-compose.production.yaml](../infra/docker-compose.production.yaml) | 独立业务栈，只使用镜像；没有公网数据库／API／内部服务端口 |
+| [gateway.py](../infra/deploy/gateway.py) | 服务器固定发布入口，锁、备份、一次迁移、验证、回滚 |
+| [send_release.py](../infra/deploy/send_release.py) | CI 校验四个镜像 digest 后通过受限 SSH 提交清单 |
+| [compatibility.json](../infra/deploy/compatibility.json) | 目标迁移版本及旧数据格式回滚声明 |
+| [bootstrap_server.py](../infra/deploy/bootstrap_server.py) | 管理员首次配置或显式更新发布规范 |
+| [validate.py](../infra/deploy/validate.py) | 无真实凭据的 Compose 与迁移声明检查 |
+
+服务器使用 `/opt/beacon/config`、`releases`、`state`、`backups`，权限为 root 私有。发布入口安装在 `/usr/local/lib/beacon-deploy/gateway.py`。基础 Traefik 的实际文件位于 `/home/ubuntu/infrastructure/docker-compose.yaml`，首次调整会备份原文件及保留 ACME 数据。
+
+固定数据卷为 `beacon-pgdata`、`beacon-data`、`beacon-gmail-data`、`beacon-meta-data`。不运行 `down -v`，不自动数据库降级或恢复旧数据库。现有本机开发文件 [docker-compose.yml](../infra/docker-compose.yml) 保留独立使用。
+
+## 首次配置
+
+本次已连接管理员 `ubuntu` 并记录用户接受的首次主机密钥。其他机器首次连接应核对服务器指纹；后续 CI 严格校验已保存密钥，不自动 `ssh-keyscan` 信任新结果。
+
+```bash
+chmod 400 Beacon.pem
+uv run --project apps/api python infra/deploy/bootstrap_server.py --key Beacon.pem
+```
+
+此操作使用管理密钥准备独立 `beacon-deploy` 用户、固定 sudo 入口及配置。CI 的私钥保存在本机受控 `data/devops/beacon-deploy-key`，不是管理用 `Beacon.pem`。SSH key 限制交互终端与转发，并强制执行固定发布程序。
+
+配置文件首次生成后保留已有值，不覆盖现有账号、数据库密码或第三方密钥。首次管理员密码随机生成；本次登录信息保存在本机受控 `data/devops/server-login.json`，不提交 Git，不输出到 CI。服务器配置包含应用运行凭据；仅按需复制本机已有的后端集成配置，不复制本机代理、Google 浏览器 profile 或 Gmail OAuth 会话。
+
+部署身份仍具有受控的 Docker 发布权限。仓库写权限、工作流修改权限和 CI 私钥属于信任边界；不能将它们开放给不可信代码。
+
+### GitHub 仓库配置
+
+| 类型 | 名称 | 内容 |
+|---|---|---|
+| Secret | `BEACON_DEPLOY_SSH_KEY` | 独立部署私钥 |
+| Secret | `BEACON_DEPLOY_KNOWN_HOSTS` | 已确认的服务器主机密钥 |
+| Variable | `BEACON_DEPLOY_HOST` | `18.175.156.130` |
+| Variable | `BEACON_DEPLOY_USER` | `beacon-deploy` |
+| Variable | `BEACON_DOMAIN` | `beacon.ai-onestep.com` |
+
+不需要长期 GHCR PAT。发布 job 使用 `GITHUB_TOKEN` 的 `packages:write`，部署 job 只用 `packages:read`，经 SSH stdin 传给服务器用于本次拉取。临时 Docker 配置在发布结束后清除，Token 不写入发布清单。新 package 通过源码 label 关联本仓库，需保留本仓库的读取权限。
+
+## 流水线顺序
+
+1. 后端在临时 PostgreSQL 中跑测试、Ruff、mypy；前端跑 typecheck、lint、Vitest 和生产构建；Gmail／Meta 独立测试；部署脚本测试及配置检查。
+2. 全部通过后构建 `beacon-api`、`beacon-web`、`beacon-gmail`、`beacon-meta`。两个 worker 复用 API 镜像。服务器为 x86_64，构建 `linux/amd64`。
+3. 推送 `sha-提交SHA` 标记，实际部署固定 `@sha256:...`，同时生成 SBOM 和 provenance。Actions 及基础镜像均固定完整 SHA／digest。
+4. 部署 job 不抢断已运行发布，服务器还使用文件锁，并拒绝较旧工作流覆盖已上线的新版本。
+5. 校验部署规范和磁盘；先拉完镜像，再停止 worker 和应用写入；备份数据库、资产和两个凭据卷。
+6. 运行一次性 `migrate`；API 启动命令不再包含迁移。只运行一个 API 进程，保持当前后台任务与浏览器心跳约束。
+7. 启动应用并验证容器健康、数据库连通、公网 HTTPS、Web 与 API 的提交 SHA。通过后启动 worker，并保存当前／上一发布清单。
+
+API `/api/health` 和 Web `/healthz` 返回实际运行的提交 SHA。首张证书可能需要等待基础配置的 90 秒 DNS 检查，发布程序会有界等待。生产会话设置 Secure Cookie；Meta 配置页默认回调随实际域名生成，Gmail 回调由业务 Compose 设置为 HTTPS 域名。
+
+CI 不读取应用密钥，不发送真实客户消息。发布不改业务发送开关；新 Gmail／Meta 服务仍默认暂停。
+
+## 回滚与失败处理
+
+镜像拉取失败发生在停止服务之前，不影响已运行版本。备份失败不会继续迁移；有上一版本时恢复上一版本应用。候选应用不健康时，只有数据结构与持久化格式兼容才自动回滚镜像，流水线仍报告失败。
+
+新增迁移必须更新 `compatibility.json` 的 `migration_head`，否则 CI 阻断。数据库 revision 不变且 provider 存储格式兼容时可回滚；revision 改变时须在 `rollback_compatible_from` 明确声明对应旧版本，并确认新结构能被旧程序读取。服务 SQLite／JSON 格式不兼容时将 `provider_storage_compatible` 设为 false。
+
+不兼容或发布中断会保留 `/opt/beacon/state/pending.json`，停止继续覆盖。管理员需核对其中阶段、数据库 revision、`releases/*/deploy.log` 和实际服务状态，确认恢复或完成方案后再清理该记录；不要直接删除记录来跳过未确认状态。
+
+应用发布清单在 `state/current.json`，上一成功版本在 `state/previous.json`；失败回滚另记 `state/last_failure.json`。日志与备份不进入 GitHub artifact，避免上传业务凭据或证据。
+
+## 基础设施升级与维护
+
+业务源码提交自动上线。修改生产 Compose 或固定 gateway 时，先用管理员 bootstrap 同步相同版本，再提交并发布；脚本 hash 不一致会在停止服务前拒绝部署。Traefik 自身升级独立执行，不混入应用 CD。
+
+发布前备份包含校验和，并检查数据库 dump 可被 pg_restore 读取；完整恢复演练应在独立环境进行。默认保留最近至少 5 份完整备份，超过 14 天的更旧完整备份在成功发布后清理；不自动清理未完成备份或上一版本镜像。
+
+当前备份仍在同一台服务器。进入正式生产前再落实加密异机备份、恢复演练、外部可用性告警及主机维护；单机不提供主机级高可用。发送／Maps／分析等正在执行任务在发布时可能中断，未知发送继续走现有对账规则，分析按界面状态重试。
+
+### 本地检查
+
+```bash
+uv run --project apps/api python infra/deploy/validate.py
+uv run --project apps/api python -m pytest tests/deploy -q
+uv run --project apps/api ruff check --config apps/api/pyproject.toml infra/deploy tests/deploy
+actionlint .github/workflows/ci-cd.yml
+```
+
+后端、前端及 provider 使用各自现有命令。提交触发后在 [GitHub Actions](https://github.com/yuanyuexiang/Beacon/actions) 查看结果；流水线失败时先看失败阶段，再核对服务器发布状态。
+
+参考：[GHCR 认证与仓库权限](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)、[GitHub Actions 安全实践](https://docs.github.com/en/actions/reference/security/secure-use)、[Docker 构建来源与 SBOM](https://docs.docker.com/build/ci/github-actions/attestations/)、[Traefik Dashboard 安全](https://doc.traefik.io/traefik/operations/dashboard/)。

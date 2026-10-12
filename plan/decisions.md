@@ -114,3 +114,7 @@ D47（2026-10-12 用户授权实施）：扩展此前“系统不发送”边界
 ### D48 Meta 首期开发授权（2026-10-12）
 
 用户同意先开发统一渠道框架及 Facebook／Instagram，授权配置后补。采用内部 Meta HTTP 容器＋API PostgreSQL 队列；账号凭据不进入业务表，身份、会话关联和内容版本参与执行复核。Gmail 继续原服务；LinkedIn 增加独立渠道，TK／LIN 自动消息后续决定。默认暂停，首期只做已入站会话内的普通文字回复；未验证的窗口外例外不启用。OAuth 浏览器接入先支持 Facebook Login，Instagram Login 可导入已有 Token。实现范围与未完成的真实账号验收见 [操作说明](../docs/社媒渠道服务.md)。本次未获准向客户发送测试消息。
+
+### D49 GHCR 连续部署（2026-10-12 授权，2026-10-13 实施）
+
+用户明确不用 ECR，测试阶段 main 提交即自动 CI/CD，不设生产审批。采用 GitHub 托管 runner、GHCR 四镜像＋API 镜像复用 worker、服务器独立业务 Compose、受限 SSH 发布入口及 GitHub 短期 Token 拉取。服务器为 Ubuntu x86_64，域名 beacon.ai-onestep.com；用户确认管理员 ubuntu 并接受首次记录主机密钥。管理 PEM 不给 CI，应用密钥只留服务器。Traefik 共享网络修正并关闭无认证的公网 Dashboard，保留证书及独立升级。部署前一致性备份、一次迁移、双端版本与 HTTPS 验证；兼容时回滚镜像，不自动恢复或降级数据库。操作见 [自动部署说明](../docs/GitHub自动部署.md)。本次发布不授权触达客户。

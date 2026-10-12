@@ -1,5 +1,5 @@
 # Beacon API：Python 3.12 + uv。构建上下文为仓库根目录（需要 templates/）。
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS base
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim@sha256:e5b65587bce7de595f299855d7385fe7fca39b8a74baa261ba1b7147afa78e58 AS base
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv/apps/api
 # 先装依赖（利用缓存），再拷贝代码

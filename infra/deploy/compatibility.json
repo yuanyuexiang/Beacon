@@ -1,0 +1,5 @@
+{
+  "migration_head": "f9496c930a01",
+  "rollback_compatible_from": [],
+  "provider_storage_compatible": true
+}

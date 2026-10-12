@@ -155,3 +155,7 @@ Docker API 与宿主机浏览器解耦；Mac 默认复用 data/browser-profiles/
 首期普通文字回复最多 1000 字符，采用最近入站后 24 小时的保守范围；预览最多 30 分钟且不超过会话截止。账号授权、文案及关联变化使预览失效；未知结果只查询或人工凭证对账。默认发送／队列暂停，设置页支持应用配置、Token 导入与 Facebook Login 浏览器授权。Instagram Login 浏览器授权、附件和评论私信、TK／LIN 自动发送、Meta MCP 尚未实现。
 
 部署、授权、订阅、存储及验收见 [社媒服务操作](../docs/社媒渠道服务.md)。普通测试不使用真实社媒；真实应用审批和收发在用户配置之后联调。
+
+## D49 GitHub CI 与 GHCR 自动部署
+
+main push → 临时库后端与前端/provider/部署测试 → 四镜像 GHCR digest → 独立部署身份提交发布清单 → 备份、单次迁移、健康与 HTTPS/SHA 验证 → 启动 worker。PR 仅测试，测试阶段没有发布审批。Compose／固定 gateway 更新先同步服务器，不允许未确认脚本在发布时替换基础入口。失败及 schema 兼容回滚场景使用本地模拟测试，真实 Actions 与服务器验收另记任务清单。见 [操作说明](../docs/GitHub自动部署.md)。

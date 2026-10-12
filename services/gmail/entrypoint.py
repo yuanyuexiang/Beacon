@@ -1,4 +1,5 @@
 """Copy root-readable Compose secret, then run the service without root privileges."""
+
 import os
 from pathlib import Path
 
@@ -10,4 +11,7 @@ os.chown(target, 10001, 10001)
 os.environ["GMAIL_SERVICE_TOKEN_FILE"] = str(target)
 os.setgid(10001)
 os.setuid(10001)
-os.execv("/srv/.venv/bin/uvicorn", ["uvicorn", "gmail_service.server:app", "--host", "0.0.0.0", "--port", "8090", "--no-access-log"])
+os.execv(
+    "/srv/.venv/bin/uvicorn",
+    ["uvicorn", "gmail_service.server:app", "--host", "0.0.0.0", "--port", "8090", "--no-access-log"],
+)

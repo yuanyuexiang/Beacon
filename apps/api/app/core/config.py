@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     test_database_url: str | None = None
     data_dir: Path = Field(description="受控文件目录（绝对路径），存放菜单证据与样稿")
     secret_key: str = Field(min_length=32, description="会话签名密钥")
+    cookie_secure: bool = False
+    release_sha: str | None = None
     bootstrap_operator: str | None = None
     bootstrap_password: str | None = None
     max_asset_bytes: int = 20 * 1024 * 1024

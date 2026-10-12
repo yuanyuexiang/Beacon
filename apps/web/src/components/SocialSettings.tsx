@@ -20,11 +20,11 @@ export default function SocialSettings() {
     const [next, rows] = await Promise.all([api<Status>("/api/outreach/status"), api<ChannelAccount[]>("/api/outreach/accounts")]);
     setStatus(next); setAccounts(rows);
   }, []);
-  useEffect(() => { refresh().catch((e) => message.error(e.message));
+  useEffect(() => { appForm.setFieldsValue({ redirect_uri: window.location.origin + "/api/outreach/oauth/callback" }); refresh().catch((e) => message.error(e.message));
     const result = new URLSearchParams(window.location.search).get("meta");
     if (result === "connected") message.success("Meta 账号已连接，发送默认暂停");
     if (result === "failed") message.error("Meta 授权未完成，请核对应用权限与回调地址");
-  }, [refresh]);
+  }, [refresh, appForm]);
   const act = async (work: () => Promise<void>) => {
     setBusy(true); try { await work(); await refresh(); } catch (e) { message.error((e as Error).message); } finally { setBusy(false); }
   };

@@ -65,7 +65,9 @@ def parse_session_token(token: str) -> str | None:
 
 
 def set_session_cookie(response: Response, token: str) -> None:
-    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL, path="/")
+    response.set_cookie(
+        COOKIE, token, httponly=True, samesite="lax", max_age=SESSION_TTL, path="/", secure=get_settings().cookie_secure
+    )
 
 
 def clear_session_cookie(response: Response) -> None:

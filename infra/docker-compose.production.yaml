@@ -1,0 +1,163 @@
+# 服务器业务栈。由 infra/deploy/gateway.py 固定 project=beacon 发布；Traefik 独立运行。
+x-service: &service
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+  stop_grace_period: 180s
+  networks: [backend]
+
+x-api-environment: &api-environment
+  BEACON_DATA_DIR: /data
+  BEACON_CHROME_PATH: ""
+  BEACON_COOKIE_SECURE: "true"
+  BEACON_RELEASE_SHA: ${BEACON_RELEASE_SHA:?release required}
+  BEACON_GMAIL_SERVICE_URL: http://gmail-service:8090
+  BEACON_GMAIL_SERVICE_TOKEN_FILE: /run/secrets/gmail_service_token
+  BEACON_META_SERVICE_URL: http://meta-service:8091
+  BEACON_META_SERVICE_TOKEN_FILE: /run/secrets/meta_service_token
+
+x-worker-environment: &worker-environment
+  BEACON_DATABASE_URL: ${BEACON_DATABASE_URL:?database URL required}
+  BEACON_SECRET_KEY: ${BEACON_SECRET_KEY:?session secret required}
+  BEACON_DATA_DIR: /data
+  BEACON_GMAIL_SERVICE_URL: http://gmail-service:8090
+  BEACON_GMAIL_SERVICE_TOKEN_FILE: /run/secrets/gmail_service_token
+  BEACON_META_SERVICE_URL: http://meta-service:8091
+  BEACON_META_SERVICE_TOKEN_FILE: /run/secrets/meta_service_token
+
+services:
+  postgres:
+    <<: *service
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_USER: beacon
+      POSTGRES_DB: beacon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?database password required}
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beacon -d beacon"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    <<: *service
+    image: ${API_IMAGE:?API image digest required}
+    env_file: ["${BEACON_CONFIG_DIR:-/opt/beacon/config}/runtime.env"]
+    environment: *api-environment
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "170"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    secrets: [gmail_service_token, meta_service_token]
+    volumes: ["data:/data"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health/db',timeout=5)"]
+      interval: 10s
+      timeout: 7s
+      retries: 18
+
+  web:
+    <<: *service
+    image: ${WEB_IMAGE:?Web image digest required}
+    environment:
+      BEACON_API_URL: http://api:8000
+      BEACON_RELEASE_SHA: ${BEACON_RELEASE_SHA:?release required}
+    depends_on:
+      api: { condition: service_healthy }
+    networks: [backend, ingress]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 7s
+      retries: 18
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: matrix-network
+      traefik.http.routers.beacon.rule: Host(`${BEACON_DOMAIN:?domain required}`)
+      traefik.http.routers.beacon.entrypoints: websecure
+      traefik.http.routers.beacon.tls.certresolver: route53
+      traefik.http.routers.beacon.service: beacon-web
+      traefik.http.services.beacon-web.loadbalancer.server.port: "3000"
+      traefik.http.routers.beacon.middlewares: beacon-security
+      traefik.http.middlewares.beacon-security.headers.contentTypeNosniff: "true"
+      traefik.http.middlewares.beacon-security.headers.referrerPolicy: strict-origin-when-cross-origin
+
+  gmail-service:
+    <<: *service
+    image: ${GMAIL_IMAGE:?Gmail image digest required}
+    environment:
+      GMAIL_SERVICE_TOKEN_FILE: /run/secrets/gmail_service_token
+      GMAIL_REDIRECT_URI: https://${BEACON_DOMAIN:?domain required}/api/gmail/oauth/callback
+    secrets: [gmail_service_token]
+    volumes: ["gmail-data:/data"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8090/health',timeout=5)"]
+      interval: 10s
+      timeout: 7s
+      retries: 18
+
+  meta-service:
+    <<: *service
+    image: ${META_IMAGE:?Meta image digest required}
+    environment:
+      META_SERVICE_TOKEN_FILE: /run/secrets/meta_service_token
+    secrets: [meta_service_token]
+    volumes: ["meta-data:/data"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8091/health',timeout=5)"]
+      interval: 10s
+      timeout: 7s
+      retries: 18
+
+  gmail-worker:
+    <<: *service
+    image: ${API_IMAGE:?API image digest required}
+    environment: *worker-environment
+    secrets: [gmail_service_token, meta_service_token]
+    command: ["python", "-m", "app.modules.gmail.worker"]
+    depends_on:
+      api: { condition: service_healthy }
+      gmail-service: { condition: service_healthy }
+
+  outreach-worker:
+    <<: *service
+    image: ${API_IMAGE:?API image digest required}
+    environment: *worker-environment
+    secrets: [gmail_service_token, meta_service_token]
+    command: ["python", "-m", "app.modules.outreach.worker"]
+    depends_on:
+      api: { condition: service_healthy }
+      meta-service: { condition: service_healthy }
+
+  migrate:
+    <<: *service
+    profiles: [tools]
+    restart: "no"
+    image: ${API_IMAGE:?API image digest required}
+    env_file: ["${BEACON_CONFIG_DIR:-/opt/beacon/config}/runtime.env"]
+    environment: *api-environment
+    command: ["alembic", "upgrade", "head"]
+    secrets: [gmail_service_token, meta_service_token]
+    volumes: ["data:/data"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+networks:
+  backend: {}
+  ingress:
+    external: true
+    name: matrix-network
+
+volumes:
+  pgdata: { name: beacon-pgdata }
+  data: { name: beacon-data }
+  gmail-data: { name: beacon-gmail-data }
+  meta-data: { name: beacon-meta-data }
+
+secrets:
+  gmail_service_token:
+    file: ${BEACON_CONFIG_DIR:-/opt/beacon/config}/secrets/gmail-service-token
+  meta_service_token:
+    file: ${BEACON_CONFIG_DIR:-/opt/beacon/config}/secrets/meta-service-token

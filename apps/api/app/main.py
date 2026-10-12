@@ -61,7 +61,11 @@ async def places_no_store(request: Request, call_next):
 
 @api.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    result = {"status": "ok"}
+    release = get_settings().release_sha
+    if release:
+        result["release"] = release
+    return result
 
 
 @api.get("/health/db")

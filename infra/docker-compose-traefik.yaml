@@ -1,7 +1,8 @@
 # 基础建设
 services:
   traefik:
-    image: traefik:v3.6.5
+    networks: [matrix-network]
+    image: traefik:v3.6.25@sha256:31267173a15b4944e797a76ffd9c419707c8d8b32fe5b610f80cd0cfa05f372d
     container_name: traefik
     restart: unless-stopped
     environment:
@@ -9,9 +10,9 @@ services:
       AWS_HOSTED_ZONE_ID: Z03256952JZ7EAAUQN35A
       TZ: Asia/Shanghai
     command:
-      - "--log.level=DEBUG"
+      - "--log.level=INFO"
       - "--api.insecure=false"
-      - "--api.dashboard=true"
+      - "--api.dashboard=false"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--providers.docker.network=matrix-network"
@@ -28,14 +29,12 @@ services:
     volumes:
       - "./data/traefik/letsencrypt:/letsencrypt"
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`traefik.ai-onestep.com`)"
-      - "traefik.http.routers.api.entrypoints=websecure"
-      - "traefik.http.routers.api.tls.certresolver=route53"
-      - "traefik.http.routers.api.service=api@internal"
     ports:
       - "80:80"
       #- "8080:8080"
       - "443:443"
 
+
+networks:
+  matrix-network:
+    external: true
