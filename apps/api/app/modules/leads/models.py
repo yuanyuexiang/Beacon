@@ -105,6 +105,8 @@ class BatchLead(UUIDPk, Base):
         UUID(as_uuid=True), ForeignKey("lead.id", ondelete="CASCADE"), nullable=False
     )
     sample_order: Mapped[int | None] = mapped_column(Integer)
+    source_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    source_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     batch: Mapped[Batch] = relationship(back_populates="members")
     lead: Mapped[Lead] = relationship(back_populates="memberships")

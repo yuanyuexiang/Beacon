@@ -66,3 +66,11 @@ def test_network_exhaustion_does_not_expose_low_level_connection_details():
     with pytest.raises(fsa.FsaConnectionError, match="3 次") as error:
         fsa.list_authorities(transport=httpx.MockTransport(handler))
     assert len(seen) == 3 and "internal-connection-details" not in str(error.value)
+
+
+def test_malformed_success_response_is_not_treated_as_an_empty_directory():
+    import pytest
+
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"error": "temporary issue"}))
+    with pytest.raises(fsa.FsaConnectionError, match="分页格式不完整"):
+        fsa.fetch_establishments(277, transport=transport)

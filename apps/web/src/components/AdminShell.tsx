@@ -12,6 +12,7 @@ const NAV_GROUPS = [
     label: "工作台",
     items: [
       { key: "/", label: "仪表盘", icon: <DashboardOutlined /> },
+      { key: "/directory", label: "门店池", icon: <ShopOutlined /> },
       { key: "/leads", label: "批次与线索", icon: <ShopOutlined /> },
       { key: "/tasks", label: "触达任务与回复", icon: <MessageOutlined /> },
     ],
@@ -19,7 +20,7 @@ const NAV_GROUPS = [
   { key: "system", label: "系统", items: [{ key: "/settings", label: "设置与说明", icon: <SettingOutlined /> }] },
 ];
 
-const TITLES: Record<string, string> = { "/": "仪表盘", "/leads": "批次与线索", "/tasks": "触达任务与回复", "/settings": "设置与说明" };
+const TITLES: Record<string, string> = { "/": "仪表盘", "/leads": "批次与线索", "/directory": "门店池", "/tasks": "触达任务与回复", "/settings": "设置与说明" };
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -31,7 +32,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     api<{ username: string }>("/api/auth/me").then((m) => setMe(m.username)).catch(() => router.replace("/login"));
   }, [path, router]);
   if (["/login", "/terms", "/privacy"].includes(path)) return <>{children}</>;
-  const section = path.startsWith("/leads") ? "/leads" : path.startsWith("/tasks") ? "/tasks" : path.startsWith("/settings") ? "/settings" : "/";
+  const section = path.startsWith("/directory") ? "/directory" : path.startsWith("/leads") ? "/leads" : path.startsWith("/tasks") ? "/tasks" : path.startsWith("/settings") ? "/settings" : "/";
   const crumbs = [{ title: <Link href="/">首页</Link> }, { title: TITLES[section] }];
   if (path.startsWith("/leads/") && path !== "/leads") crumbs.push({ title: "线索详情" });
   return (

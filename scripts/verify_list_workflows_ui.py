@@ -32,7 +32,7 @@ def make_task(key, body):
         "kind": body["kind"],
         "status": "pending",
         "step": 0,
-        "steps": (["fsa"] if body["kind"] != "enrich" else [])
+        "steps": (["pool"] if body["kind"] != "enrich" else [])
         + ["overture", "screen", "contacts"],
         "params": {**body, "seed": None} if body["kind"] != "enrich" else {},
         "results": [],
@@ -56,8 +56,18 @@ async def handle(route):
     status = 200
     if path == "/api/auth/me":
         result = {"username": "ui-test"}
-    elif path == "/api/sources/fsa/authorities":
-        result = [{"id": 277, "name": "Adur", "region": "South East", "count": 464}]
+    elif path == "/api/directory/regions":
+        result = [
+            {
+                "id": 277,
+                "name": "Adur",
+                "region": "South East",
+                "count": 464,
+                "pool_count": 3,
+                "last_success_at": "2026-10-15T00:00:00Z",
+                "type_versions": {"1": {}, "7843": {}, "7844": {}},
+            }
+        ]
     elif path == "/api/batches" and request.method == "GET":
         result = batches
     elif path in ["/api/batches", "/api/lists"]:
@@ -96,7 +106,7 @@ async def handle(route):
                 fail_overture = False
                 t.update(status="failed", error="模拟网络中断；已保存检查点")
             else:
-                if stage == "fsa":
+                if stage == "pool":
                     previous = len(leads[key])
                     count = 3 if not previous else 2
                     leads[key] += [
@@ -178,7 +188,7 @@ async def main():
         await page.locator(".ant-select-item-option").filter(has_text="Adur").click()
         assert await page.get_by_label("获取餐厅数量", exact=True).count() == 0
         await expect(
-            page.get_by_text("获取所选类型的全部商户", exact=True)
+            page.get_by_text("从门店池选入所选类型的全部商户", exact=True)
         ).to_be_visible()
         await page.get_by_label("商户类型", exact=True).click()
         await (
@@ -206,7 +216,7 @@ async def main():
         await expect(
             page.get_by_role("button", name="建立名单", exact=True)
         ).to_be_enabled()
-        assert len([s for _, _, s in advances if s == "fsa"]) == 1
+        assert len([s for _, _, s in advances if s == "pool"]) == 1
         assert tasks["ui-workflow"]["params"]["sample_n"] is None
         assert sorted(tasks["ui-workflow"]["params"]["business_type_ids"]) == [
             1,
@@ -218,7 +228,7 @@ async def main():
         await page.get_by_role("button", name="查看 / 继续任务", exact=True).click()
         await page.get_by_role("button", name="重试未完成步骤", exact=True).click()
         await page.get_by_text("处理完成", exact=True).wait_for()
-        assert len([s for _, _, s in advances if s == "fsa"]) == 1
+        assert len([s for _, _, s in advances if s == "pool"]) == 1
         await page.locator(".ant-drawer-close").click()
         await page.get_by_role("button", name="完善名单", exact=True).click()
         before = len(advances)
@@ -297,7 +307,7 @@ async def main():
         assert len([r for r in requests if r[:2] == ("POST", "/api/imports")]) == 1
         assert not errors, errors
         print(
-            "Verified local production UI: create multi-type list, persisted refresh/retry, enrich skips FSA, append full remaining members in fixed region, running controls locked, CSV and empty list; zero page errors."
+            "Verified local production UI: create multi-type list, persisted refresh/retry, new lists use cached pool and enrich skips FSA, append full remaining members in fixed region, running controls locked, CSV and empty list; zero page errors."
         )
         await browser.close()
 

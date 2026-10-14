@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.core.models_base import Base, Timestamped, UUIDPk
+from app.modules.directory import service as directory
 from app.modules.leads import runs, service
 from app.modules.leads.models import Batch
 
@@ -113,6 +114,13 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
             authority = int(match.group(1)) if match else None
         if authority is not None and authority != body.authority_id:
             raise HTTPException(422, "地区与已保存任务不一致")
+    if body.kind != "enrich":
+        if batch.country != "GB":
+            raise HTTPException(422, "FSA 门店池仅支持英国名单")
+        assert body.authority_id is not None
+        region = directory.require_pool(db, body.authority_id, list(body.business_type_ids))
+        if region.name != batch.region:
+            raise HTTPException(422, "门店池地区与名单不一致")
     previous_task = latest(db, batch)
     if previous_task and previous_task.status == "failed":
         # 开始新任务时归档旧失败任务，保留成果和错误，避免旧任务后来重入。
@@ -121,10 +129,11 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
     if body.kind != "enrich":
         params["seed"] = None
         params["selection"] = "ordered"
+        params["source"] = "directory"
     task = Workflow(
         batch_id=batch.id,
         kind=body.kind,
-        steps=(["fsa"] if body.kind != "enrich" else []) + ["overture", "screen", "contacts"],
+        steps=(["pool"] if body.kind != "enrich" else []) + ["overture", "screen", "contacts"],
         params=params,
         results=[],
         started_by=by,
@@ -143,7 +152,18 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
     db.commit()
     stage = task.steps[task.step]
     try:
-        if stage == "fsa":
+        if stage == "pool":
+            p = task.params
+            result = directory.add_to_batch(
+                db,
+                batch,
+                p["authority_id"],
+                p["business_type_ids"],
+                p["exclude_awaiting"],
+                p["sample_n"],
+                task.started_by,
+            )
+        elif stage == "fsa":
             p = task.params
             result = service.sync_fsa(
                 db,

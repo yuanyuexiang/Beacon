@@ -95,7 +95,14 @@ def fetch_establishments(
             )
             r.raise_for_status()
             d = r.json()
-            meta = d.get("meta") or {}
+            if (
+                not isinstance(d, dict)
+                or not isinstance(d.get("meta"), dict)
+                or not isinstance(d.get("establishments"), list)
+                or "totalCount" not in d["meta"]
+            ):
+                raise FsaConnectionError("FSA 返回的分页格式不完整，请稍后重试；已有数据保留")
+            meta = d["meta"]
             extract = extract or meta.get("extractDate")
             total = int(meta.get("totalCount") or 0)
             out += d.get("establishments") or []

@@ -228,3 +228,23 @@ def test_upgrade_supplies_maps_image_to_previous_release_for_rollback(tmp_path):
     )
     assert "maps-worker" in gateway.WORKERS
     assert "beacon-maps-data" in gateway.VOLUMES
+
+
+def test_directory_worker_is_started_only_for_supported_api_release(tmp_path):
+    g = FakeGateway(tmp_path)
+    old = g.root / "releases/previous"
+    assert "directory-worker" not in g.workers_for(old)
+    new = g.root / "releases/new"
+    new.mkdir()
+    atomic_json(new / "manifest.json", {"compatibility": {"directory_worker": True}})
+    assert "directory-worker" in g.workers_for(new)
+
+
+def test_backup_failure_does_not_start_directory_worker_with_old_api(tmp_path):
+    g = FakeGateway(tmp_path, failure="backup")
+    body = g.body()
+    body["compatibility"]["directory_worker"] = True
+    with pytest.raises(DeploymentError):
+        g.deploy(body)
+    worker_commands = [c for c in g.calls if "up" in c and "gmail-worker" in c]
+    assert worker_commands and all("directory-worker" not in c for c in worker_commands)

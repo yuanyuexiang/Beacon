@@ -11,7 +11,7 @@ import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLE
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
 type Lead = { business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
-type Authority = { id: number; name: string; region: string | null; count: number | null };
+type Authority = { id: number; name: string; region: string | null; count: number | null; pool_count: number; last_success_at: string | null; type_versions: Record<string, unknown> };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
 type CreateValues = { batch_key?: string; region?: string; notes?: string; exclude_awaiting?: boolean; business_type_ids?: number[] };
@@ -37,6 +37,7 @@ function LeadsInner() {
   const [newOpen, setNewOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
   const [authFailed, setAuthFailed] = useState(false);
+  const [authoritiesLoading, setAuthoritiesLoading] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
   const [delPreview, setDelPreview] = useState<DeletePreview | null>(null);
   const [delConfirm, setDelConfirm] = useState("");
@@ -60,9 +61,9 @@ function LeadsInner() {
   const err = (e: Error) => message.error(e.message);
   // 地区取自 FSA 地方当局名录；接口不可用时退回手工输入
   const loadAuthorities = useCallback(() => {
-    if (authorities.length) return;
-    api<Authority[]>("/api/sources/fsa/authorities").then((a) => { setAuthorities(a); setAuthFailed(false); }).catch(() => { setAuthFailed(true); });
-  }, [authorities.length]);
+    setAuthoritiesLoading(true);
+    api<Authority[]>("/api/directory/regions").then((a) => { setAuthorities(a.filter((r) => !!r.last_success_at)); setAuthFailed(false); }).catch(() => { setAuthFailed(true); }).finally(() => setAuthoritiesLoading(false));
+  }, []);
 
   const loadBatches = useCallback(() => api<Batch[]>("/api/batches").then((b) => { setBatches(b); if (!batchKey && b[0]) setBatchKey(b[0].batch_key); }).catch(err), [batchKey]);
   const loadLeads = useCallback((key?: string) => {
@@ -135,7 +136,7 @@ function LeadsInner() {
   };
   const createBatch = async (v: CreateValues) => {
     const authority = authorities.find((a) => a.name === v.region);
-    if (createMethod === "auto" && !authority) return message.error("请选择可用地区；名录暂不可用时可重试加载或改为导入 CSV。");
+    if (createMethod === "auto" && !authority) return message.error("请选择已同步的门店池地区；可先到门店池同步，或改为导入 CSV。");
     if (createMethod === "csv" && !csvFile) return message.error("请先选择 CSV 文件");
     const key = v.batch_key?.trim() || listName(v.region);
     const metadata = { batch_key: key, region: v.region, notes: v.notes, country: "GB", source_name: createMethod === "auto" ? "fsa" : createMethod === "csv" ? "csv" : "manual", source_licence: createMethod === "auto" ? "OGL-3.0" : null };
@@ -189,7 +190,7 @@ function LeadsInner() {
 
   return (
     <>
-      <HeroBand kicker="LEADS" title="批次与线索" subtitle="用 FSA 名录自动建立候选，Overture 补官网，规则预筛后交人工确认类型。"
+      <HeroBand kicker="LEADS" title="批次与线索" subtitle="从门店池建立名单，补充官网与联系方式；来源同步与销售处理分开。"
         extra={<>
           <Select style={{ width: 260 }} value={batchKey} disabled={creating || !!busy} onChange={setBatchKey} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
           <Button type="primary" aria-label="建立名单" icon={<CloudDownloadOutlined />} disabled={!mounted || locked} onClick={() => { setCsvFile(null); setCreateMethod("auto"); generatedName.current = ""; setNewOpen(true); loadAuthorities(); }}>建立名单</Button>
@@ -237,12 +238,13 @@ function LeadsInner() {
               createForm.setFieldValue("batch_key", generatedName.current);
             }
           }}>
+            {createMethod === "auto" && !authorities.length && !authFailed && <Alert type="info" showIcon message="还没有已同步的门店池" description={<Link href="/directory">前往门店池，选择地区并同步后即可建立名单</Link>} style={{ marginBottom: 16 }} />}
             <Form.Item label="创建方式"><Radio.Group value={createMethod} onChange={(e) => setCreateMethod(e.target.value)} options={[{ value: "auto", label: "自动获取" }, { value: "csv", label: "导入 CSV" }, { value: "empty", label: "仅建空名单" }]} /></Form.Item>
-            {authFailed && createMethod === "auto" && <Alert type="warning" showIcon message="地区名录暂不可用" description="可以重试加载，或选择导入 CSV。" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 12 }} />}
-            <Form.Item name="region" label="地区" extra={createMethod === "auto" ? "地区总数包含所有食品经营场所；本次只获取所选商户类型，数量通常少于地区总数。" : undefined} rules={[{ required: createMethod === "auto", message: "请选择地区" }]}>
-              {authFailed && createMethod !== "auto" ? <Input placeholder="可选，例如 Camden" /> : <Select showSearch allowClear placeholder={createMethod === "auto" ? "搜索英国地区，例如 Camden" : "可选，选择名单所属地区"} optionFilterProp="label" loading={!authorities.length && !authFailed} options={authorities.map((a) => ({ value: a.name, label: `${a.name}${a.region ? `（${a.region}）` : ""} · 全部食品经营场所 ${a.count ?? "未知"} 家` }))} />}
+            {authFailed && createMethod === "auto" && <Alert type="warning" showIcon message="门店池暂不可用" description="可以重试读取，或选择导入 CSV。" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 12 }} />}
+            <Form.Item name="region" label="地区" extra={createMethod === "auto" ? "从已经同步的门店池选入所选类型全部商户，不会在这里请求 FSA。" : undefined} rules={[{ required: createMethod === "auto", message: "请选择地区" }]}>
+              {authFailed && createMethod !== "auto" ? <Input placeholder="可选，例如 Camden" /> : <Select showSearch allowClear placeholder={createMethod === "auto" ? "搜索英国地区，例如 Camden" : "可选，选择名单所属地区"} optionFilterProp="label" loading={authoritiesLoading} options={authorities.map((a) => ({ value: a.name, label: `${a.name}${a.region ? `（${a.region}）` : ""} · 门店池 ${a.pool_count} 家 · ${a.last_success_at ? new Date(a.last_success_at).toLocaleDateString("zh-CN") : "未同步"}` }))} />}
             </Form.Item>
-            {createMethod === "auto" && <Alert type="info" showIcon message="获取所选类型的全部商户" description="按地区建立完整名单，已有门店自动去重。" style={{ marginBottom: 16 }} />}
+            {createMethod === "auto" && <Alert type="info" showIcon message="从门店池选入所选类型的全部商户" description="名单成员固定，来源同步不会自动改变已有名单。" style={{ marginBottom: 16 }} />}
             {createMethod === "auto" && <Form.Item name="business_type_ids" label="商户类型" rules={[{ required: true, type: "array", min: 1, message: "请至少选择一种商户类型" }]} extra="默认餐厅类；其他类型按需选入。Pub 类包含夜店，是否有菜单需进一步核实。"><Select mode="multiple" options={BUSINESS_TYPES} /></Form.Item>}
             <Form.Item name="batch_key" label="名单名称" rules={[{ max: 64, message: "最多 64 个字符" }, { validator: (_, value) => value && !value.trim() ? Promise.reject(new Error("名称不能只有空格")) : Promise.resolve() }]} extra="根据地区自动生成，可修改；留空也会自动生成。"><Input maxLength={64} placeholder="选择地区后自动生成" /></Form.Item>
             {createMethod === "csv" && <Form.Item label="CSV 文件" required extra="至少包含 name，以及 source_key、source_id 或 fhrsid 中的一项。">
@@ -300,9 +302,9 @@ function LeadsInner() {
           <Steps direction="vertical" size="small" items={[{ title: "补充官网与电话" }, { title: "规则预筛" }, { title: "查找联系方式" }]} />
           <Button type="primary" block disabled={locked} loading={creating} style={{ marginTop: 16 }} onClick={() => startWorkflow("enrich")}>开始完善名单</Button>
         </> : <>
-          <Alert showIcon type="info" message={`追加到 ${currentBatch?.region || "未设置地区"}`} description="获取所选类型的全部剩余商户，自动排除本名单已有成员。其他地区请建立新名单。追加后自动补全官网与联系方式。" style={{ marginBottom: 16 }} />
-          {authFailed && <Alert type="warning" message="地区名录暂不可用" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 16 }} />}
-          {!authFailed && authorities.length > 0 && !appendAuthority && <Alert type="warning" message="当前名单未关联有效 FSA 地区，请建立新名单或追加 CSV" style={{ marginBottom: 16 }} />}
+          <Alert showIcon type="info" message={`追加到 ${currentBatch?.region || "未设置地区"}`} description="从门店池选入所选类型的全部剩余商户，自动排除本名单已有成员。其他地区请建立新名单。追加后自动补全官网与联系方式。" style={{ marginBottom: 16 }} />
+          {authFailed && <Alert type="warning" message="门店池暂不可用" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 16 }} />}
+          {!authFailed && authorities.length > 0 && !appendAuthority && <Alert type="warning" message="该地区尚未同步到门店池，请先前往门店池同步，或追加 CSV" style={{ marginBottom: 16 }} />}
           <Form name="append-list" form={fsaForm} layout="vertical" initialValues={{ business_type_ids: [1], exclude_awaiting: false }} onFinish={(v) => startWorkflow("append", v)}>
             <Form.Item label="地区" htmlFor="append-list-region"><Input id="append-list-region" disabled value={currentBatch?.region ?? "未设置"} /></Form.Item>
             <Form.Item name="business_type_ids" label="商户类型" rules={[{ required: true, type: "array", min: 1, message: "请至少选择一种类型" }]}><Select mode="multiple" options={BUSINESS_TYPES} /></Form.Item>

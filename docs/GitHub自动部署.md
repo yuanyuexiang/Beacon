@@ -100,3 +100,6 @@ actionlint .github/workflows/ci-cd.yml
 2026-10-13：提交 `3acfcb7` 的 [GitHub Actions](https://github.com/yuanyuexiang/Beacon/actions/runs/38281693112) 全流程成功。270 后端、两个 provider 各 11 测试、15 个部署测试及 8 前端测试通过；四个镜像推送 GHCR 后，服务器完成一致性备份、迁移、应用健康检查、公网 HTTPS 与双端提交版本验证，再启动两个 worker。首次调试的两次 create 参数失败均发生在迁移之前，已验证初始库无迁移后归档失败记录，并加入实际 CLI 参数校验。
 
 D50 扩展：新增第五个 GHCR 镜像 `beacon-maps`、`maps-worker` 与 `beacon-maps-data` 备份。升级前先同步 bootstrap；首轮兼容旧 release 时补充 Maps 镜像引用，使新固定 Compose 能停止或回滚上一版本。密钥保留在服务器，不写入 Actions secrets。
+
+
+D57（2026-10-15，本地已准备、服务器未发布）：新增 directory-worker，复用 API 镜像，没有新增 registry／账号／凭据卷。发布清单 compatibility.directory_worker=true 才启动；恢复旧 API 时不启动它。迁移 d157a0010001 含新 pool 流水线阶段，旧代码不能处理，不声明跨迁移自动回滚。发布前按既有流程由管理员同步固定 gateway 与生产 Compose，并确认目标源码已本地验收；当前未执行服务器升级。

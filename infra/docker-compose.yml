@@ -160,6 +160,30 @@ services:
     command: ["uv", "run", "--no-sync", "python", "-m", "app.modules.outreach.worker"]
     restart: unless-stopped
 
+  directory-worker:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: beacon-directory-worker
+    depends_on:
+      api:
+        condition: service_healthy
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      BEACON_DATABASE_URL: postgresql+psycopg://beacon:beacon@postgres:5432/beacon
+      BEACON_DATA_DIR: /data
+      BEACON_SECRET_KEY: ${BEACON_SECRET_KEY:-dev-only-secret-key-please-change-0123456789abcdef}
+    command: ["python", "-m", "app.modules.directory.worker"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time;assert time.time()-pathlib.Path('/tmp/directory-heartbeat').stat().st_mtime < 90"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
   # 在容器里跑后端测试（使用同一 postgres 的 beacon_test 库）
   api-test:
     profiles: ["test"]

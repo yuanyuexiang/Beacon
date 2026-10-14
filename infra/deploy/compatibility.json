@@ -1,7 +1,6 @@
 {
-  "migration_head": "da54a0010001",
-  "rollback_compatible_from": [
-    "f9496c930a01"
-  ],
-  "provider_storage_compatible": true
+  "migration_head": "d157a0010001",
+  "rollback_compatible_from": [],
+  "provider_storage_compatible": true,
+  "directory_worker": true
 }

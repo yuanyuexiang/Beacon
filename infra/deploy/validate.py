@@ -86,6 +86,8 @@ def main():
             assert not service.get("build"), name + " must use release images"
         assert compose["networks"]["ingress"]["external"]
         assert compose["networks"]["ingress"]["name"] == "matrix-network"
+        if "directory-worker" in compose["services"]:
+            assert compatibility.get("directory_worker") is True
         assert "alembic" not in compose["services"]["api"]["command"]
     print("Production Compose, secret isolation and migration declaration checked.")
     print(

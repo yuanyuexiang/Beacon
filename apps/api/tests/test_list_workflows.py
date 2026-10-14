@@ -6,6 +6,8 @@ import pytest
 from sqlalchemy import select
 
 from app.integrations import fsa
+from app.modules.directory import service as directory
+from app.modules.directory.models import Region, SyncRun
 from app.modules.leads import runs, service, workflows
 from app.modules.leads.models import Batch, BatchLead, Lead
 from tests.test_fsa_sync import _transport
@@ -16,6 +18,15 @@ from tests.test_imports import create_batch, login
 def setup(client, db, monkeypatch):
     login(client, db)
     original = fsa.fetch_establishments
+    region = Region(
+        authority_id=277, name="Adur", business_type_ids=[1], type_versions={}, auto_sync=False, interval_hours=24
+    )
+    db.add(region)
+    db.commit()
+    run = SyncRun(authority_id=277, business_type_ids=[1], trigger="manual")
+    db.add(run)
+    db.commit()
+    directory.apply_snapshot(db, run, {1: original(277, 1, transport=_transport(7, 0))})
     monkeypatch.setattr(fsa, "fetch_establishments", lambda *a, **k: original(277, 1, transport=_transport(7, 0)))
     monkeypatch.setattr(
         service, "enrich_overture", lambda *a, **k: {"leads": 3, "matched": 2, "website_set": 2, "phone_found": 1}
@@ -127,20 +138,20 @@ def test_lock_rejects_second_executor_and_cancel(setup, db):
     assert _advance(client, task)["step"] == 1
 
 
-def test_atomic_fsa_checkpoint_rolls_back_members_on_crash(setup, db, monkeypatch):
+def test_atomic_pool_checkpoint_rolls_back_members_on_crash(setup, db, monkeypatch):
     client = setup
     task = _new(client).json()["workflow"]
-    original = service.sync_fsa
+    original = directory.add_to_batch
 
     def crash(*args, **kwargs):
         original(*args, **kwargs)
         raise RuntimeError("before checkpoint")
 
-    monkeypatch.setattr(service, "sync_fsa", crash)
+    monkeypatch.setattr(directory, "add_to_batch", crash)
     failed = _advance(client, task)
     assert failed["status"] == "failed" and failed["step"] == 0
     assert client.get("/api/leads?batch_key=new").json() == []
-    monkeypatch.setattr(service, "sync_fsa", original)
+    monkeypatch.setattr(directory, "add_to_batch", original)
     retried = _advance(client, failed)
     assert retried["results"][0]["selected"] == 3
     assert retried["params"] == task["params"]
@@ -338,6 +349,8 @@ def test_saved_legacy_task_replays_its_original_parameters(setup, db):
     saved = db.get(workflows.Workflow, uuid.UUID(task["id"]))
     params = dict(saved.params)
     params.pop("selection")
+    params.pop("source")
+    saved.steps = ["fsa", "overture", "screen", "contacts"]
     params["seed"] = 123
     saved.params = params
     db.commit()

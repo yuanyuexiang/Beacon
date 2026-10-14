@@ -22,7 +22,7 @@ import urllib.request
 from pathlib import Path
 
 APP_SERVICES = ["api", "web", "gmail-service", "meta-service"]
-WORKERS = ["gmail-worker", "outreach-worker", "maps-worker"]
+WORKERS = ["gmail-worker", "outreach-worker", "maps-worker", "directory-worker"]
 VOLUMES = ["beacon-data", "beacon-gmail-data", "beacon-meta-data", "beacon-maps-data"]
 MAX_REQUEST = 32768
 CREATE_ARGS = ["--no-build", "--pull", "never"]
@@ -78,6 +78,8 @@ def validate_request(body, compose_hash, gateway_hash):
         raise DeploymentError("回滚兼容版本声明无效")
     if type(compatibility.get("provider_storage_compatible")) is not bool:
         raise DeploymentError("服务持久化格式兼容声明无效")
+    if "directory_worker" in compatibility and type(compatibility["directory_worker"]) is not bool:
+        raise DeploymentError("来源 worker 兼容声明无效")
     user, token = body.get("registry_user"), body.get("registry_token")
     if not isinstance(user, str) or not re.fullmatch(r"[A-Za-z0-9_\[\]-]{1,100}", user):
         raise DeploymentError("镜像认证用户无效")
@@ -318,6 +320,15 @@ class Gateway:
             *APP_SERVICES,
         )
 
+    def workers_for(self, release):
+        # 固定 Compose 会恢复旧镜像；旧 API 不支持来源 worker，不能启动它。
+        path = release / "manifest.json"
+        manifest = json.loads(path.read_text()) if path.exists() else {}
+        names = list(WORKERS)
+        if manifest.get("compatibility", {}).get("directory_worker") is not True:
+            names.remove("directory-worker")
+        return names
+
     def start_workers(self, release):
         self.compose(
             release,
@@ -328,7 +339,7 @@ class Gateway:
             "--wait",
             "--wait-timeout",
             "60",
-            *WORKERS,
+            *self.workers_for(release),
         )
 
     def deploy(self, body):
@@ -410,7 +421,7 @@ class Gateway:
                     "stop",
                     "--timeout",
                     "180",
-                    *WORKERS,
+                    *self.workers_for(release),
                     *APP_SERVICES,
                     timeout=1500,
                 )
@@ -451,7 +462,7 @@ class Gateway:
                 if touched:
                     # Never restore a database automatically or resume an unsafe old worker.
                     with contextlib.suppress(Exception):
-                        self.compose(release, "stop", "--timeout", "180", *WORKERS, timeout=400)
+                        self.compose(release, "stop", "--timeout", "180", *self.workers_for(release), timeout=400)
                     if old_release and rollback_allowed(
                         old_revision, self.revision(release), manifest["compatibility"]
                     ):
