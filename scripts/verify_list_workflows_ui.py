@@ -34,7 +34,7 @@ def make_task(key, body):
         "step": 0,
         "steps": (["fsa"] if body["kind"] != "enrich" else [])
         + ["overture", "screen", "contacts"],
-        "params": {**body, "seed": 4242} if body["kind"] != "enrich" else {},
+        "params": {**body, "seed": None} if body["kind"] != "enrich" else {},
         "results": [],
         "error": None,
     }
@@ -98,7 +98,7 @@ async def handle(route):
             else:
                 if stage == "fsa":
                     previous = len(leads[key])
-                    count = t["params"]["sample_n"] or 3
+                    count = 3 if not previous else 2
                     leads[key] += [
                         {
                             "id": str(i),
@@ -117,9 +117,9 @@ async def handle(route):
                         if b["batch_key"] == key:
                             b["candidate_count"] = len(leads[key])
                     r = {
-                        "fetched": 80,
+                        "fetched": previous + count,
                         "already_in_list": previous,
-                        "pool": 80 - previous,
+                        "pool": count,
                         "selected": count,
                         "created": count,
                         "linked": 0,
@@ -176,8 +176,10 @@ async def main():
         await page.get_by_role("button", name="建立名单", exact=True).click()
         await page.get_by_label("地区", exact=True).click()
         await page.locator(".ant-select-item-option").filter(has_text="Adur").click()
-        await expect(page.get_by_label("获取餐厅数量", exact=True)).to_have_value("50")
-        await page.get_by_label("获取餐厅数量", exact=True).fill("3")
+        assert await page.get_by_label("获取餐厅数量", exact=True).count() == 0
+        await expect(
+            page.get_by_text("获取所选类型的全部商户", exact=True)
+        ).to_be_visible()
         await page.get_by_label("商户类型", exact=True).click()
         await (
             page.locator(".ant-select-item-option")
@@ -199,6 +201,7 @@ async def main():
             page.get_by_role("button", name="建立名单", exact=True)
         ).to_be_disabled()
         assert len([s for _, _, s in advances if s == "fsa"]) == 1
+        assert tasks["ui-workflow"]["params"]["sample_n"] is None
         assert sorted(tasks["ui-workflow"]["params"]["business_type_ids"]) == [
             1,
             7843,
@@ -246,14 +249,14 @@ async def main():
         await expect(
             page.get_by_role("dialog").get_by_label("地区", exact=True)
         ).to_have_value("Adur")
-        await page.get_by_label("追加商户数量", exact=True).fill("2")
+        assert await page.get_by_label("追加商户数量", exact=True).count() == 0
         await page.wait_for_timeout(400)
         await page.screenshot(
             path="data/devchecks/list-workflow-append.png", full_page=True
         )
         await page.get_by_role("button", name="追加并完善", exact=True).click()
         await page.get_by_text("处理完成", exact=True).wait_for()
-        assert tasks["ui-workflow"]["params"]["sample_n"] == 2
+        assert tasks["ui-workflow"]["params"]["sample_n"] is None
         assert len(leads["ui-workflow"]) == 5
         await page.wait_for_timeout(400)
         await page.screenshot(
@@ -288,7 +291,7 @@ async def main():
         assert len([r for r in requests if r[:2] == ("POST", "/api/imports")]) == 1
         assert not errors, errors
         print(
-            "Verified local production UI: create multi-type list, persisted refresh/retry, enrich skips FSA, append fixed region/count, running controls locked, CSV and empty list; zero page errors."
+            "Verified local production UI: create multi-type list, persisted refresh/retry, enrich skips FSA, append full remaining members in fixed region, running controls locked, CSV and empty list; zero page errors."
         )
         await browser.close()
 

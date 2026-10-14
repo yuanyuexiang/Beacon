@@ -1,3 +1,4 @@
+import { api } from "./api";
 export type ListWorkflow = {
   id: string; batch_id: string; kind: "create" | "enrich" | "append";
   status: "pending" | "running" | "failed" | "completed" | "cancelled";
@@ -13,4 +14,14 @@ export function workflowSummary(stage: string, result?: Record<string, unknown>)
   if (stage === "screen") return "仅预筛未确认的门店，已有判断保留";
   const t = result.totals as Record<string, number> | undefined;
   return t ? `成功 ${t.succeeded ?? 0}，失败 ${t.failed ?? 0}，待处理 ${(t.pending ?? 0) + (t.running ?? 0)}` : undefined;
+}
+
+// FSA 全量名单可能超过单页 500 条；读完整名单后统一展示与统计。
+export async function getAllBatchLeads<T>(key: string): Promise<T[]> {
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += 500) {
+    const page = await api<T[]>(`/api/leads?batch_key=${encodeURIComponent(key)}&limit=500&offset=${offset}`);
+    rows.push(...page);
+    if (page.length < 500) return rows;
+  }
 }

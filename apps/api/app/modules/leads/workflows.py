@@ -5,7 +5,6 @@ FSA 写入和检查点同一事务，避免追加时崩溃重抽。联系方式�
 """
 
 import re
-import secrets
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -45,7 +44,7 @@ class WorkflowIn(BaseModel):
     authority_id: int | None = Field(default=None, gt=0)
     authority_name: str | None = None
     business_type_ids: list[Literal[1, 7843, 7844]] = Field(default=[1], min_length=1, max_length=3)
-    sample_n: int | None = Field(default=50, ge=1, le=5000)
+    sample_n: int | None = Field(default=None, ge=1, le=5000)
     exclude_awaiting: bool = False
 
 
@@ -116,7 +115,8 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
             raise HTTPException(422, "地区与已保存任务不一致")
     params = body.model_dump(exclude={"kind"}) if body.kind != "enrich" else {}
     if body.kind != "enrich":
-        params["seed"] = secrets.randbits(31)
+        params["seed"] = None
+        params["selection"] = "ordered"
     task = Workflow(
         batch_id=batch.id,
         kind=body.kind,
@@ -149,6 +149,7 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
                 exclude_awaiting=p["exclude_awaiting"],
                 sample_n=p["sample_n"],
                 seed=p["seed"],
+                random_sample=p.get("selection") != "ordered",
                 operator=task.started_by,
                 only_new=True,
                 commit=False,

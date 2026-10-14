@@ -48,7 +48,8 @@ def test_create_and_resume_persist_params_skip_successful_fsa(setup, db, monkeyp
     assert response.status_code == 201
     task = response.json()["workflow"]
     seed = task["params"]["seed"]
-    assert 0 <= seed <= 2**31 - 1
+    assert seed is None
+    assert task["params"]["selection"] == "ordered"
     task = _advance(client, task)
     assert task["step"] == 1 and task["results"][0]["selected"] == 3
     # 模拟失败，读取任务相当于刷新页面，再重试不得重跑 FSA。
@@ -287,3 +288,60 @@ def test_workflow_routes_require_authentication(client):
         ).status_code
         == 401
     )
+
+
+def test_customer_default_fetches_entire_directory_without_random_sampling(setup, db, monkeypatch):
+    import random
+
+    client = setup
+    monkeypatch.setattr(random.Random, "sample", lambda *a, **k: pytest.fail("客户名单不得随机抽样"))
+    response = client.post(
+        "/api/lists",
+        json={
+            "batch_key": "full",
+            "country": "GB",
+            "region": "Adur",
+            "source_name": "fsa",
+            "workflow": {"kind": "create", "authority_id": 277, "authority_name": "Adur"},
+        },
+    )
+    assert response.status_code == 201
+    task = response.json()["workflow"]
+    assert task["params"]["sample_n"] is None and task["params"]["seed"] is None
+    task = _advance(client, task, "full")
+    assert task["results"][0]["selected"] == 7
+    batch = db.scalar(select(Batch).where(Batch.batch_key == "full"))
+    assert batch.sampling_seed is None and "全量" in batch.sampling_method
+    assert len(client.get("/api/leads?batch_key=full").json()) == 7
+
+
+def test_explicit_api_limit_uses_stable_order_without_randomness(setup, monkeypatch):
+    import random
+
+    client = setup
+    monkeypatch.setattr(random.Random, "sample", lambda *a, **k: pytest.fail("不应抽样"))
+    task = _new(client).json()["workflow"]
+    task = _advance(client, task)
+    assert task["results"][0]["selected"] == 3
+    assert {row["source_key"] for row in client.get("/api/leads?batch_key=new").json()} == {
+        "fsa:1000",
+        "fsa:1001",
+        "fsa:1002",
+    }
+
+
+def test_saved_legacy_task_replays_its_original_parameters(setup, db):
+    import random
+
+    client = setup
+    task = _new(client).json()["workflow"]
+    saved = db.get(workflows.Workflow, uuid.UUID(task["id"]))
+    params = dict(saved.params)
+    params.pop("selection")
+    params["seed"] = 123
+    saved.params = params
+    db.commit()
+    resumed = _advance(client, task)
+    assert resumed["results"][0]["selected"] == 3
+    expected = set(random.Random(123).sample([f"fsa:{1000 + i}" for i in range(7)], 3))
+    assert {row["source_key"] for row in client.get("/api/leads?batch_key=new").json()} == expected

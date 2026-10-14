@@ -108,11 +108,13 @@ def get_batch_by_key(db: Session, batch_key: str) -> Batch | None:
     return db.scalar(select(Batch).where(Batch.batch_key == batch_key))
 
 
-def list_leads(db: Session, batch_id: uuid.UUID | None, screening: ScreeningClass | None, limit: int, offset: int):
+def list_leads(
+    db: Session, batch_id: uuid.UUID | None, screening: ScreeningClass | None, limit: int | None, offset: int
+):
     q = select(Lead)
     if batch_id is not None:
         q = q.join(BatchLead, BatchLead.lead_id == Lead.id).where(BatchLead.batch_id == batch_id)
-        q = q.order_by(BatchLead.sample_order.nulls_last(), Lead.name)
+        q = q.order_by(BatchLead.sample_order.nulls_last(), Lead.name, Lead.id)
     else:
         q = q.order_by(Lead.name)
     if screening is not None:
@@ -136,14 +138,15 @@ def sync_fsa(
     business_type_ids: list[int] | None = None,
     only_new: bool = False,
     commit: bool = True,
+    random_sample: bool = True,
 ) -> dict:
-    """从 FSA 拉取地方当局的经营者，去重后加入批次；可选固定种子抽样。返回计数与来源版本。"""
+    """从 FSA 拉取经营者，去重后加入批次。客户全量／稳定顺序；研究保留固定种子抽样。"""
     import random
     import secrets
 
     from app.integrations import fsa
 
-    seed = seed if seed is not None else secrets.randbits(31)
+    seed = (seed if seed is not None else secrets.randbits(31)) if random_sample else None
     type_ids = sorted(set(business_type_ids if business_type_ids is not None else [business_type_id]))
     if not type_ids or not set(type_ids) <= {1, 7843, 7844}:
         raise ValueError("不支持的商户类型")
@@ -177,7 +180,7 @@ def sync_fsa(
     sampled = sample_n is not None and sample_n < pool
     if sampled:
         assert sample_n is not None
-        rows = random.Random(seed).sample(rows, sample_n)
+        rows = random.Random(seed).sample(rows, sample_n) if random_sample else rows[:sample_n]
     for category in categories:
         category["selected"] = sum(row["raw"]["BusinessTypeID"] == category["id"] for row in rows)
     created = linked = skipped = 0
@@ -217,7 +220,15 @@ def sync_fsa(
     batch.sampling_method = (
         f"FSA localAuthorityId={authority_id} businessTypeIds={type_ids} versions={versions}"
         + ("，排除 AwaitingInspection" if exclude_awaiting else "")
-        + (f"，按 source_key 排序后 random.Random({seed}).sample({sample_n})" if sampled else "，全量")
+        + (
+            (
+                f"，按 source_key 排序后 random.Random({seed}).sample({sample_n})"
+                if random_sample
+                else f"，按 source_key 顺序取前 {sample_n} 条"
+            )
+            if sampled
+            else "，全量"
+        )
     )
     batch.sampling_seed = seed
     batch.candidate_count = len(existing_members)
@@ -256,7 +267,7 @@ def sync_fsa(
 
 
 def batch_bbox(db: Session, batch: Batch, margin: float = 0.01) -> tuple[float, float, float, float] | None:
-    leads = list_leads(db, batch.id, None, 5000, 0)
+    leads = list_leads(db, batch.id, None, None, 0)
     pts = [(lead.lng, lead.lat) for lead in leads if lead.lat is not None and lead.lng is not None]
     if not pts:
         return None
@@ -280,7 +291,7 @@ def enrich_overture(
     if places is None:
         path = overture.ensure_places(bbox, get_settings().data_dir)
         places = overture.load_places(path)
-    leads = list_leads(db, batch.id, None, 5000, 0)
+    leads = list_leads(db, batch.id, None, None, 0)
     matched = website_set = phone_set = 0
     now = datetime.now(UTC).isoformat(timespec="seconds")
     for lead in leads:
@@ -378,7 +389,7 @@ def auto_screen(db: Session, batch: Batch, only_unchecked: bool = True) -> dict:
     """按名称规则与 Overture brand 给出筛选建议：咖啡店/连锁/机构/酒吧标为排除，其余保持 unchecked 交人工。
     只改未筛选的记录。"""
     counts: dict[str, int] = {}
-    for lead in list_leads(db, batch.id, None, 5000, 0):
+    for lead in list_leads(db, batch.id, None, None, 0):
         if only_unchecked and lead.screening_class != ScreeningClass.unchecked:
             continue
         name = lead.name or ""

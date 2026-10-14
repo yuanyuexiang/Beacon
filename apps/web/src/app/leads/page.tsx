@@ -1,5 +1,5 @@
 "use client";
-import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Row, Select, Space, Steps, Switch, Table, Tag, Upload, message } from "antd";
+import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, Modal, Radio, Row, Select, Space, Steps, Switch, Table, Tag, Upload, message } from "antd";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,14 +7,14 @@ import { api, json } from "@/lib/api";
 import { CheckCircleOutlined, CloudDownloadOutlined, GlobalOutlined, ShopOutlined, UserOutlined } from "@ant-design/icons";
 import { HeroBand, SCREEN_ZH, ScreenTag, StatCard } from "@/components/ui";
 import { label } from "@/lib/format";
-import { ListWorkflow, workflowUnfinished, WORKFLOW_TITLES, workflowSummary } from "@/lib/list-workflow";
+import { ListWorkflow, workflowUnfinished, WORKFLOW_TITLES, workflowSummary, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
 type Lead = { business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
 type Authority = { id: number; name: string; region: string | null; count: number | null };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
-type CreateValues = { batch_key?: string; region?: string; notes?: string; sample_n?: number | null; exclude_awaiting?: boolean; business_type_ids?: number[] };
+type CreateValues = { batch_key?: string; region?: string; notes?: string; exclude_awaiting?: boolean; business_type_ids?: number[] };
 const BUSINESS_TYPES = [{ value: 1, label: "餐厅、咖啡馆、食堂" }, { value: 7844, label: "外卖店、三明治店" }, { value: 7843, label: "酒吧、Pub、夜店" }];
 const businessLabel = (id?: number | null, name?: string | null) => BUSINESS_TYPES.find((t) => t.value === id)?.label || name || "未记录";
 const listName = (region?: string) => `${(region || "名单").slice(0, 35)}-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 17)}`;
@@ -67,7 +67,7 @@ function LeadsInner() {
   const loadBatches = useCallback(() => api<Batch[]>("/api/batches").then((b) => { setBatches(b); if (!batchKey && b[0]) setBatchKey(b[0].batch_key); }).catch(err), [batchKey]);
   const loadLeads = useCallback((key?: string) => {
     if (!key) return setLeads([]);
-    api<Lead[]>(`/api/leads?batch_key=${encodeURIComponent(key)}&limit=500`).then(setLeads).catch(err);
+    getAllBatchLeads<Lead>(key).then((rows) => { if (activeKey.current === key) setLeads(rows); }).catch(err);
   }, []);
   useEffect(() => { loadBatches(); }, [loadBatches]);
   useEffect(() => { loadLeads(batchKey); router.replace(batchKey ? `/leads?batch=${encodeURIComponent(batchKey)}` : "/leads"); }, [batchKey, loadLeads, router]);
@@ -94,7 +94,7 @@ function LeadsInner() {
     if (!buildOpen || mode !== "append") return;
     loadAuthorities();
     const ids = currentBatch?.business_type?.startsWith("fsa:") ? currentBatch.business_type.slice(4).split(",").map(Number).filter((id) => BUSINESS_TYPES.some((t) => t.value === id)) : [1];
-    fsaForm.setFieldsValue({ sample_n: 50, exclude_awaiting: false, business_type_ids: ids.length ? ids : [1] });
+    fsaForm.setFieldsValue({ exclude_awaiting: false, business_type_ids: ids.length ? ids : [1] });
   }, [buildOpen, mode, currentBatch?.business_type, fsaForm, loadAuthorities]);
 
   const executeWorkflow = async (key: string, task: ListWorkflow) => {
@@ -121,7 +121,7 @@ function LeadsInner() {
     const key = batchKey;
     setCreating(true);
     try {
-      const task = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow`, json({ kind, ...(kind === "append" ? { authority_id: appendAuthority?.id, authority_name: currentBatch?.region, business_type_ids: values?.business_type_ids || [1], sample_n: values?.sample_n || null, exclude_awaiting: values?.exclude_awaiting ?? false } : {}) }));
+      const task = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow`, json({ kind, ...(kind === "append" ? { authority_id: appendAuthority?.id, authority_name: currentBatch?.region, business_type_ids: values?.business_type_ids || [1], sample_n: null, exclude_awaiting: values?.exclude_awaiting ?? false } : {}) }));
       await executeWorkflow(key, task);
     } catch (e) { err(e as Error); } finally { setCreating(false); }
   };
@@ -142,7 +142,7 @@ function LeadsInner() {
     setCreating(true);
     try {
       if (createMethod === "auto") {
-        const result = await api<{ workflow: ListWorkflow }>("/api/lists", json({ ...metadata, workflow: { kind: "create", authority_id: authority!.id, authority_name: authority!.name, business_type_ids: v.business_type_ids || [1], sample_n: v.sample_n || null, exclude_awaiting: v.exclude_awaiting ?? false } }));
+        const result = await api<{ workflow: ListWorkflow }>("/api/lists", json({ ...metadata, workflow: { kind: "create", authority_id: authority!.id, authority_name: authority!.name, business_type_ids: v.business_type_ids || [1], sample_n: null, exclude_awaiting: v.exclude_awaiting ?? false } }));
         activeKey.current = key;
         setBatchKey(key);
         setNewOpen(false);
@@ -231,7 +231,7 @@ function LeadsInner() {
       </Card>
 
       <Modal title="建立名单" forceRender={mounted} open={newOpen} onCancel={() => { if (!creating) setNewOpen(false); }} footer={null} destroyOnHidden maskClosable={false} closable={!creating}>
-          <Form name="create-list" form={createForm} layout="vertical" initialValues={{ sample_n: 50, exclude_awaiting: false, business_type_ids: [1] }} onFinish={createBatch} onValuesChange={(changed, values) => {
+          <Form name="create-list" form={createForm} layout="vertical" initialValues={{ exclude_awaiting: false, business_type_ids: [1] }} onFinish={createBatch} onValuesChange={(changed, values) => {
             if ("region" in changed && (!values.batch_key || values.batch_key === generatedName.current)) {
               generatedName.current = listName(values.region);
               createForm.setFieldValue("batch_key", generatedName.current);
@@ -242,8 +242,8 @@ function LeadsInner() {
             <Form.Item name="region" label="地区" extra={createMethod === "auto" ? "地区总数包含所有食品经营场所；本次只获取所选商户类型，数量通常少于地区总数。" : undefined} rules={[{ required: createMethod === "auto", message: "请选择地区" }]}>
               {authFailed && createMethod !== "auto" ? <Input placeholder="可选，例如 Camden" /> : <Select showSearch allowClear placeholder={createMethod === "auto" ? "搜索英国地区，例如 Camden" : "可选，选择名单所属地区"} optionFilterProp="label" loading={!authorities.length && !authFailed} options={authorities.map((a) => ({ value: a.name, label: `${a.name}${a.region ? `（${a.region}）` : ""} · 全部食品经营场所 ${a.count ?? "未知"} 家` }))} />}
             </Form.Item>
+            {createMethod === "auto" && <Alert type="info" showIcon message="获取所选类型的全部商户" description="按地区建立完整名单，已有门店自动去重。" style={{ marginBottom: 16 }} />}
             {createMethod === "auto" && <Form.Item name="business_type_ids" label="商户类型" rules={[{ required: true, type: "array", min: 1, message: "请至少选择一种商户类型" }]} extra="默认餐厅类；其他类型按需选入。Pub 类包含夜店，是否有菜单需进一步核实。"><Select mode="multiple" options={BUSINESS_TYPES} /></Form.Item>}
-            {createMethod === "auto" && <Form.Item name="sample_n" label="获取餐厅数量" extra="所选类型合计随机选取 50 家，留空获取所选类型全部商户；数量不代表优质客户数量。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>}
             <Form.Item name="batch_key" label="名单名称" rules={[{ max: 64, message: "最多 64 个字符" }, { validator: (_, value) => value && !value.trim() ? Promise.reject(new Error("名称不能只有空格")) : Promise.resolve() }]} extra="根据地区自动生成，可修改；留空也会自动生成。"><Input maxLength={64} placeholder="选择地区后自动生成" /></Form.Item>
             {createMethod === "csv" && <Form.Item label="CSV 文件" required extra="至少包含 name，以及 source_key、source_id 或 fhrsid 中的一项。">
               <Upload accept=".csv" fileList={csvFile ? [{ uid: "selected", name: csvFile.name, status: "done" }] : []} maxCount={1} beforeUpload={(file) => { setCsvFile(file); return false; }} onRemove={() => { setCsvFile(null); }}><Button>选择 CSV 文件</Button></Upload>
@@ -300,13 +300,12 @@ function LeadsInner() {
           <Steps direction="vertical" size="small" items={[{ title: "补充官网与电话" }, { title: "规则预筛" }, { title: "查找联系方式" }]} />
           <Button type="primary" block disabled={locked} loading={creating} style={{ marginTop: 16 }} onClick={() => startWorkflow("enrich")}>开始完善名单</Button>
         </> : <>
-          <Alert showIcon type="info" message={`追加到 ${currentBatch?.region || "未设置地区"}`} description="先排除本名单已有商户，再从所选类型中抽取新成员。其他地区请建立新名单。追加后自动补全官网与联系方式。" style={{ marginBottom: 16 }} />
+          <Alert showIcon type="info" message={`追加到 ${currentBatch?.region || "未设置地区"}`} description="获取所选类型的全部剩余商户，自动排除本名单已有成员。其他地区请建立新名单。追加后自动补全官网与联系方式。" style={{ marginBottom: 16 }} />
           {authFailed && <Alert type="warning" message="地区名录暂不可用" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 16 }} />}
           {!authFailed && authorities.length > 0 && !appendAuthority && <Alert type="warning" message="当前名单未关联有效 FSA 地区，请建立新名单或追加 CSV" style={{ marginBottom: 16 }} />}
-          <Form name="append-list" form={fsaForm} layout="vertical" initialValues={{ sample_n: 50, business_type_ids: [1], exclude_awaiting: false }} onFinish={(v) => startWorkflow("append", v)}>
+          <Form name="append-list" form={fsaForm} layout="vertical" initialValues={{ business_type_ids: [1], exclude_awaiting: false }} onFinish={(v) => startWorkflow("append", v)}>
             <Form.Item label="地区" htmlFor="append-list-region"><Input id="append-list-region" disabled value={currentBatch?.region ?? "未设置"} /></Form.Item>
             <Form.Item name="business_type_ids" label="商户类型" rules={[{ required: true, type: "array", min: 1, message: "请至少选择一种类型" }]}><Select mode="multiple" options={BUSINESS_TYPES} /></Form.Item>
-            <Form.Item name="sample_n" label="追加商户数量" extra="数量指本次新加入名单的商户；留空追加剩余全部。可选商户不足时取全部。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 剩余全部" /></Form.Item>
             <Collapse ghost items={[{ key: "filters", label: "高级筛选", children: <Form.Item name="exclude_awaiting" label="排除尚未首次检查的商家" valuePropName="checked"><Switch /></Form.Item> }]} />
             <Button type="primary" htmlType="submit" block disabled={locked || !appendAuthority} loading={creating}>追加并完善</Button>
           </Form>

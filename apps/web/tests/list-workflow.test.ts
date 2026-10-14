@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { ListWorkflow, workflowSummary, workflowUnfinished } from "../src/lib/list-workflow";
+import { describe, expect, it, vi } from "vitest";
+import { ListWorkflow, workflowSummary, workflowUnfinished, getAllBatchLeads } from "../src/lib/list-workflow";
+
+import { api } from "../src/lib/api";
+vi.mock("../src/lib/api", () => ({ api: vi.fn() }));
 
 describe("名单进度展示", () => {
   it("失败与崩溃中的任务保持未完成状态", () => {
@@ -13,5 +16,23 @@ describe("名单进度展示", () => {
   it("联系方式部分失败仍展示失败与剩余项", () => {
     expect(workflowSummary("contacts", { totals: { succeeded: 18, failed: 2, pending: 4, running: 1 } })).toBe("成功 18，失败 2，待处理 5");
     expect(workflowSummary("contacts")).toBeUndefined();
+  });
+});
+
+
+describe("全量名单读取", () => {
+  it("读取超过 500 家的全部页", async () => {
+    const mocked = vi.mocked(api);
+    mocked.mockReset();
+    mocked.mockResolvedValueOnce(Array.from({ length: 500 }, (_, id) => ({ id }))).mockResolvedValueOnce([{ id: 500 }, { id: 501 }]);
+    const rows = await getAllBatchLeads<{ id: number }>("完整 名单");
+    expect(rows).toHaveLength(502);
+    expect(mocked).toHaveBeenNthCalledWith(2, "/api/leads?batch_key=%E5%AE%8C%E6%95%B4%20%E5%90%8D%E5%8D%95&limit=500&offset=500");
+  });
+  it("获取失败不返回不完整名单", async () => {
+    const mocked = vi.mocked(api);
+    mocked.mockReset();
+    mocked.mockResolvedValueOnce(Array(500).fill({ id: 1 })).mockRejectedValueOnce(new Error("network"));
+    await expect(getAllBatchLeads("full")).rejects.toThrow("network");
   });
 });
