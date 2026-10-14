@@ -129,3 +129,94 @@ def test_generated_sampling_seed_can_reproduce_the_same_selection(client, db):
     first = service.sync_fsa(db, batch, 106, sample_n=3, transport=_transport())
     second = service.sync_fsa(db, batch, 106, sample_n=3, seed=first["sampling_seed"], transport=_transport())
     assert second["created"] == 0 and second["skipped"] == 3
+
+
+def _typed_transport(fail_type=None):
+    names = {1: "Restaurant/Cafe/Canteen", 7844: "Takeaway/sandwich shop", 7843: "Pub/bar/nightclub"}
+
+    def handler(req):
+        type_id = int(req.url.params["businessTypeId"])
+        if type_id == fail_type:
+            return httpx.Response(503)
+        rows = []
+        for i in range(3):
+            row = _est(type_id * 10 + i)
+            row.update(BusinessTypeID=type_id, BusinessType=names[type_id])
+            if type_id == 7843:
+                row["BusinessName"] = f"Test Pub {i}"
+            rows.append(row)
+        return httpx.Response(200, json={"meta": {"totalCount": 3, "totalPages": 1}, "establishments": rows})
+
+    return httpx.MockTransport(handler)
+
+
+def test_multitype_sampling_uses_one_combined_limit_and_preserves_category(client, db):
+    from sqlalchemy import select
+
+    from app.modules.leads.models import Batch
+
+    login(client, db)
+    create_batch(client, "multi")
+    batch = db.scalar(select(Batch).where(Batch.batch_key == "multi"))
+    result = service.sync_fsa(
+        db, batch, 277, sample_n=5, seed=9, business_type_ids=[1, 7844, 7843], transport=_typed_transport()
+    )
+    assert result["fetched"] == 9 and result["pool"] == 9 and result["selected"] == 5
+    assert sum(category["selected"] for category in result["categories"]) == 5
+    assert batch.business_type == "fsa:1,7843,7844"
+    rows = client.get("/api/leads?batch_key=multi").json()
+    assert len(rows) == 5 and all(row["business_type_id"] in {1, 7843, 7844} for row in rows)
+    assert all(row["business_type_name"] for row in rows)
+    repeated = service.sync_fsa(
+        db, batch, 277, sample_n=5, seed=9, business_type_ids=[7844, 1, 7843, 1], transport=_typed_transport()
+    )
+    assert repeated["created"] == 0 and repeated["skipped"] == 5
+
+
+def test_multitype_upstream_failure_does_not_write_partial_list(client, db):
+    import pytest
+    from sqlalchemy import select
+
+    from app.modules.leads.models import Batch
+
+    login(client, db)
+    create_batch(client, "partial")
+    batch = db.scalar(select(Batch).where(Batch.batch_key == "partial"))
+    with pytest.raises(httpx.HTTPStatusError):
+        service.sync_fsa(db, batch, 277, business_type_ids=[1, 7844], transport=_typed_transport(fail_type=7844))
+    assert client.get("/api/leads?batch_key=partial").json() == []
+    assert batch.business_type is None
+
+
+def test_business_type_validation_and_explicit_pub_selection(client, db, monkeypatch):
+    from sqlalchemy import select
+
+    from app.modules.leads.models import Batch
+
+    login(client, db)
+    create_batch(client, "pubs")
+    for ids in ([], [999], [1, 7843, 7844, 1]):
+        assert (
+            client.post("/api/batches/pubs/sync/fsa", json={"authority_id": 277, "business_type_ids": ids}).status_code
+            == 422
+        )
+    original = fsa.fetch_establishments
+    monkeypatch.setattr(fsa, "fetch_establishments", lambda a, b, **kw: original(a, b, transport=_typed_transport()))
+    response = client.post("/api/batches/pubs/sync/fsa", json={"authority_id": 277, "business_type_ids": [7843]})
+    assert response.status_code == 200 and response.json()["selected"] == 3
+    batch = db.scalar(select(Batch).where(Batch.batch_key == "pubs"))
+    assert service.auto_screen(db, batch)["counts"] == {"unchecked": 3}
+
+
+def test_supplementing_one_type_keeps_previously_selected_pub_scope(client, db):
+    from sqlalchemy import select
+
+    from app.modules.leads.models import Batch
+
+    login(client, db)
+    create_batch(client, "supplement")
+    batch = db.scalar(select(Batch).where(Batch.batch_key == "supplement"))
+    service.sync_fsa(db, batch, 277, business_type_ids=[7843], transport=_typed_transport())
+    service.sync_fsa(db, batch, 277, business_type_ids=[1], transport=_typed_transport())
+    assert batch.business_type == "fsa:1,7843"
+    assert service.auto_screen(db, batch)["counts"] == {"unchecked": 6}

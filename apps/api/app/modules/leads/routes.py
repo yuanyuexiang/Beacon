@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -309,7 +310,8 @@ def list_runs(batch_key: str, db: Session = Depends(get_db), op: Operator = Depe
 
 class FsaSyncIn(BaseModel):
     authority_id: int
-    business_type_id: int = 1
+    business_type_id: Literal[1, 7843, 7844] = 1
+    business_type_ids: list[Literal[1, 7843, 7844]] | None = Field(default=None, min_length=1, max_length=3)
     exclude_awaiting: bool = False
     sample_n: int | None = None
     seed: int | None = None
@@ -343,6 +345,9 @@ def sync_fsa(
             body.sample_n,
             body.seed,
             op.username,
+            business_type_ids=[int(value) for value in body.business_type_ids]
+            if body.business_type_ids is not None
+            else None,
         )
     except Exception as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"FSA 同步失败：{e.__class__.__name__}: {e}") from e

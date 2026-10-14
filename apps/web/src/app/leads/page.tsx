@@ -8,14 +8,19 @@ import { CheckCircleOutlined, CloudDownloadOutlined, GlobalOutlined, ShopOutline
 import { HeroBand, SCREEN_ZH, ScreenTag, StatCard } from "@/components/ui";
 import { label } from "@/lib/format";
 
-type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; candidate_count: number | null };
-type Lead = { inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
+type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
+type Lead = { business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
 type Run = { id: string; status: string; totals: { pending: number; running: number; succeeded: number; failed: number } | null };
 type Authority = { id: number; name: string; region: string | null; count: number | null };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
-type CreateValues = { batch_key?: string; region?: string; notes?: string; sample_n?: number | null; exclude_awaiting?: boolean };
-type BuildRequest = { key: string; method: "auto" | "csv"; authority_id?: number; sample_n: number | null; seed: number; exclude_awaiting: boolean; file?: File };
+type CreateValues = { batch_key?: string; region?: string; notes?: string; sample_n?: number | null; exclude_awaiting?: boolean; business_type_ids?: number[] };
+type BuildRequest = { key: string; method: "auto" | "csv"; authority_id?: number; sample_n: number | null; seed: number; exclude_awaiting: boolean; business_type_ids: number[]; file?: File };
+const BUSINESS_TYPES = [{ value: 1, label: "餐厅、咖啡馆、食堂" }, { value: 7844, label: "外卖店、三明治店" }, { value: 7843, label: "酒吧、Pub、夜店" }];
+const businessLabel = (id?: number | null, name?: string | null) => BUSINESS_TYPES.find((t) => t.value === id)?.label || name || "未记录";
+const scopeLabel = (ids: number[]) => ids.map((id) => businessLabel(id)).join(" / ");
+type FsaResult = { fetched: number; pool: number; selected: number; created: number; linked: number; skipped?: number; categories?: { id: number; fetched: number; selected: number }[] };
+const fsaSummary = (r: FsaResult, ids: number[]) => `${scopeLabel(ids)}共 ${r.fetched} 家，筛选后可选 ${r.pool} 家，选入 ${r.selected} 家（新增 ${r.created}，关联已有 ${r.linked}${r.skipped != null ? `，跳过 ${r.skipped}` : ""}）${r.categories?.length && r.categories.length > 1 ? `；分类选入：${r.categories.map((c) => `${businessLabel(c.id)} ${c.selected} 家`).join("，")}` : ""}`;
 const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff;
 const listName = (region?: string) => `${(region || "名单").slice(0, 35)}-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 17)}`;
 
@@ -29,6 +34,7 @@ function LeadsInner() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [batchKey, setBatchKey] = useState<string | undefined>(sp.get("batch") ?? undefined);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [businessType, setBusinessType] = useState<number>();
   const [screen, setScreen] = useState<string>();
   const [q, setQ] = useState("");
   const [authorities, setAuthorities] = useState<Authority[]>([]);
@@ -70,7 +76,12 @@ function LeadsInner() {
   useEffect(() => {
     if (!buildOpen) return;
     loadAuthorities();
-    const region = batches.find((b) => b.batch_key === batchKey)?.region;
+    const batch = batches.find((b) => b.batch_key === batchKey);
+    const region = batch?.region;
+    if (fsaForm.getFieldValue("business_type_ids") == null) {
+      const ids = batch?.business_type?.startsWith("fsa:") ? batch.business_type.slice(4).split(",").map(Number).filter((id) => BUSINESS_TYPES.some((t) => t.value === id)) : [1];
+      fsaForm.setFieldValue("business_type_ids", ids.length ? ids : [1]);
+    }
     const match = authorities.find((a) => a.name === region);
     if (match && fsaForm.getFieldValue("authority_id") == null) fsaForm.setFieldsValue({ authority_id: match.id });  // 不覆盖手工选择
   }, [buildOpen, authorities, batches, batchKey, fsaForm, loadAuthorities]);
@@ -105,8 +116,8 @@ function LeadsInner() {
         return;
       }
       if (step === 0) {
-        const f = await api<{ fetched: number; pool: number; selected: number; created: number; linked: number }>(`/api/batches/${key}/sync/fsa`, json({ authority_id: request.authority_id, business_type_id: 1, exclude_awaiting: request.exclude_awaiting, sample_n: request.sample_n, seed: request.seed }));
-        lines.push(`餐厅、咖啡馆、食堂共 ${f.fetched} 家，筛选后可选 ${f.pool} 家，选入 ${f.selected} 家（新增 ${f.created}，关联已有 ${f.linked}）`);
+        const f = await api<FsaResult>(`/api/batches/${key}/sync/fsa`, json({ authority_id: request.authority_id, business_type_ids: request.business_type_ids, exclude_awaiting: request.exclude_awaiting, sample_n: request.sample_n, seed: request.seed }));
+        lines.push(fsaSummary(f, request.business_type_ids));
         setAutoProg({ step: (step = 1), lines: [...lines] });
       }
       if (step === 1) {
@@ -146,7 +157,7 @@ function LeadsInner() {
         setCreating(false);
         return setNewOpen(false);
       }
-      const request: BuildRequest = { key, method: createMethod, authority_id: authority?.id, sample_n: v.sample_n || null, seed: randomSeed(), exclude_awaiting: v.exclude_awaiting ?? false, file: csvFile || undefined };
+      const request: BuildRequest = { key, method: createMethod, business_type_ids: [...(v.business_type_ids || [1])], authority_id: authority?.id, sample_n: v.sample_n || null, seed: randomSeed(), exclude_awaiting: v.exclude_awaiting ?? false, file: csvFile || undefined };
       setBuildRequest(request);
       await executeBuild(request);
     } catch (e) {
@@ -175,7 +186,7 @@ function LeadsInner() {
       .finally(() => setDelBusy(false));
   };
 
-  const filtered = useMemo(() => leads.filter((l) => (!screen || l.screening_class === screen) && (!q || l.name.toLowerCase().includes(q.toLowerCase()) || (l.postcode ?? "").toLowerCase().includes(q.toLowerCase()))), [leads, screen, q]);
+  const filtered = useMemo(() => leads.filter((l) => (!businessType || l.business_type_id === businessType) && (!screen || l.screening_class === screen) && (!q || l.name.toLowerCase().includes(q.toLowerCase()) || (l.postcode ?? "").toLowerCase().includes(q.toLowerCase()))), [leads, businessType, screen, q]);
   const stats = useMemo(() => ({ total: leads.length, website: leads.filter((l) => l.website).length, candidate: leads.filter((l) => l.screening_class === "candidate").length, unchecked: leads.filter((l) => l.screening_class === "unchecked").length }), [leads]);
   const run = (name: string, p: Promise<unknown>, done: (r: never) => string) => { setBusy(name); p.then((r) => { message.success(done(r as never)); loadLeads(batchKey); loadBatches(); }).catch(err).finally(() => setBusy(null)); };
 
@@ -186,7 +197,7 @@ function LeadsInner() {
           <Select style={{ width: 260 }} value={batchKey} disabled={creating} onChange={setBatchKey} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
           <Button type="primary" aria-label="建立名单" icon={<CloudDownloadOutlined />} disabled={!mounted || creating} onClick={() => { setAutoProg(null); setBuildRequest(null); setCsvFile(null); setCreateMethod("auto"); generatedName.current = ""; setNewOpen(true); loadAuthorities(); }}>建立名单</Button>
           <Button danger disabled={!batchKey || creating} onClick={openDelete}>删除批次</Button>
-          <Button disabled={!batchKey || creating} onClick={() => { fsaForm.resetFields(["authority_id"]); setContactProg(null); setBuildOpen(true); }}>补充数据</Button>
+          <Button disabled={!batchKey || creating} onClick={() => { fsaForm.resetFields(["authority_id", "business_type_ids"]); setContactProg(null); setBuildOpen(true); }}>补充数据</Button>
         </>} />
 
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
@@ -198,6 +209,7 @@ function LeadsInner() {
 
       <Card size="small" title="线索" extra={<Space>
         <Input.Search allowClear placeholder="搜索名称 / 邮编" style={{ width: 220 }} onSearch={setQ} onChange={(e) => !e.target.value && setQ("")} />
+        <Select allowClear placeholder="商户类型" style={{ width: 200 }} value={businessType} onChange={setBusinessType} options={BUSINESS_TYPES} />
         <Select allowClear placeholder="筛选分类" style={{ width: 160 }} value={screen} onChange={setScreen} options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} />
         <Upload accept=".csv" showUploadList={false} customRequest={({ file }) => { if (!batchKey) return message.warning("先选择批次"); const fd = new FormData(); fd.append("batch_key", batchKey); fd.append("file", file as File); run("csv", api("/api/imports", { method: "POST", body: fd }), (r: { created_count: number; linked_count: number; skipped_count: number; error_count: number }) => `导入：新增 ${r.created_count}，关联 ${r.linked_count}，跳过 ${r.skipped_count}，错误 ${r.error_count}`); }}>
           <Button disabled={!batchKey}>追加 CSV</Button>
@@ -208,6 +220,7 @@ function LeadsInner() {
         <Table<Lead> rowKey="id" size="small" dataSource={filtered} pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           columns={[
             { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
+            { title: "商户类型", width: 160, render: (_, r) => businessLabel(r.business_type_id, r.business_type_name) },
             { title: "来源键", dataIndex: "source_key", width: 120 },
             { title: "邮编", dataIndex: "postcode", width: 100 },
             { title: "官网", dataIndex: "website", ellipsis: true, render: (v, r) => (v ? <a href={v} target="_blank" rel="noreferrer"><GlobalOutlined style={{ marginRight: 6, color: "#d97706" }} />{v.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <Link href={`/leads/${r.id}`} title="进入详情页搜索并核对官网">搜索补官网</Link>) },
@@ -234,7 +247,7 @@ function LeadsInner() {
             </Space>
           </>
         ) : (
-          <Form form={createForm} layout="vertical" initialValues={{ sample_n: 50, exclude_awaiting: false }} onFinish={createBatch} onValuesChange={(changed, values) => {
+          <Form form={createForm} layout="vertical" initialValues={{ sample_n: 50, exclude_awaiting: false, business_type_ids: [1] }} onFinish={createBatch} onValuesChange={(changed, values) => {
             if ("region" in changed && (!values.batch_key || values.batch_key === generatedName.current)) {
               generatedName.current = listName(values.region);
               createForm.setFieldValue("batch_key", generatedName.current);
@@ -242,10 +255,11 @@ function LeadsInner() {
           }}>
             <Form.Item label="创建方式"><Radio.Group value={createMethod} onChange={(e) => setCreateMethod(e.target.value)} options={[{ value: "auto", label: "自动获取" }, { value: "csv", label: "导入 CSV" }, { value: "empty", label: "仅建空名单" }]} /></Form.Item>
             {authFailed && createMethod === "auto" && <Alert type="warning" showIcon message="地区名录暂不可用" description="可以重试加载，或选择导入 CSV。" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 12 }} />}
-            <Form.Item name="region" label="地区" extra={createMethod === "auto" ? "地区总数包含所有食品经营场所；本次只获取餐厅、咖啡馆、食堂，数量通常少于地区总数。" : undefined} rules={[{ required: createMethod === "auto", message: "请选择地区" }]}>
+            <Form.Item name="region" label="地区" extra={createMethod === "auto" ? "地区总数包含所有食品经营场所；本次只获取所选商户类型，数量通常少于地区总数。" : undefined} rules={[{ required: createMethod === "auto", message: "请选择地区" }]}>
               {authFailed && createMethod !== "auto" ? <Input placeholder="可选，例如 Camden" /> : <Select showSearch allowClear placeholder={createMethod === "auto" ? "搜索英国地区，例如 Camden" : "可选，选择名单所属地区"} optionFilterProp="label" loading={!authorities.length && !authFailed} options={authorities.map((a) => ({ value: a.name, label: `${a.name}${a.region ? `（${a.region}）` : ""} · 全部食品经营场所 ${a.count ?? "未知"} 家` }))} />}
             </Form.Item>
-            {createMethod === "auto" && <Form.Item name="sample_n" label="获取餐厅数量" extra="默认随机选取 50 家，留空获取该地区全部餐厅、咖啡馆、食堂（可能上千家）；数量不代表优质客户数量。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>}
+            {createMethod === "auto" && <Form.Item name="business_type_ids" label="商户类型" rules={[{ required: true, type: "array", min: 1, message: "请至少选择一种商户类型" }]} extra="默认餐厅类；其他类型按需选入。Pub 类包含夜店，是否有菜单需进一步核实。"><Select mode="multiple" options={BUSINESS_TYPES} /></Form.Item>}
+            {createMethod === "auto" && <Form.Item name="sample_n" label="获取餐厅数量" extra="所选类型合计随机选取 50 家，留空获取所选类型全部商户；数量不代表优质客户数量。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>}
             <Form.Item name="batch_key" label="名单名称" rules={[{ max: 64, message: "最多 64 个字符" }, { validator: (_, value) => value && !value.trim() ? Promise.reject(new Error("名称不能只有空格")) : Promise.resolve() }]} extra="根据地区自动生成，可修改；留空也会自动生成。"><Input maxLength={64} placeholder="选择地区后自动生成" /></Form.Item>
             {createMethod === "csv" && <Form.Item label="CSV 文件" required extra="至少包含 name，以及 source_key、source_id 或 fhrsid 中的一项。">
               <Upload accept=".csv" fileList={csvFile ? [{ uid: "selected", name: csvFile.name, status: "done" }] : []} maxCount={1} beforeUpload={(file) => { setCsvFile(file); return false; }} onRemove={() => { setCsvFile(null); }}><Button>选择 CSV 文件</Button></Upload>
@@ -288,12 +302,13 @@ function LeadsInner() {
       {mounted && <Drawer forceRender title={`补充数据 · ${batchKey ?? ""}`} open={buildOpen} onClose={() => setBuildOpen(false)} width={520}>
         {authFailed && <Alert type="warning" message="地区名录暂不可用，其他补充步骤仍可操作" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 16 }} />}
         <Card size="small" title="第 1 步：从 FSA 名录建立候选" style={{ marginBottom: 16 }}>
-          <Form form={fsaForm} initialValues={{ sample_n: 50, exclude_awaiting: false }} layout="vertical" onFinish={(v) => run("fsa", api(`/api/batches/${encodeURIComponent(batchKey!)}/sync/fsa`, json({ authority_id: v.authority_id, business_type_id: 1, exclude_awaiting: v.exclude_awaiting ?? false, sample_n: v.sample_n || null, seed: randomSeed() })), (r: { fetched: number; pool: number; selected: number; created: number; linked: number; skipped: number }) => `餐厅、咖啡馆、食堂共 ${r.fetched} 家，筛选后可选 ${r.pool} 家，选入 ${r.selected} 家，新增 ${r.created}，关联 ${r.linked}，跳过 ${r.skipped}`)}>
-            <Form.Item name="authority_id" label="地方当局" extra="地区总数包含所有食品经营场所；本次只获取餐厅、咖啡馆、食堂。" rules={[{ required: true }]}>
+          <Form form={fsaForm} initialValues={{ sample_n: 50, exclude_awaiting: false }} layout="vertical" onFinish={(v) => run("fsa", api(`/api/batches/${encodeURIComponent(batchKey!)}/sync/fsa`, json({ authority_id: v.authority_id, business_type_ids: v.business_type_ids || [1], exclude_awaiting: v.exclude_awaiting ?? false, sample_n: v.sample_n || null, seed: randomSeed() })), (r: FsaResult) => fsaSummary(r, v.business_type_ids || [1]))}>
+            <Form.Item name="authority_id" label="地方当局" extra="地区总数包含所有食品经营场所；本次只获取所选商户类型。" rules={[{ required: true }]}>
               <Select showSearch placeholder="默认取批次的地区，可改" optionFilterProp="label" loading={!authorities.length && !authFailed}
                 options={authorities.map((a) => ({ value: a.id, label: `${a.name}${a.region ? `（${a.region}）` : ""} · 全部食品经营场所 ${a.count ?? "未知"} 家` }))} />
             </Form.Item>
-            <Form.Item name="sample_n" label="获取餐厅数量" extra="从餐厅、咖啡馆、食堂中随机选取指定数量，留空获取该类别全部；已在名单中的门店不会重复新增。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>
+            <Form.Item name="business_type_ids" label="商户类型" rules={[{ required: true, type: "array", min: 1, message: "请至少选择一种商户类型" }]}><Select mode="multiple" options={BUSINESS_TYPES} /></Form.Item>
+            <Form.Item name="sample_n" label="获取餐厅数量" extra="所选类型合计随机选取指定数量，留空获取全部；已在名单中的门店不会重复新增。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>
             <Collapse ghost items={[{ key: "filters", label: "高级筛选", children: <Form.Item name="exclude_awaiting" label="排除尚未首次检查的商家" valuePropName="checked" initialValue={false}><Switch /></Form.Item> }]} />
             <Button type="primary" htmlType="submit" loading={busy === "fsa"} block>拉取并建立候选</Button>
           </Form>
@@ -303,7 +318,7 @@ function LeadsInner() {
           <Button loading={busy === "ov"} block onClick={() => run("ov", api(`/api/batches/${encodeURIComponent(batchKey!)}/enrich/overture`, json({})), (r: { leads: number; matched: number; website_set: number; phone_found: number; places: number }) => `Overture：${r.places} 个地点，匹配 ${r.matched}/${r.leads}，补官网 ${r.website_set}，有电话 ${r.phone_found}`)}>运行 Overture 补全</Button>
         </Card>
         <Card size="small" title="第 3 步：规则预筛" style={{ marginBottom: 16 }}>
-          <p style={{ color: "#6b7280", marginTop: 0 }}>连锁（含 Overture 品牌）、咖啡店、机构、酒吧标为排除并注明规则；其余保持“待筛选”交人工；人工改过的不覆盖。</p>
+          <p style={{ color: "#6b7280", marginTop: 0 }}>连锁（含 Overture 品牌）、咖啡店、机构按现有规则预筛；名单明确选择酒吧类时，不仅凭酒吧名称词排除。已有筛选结果保留，其余待核对。</p>
           <Button loading={busy === "screen"} block onClick={() => run("screen", api(`/api/batches/${encodeURIComponent(batchKey!)}/screen`, { method: "POST" }), (r: { counts: Record<string, number> }) => `预筛：${Object.entries(r.counts).map(([k, v]) => `${k} ${v}`).join("，")}`)}>运行规则预筛</Button>
         </Card>
         <Card size="small" title="第 4 步：查找联系方式">

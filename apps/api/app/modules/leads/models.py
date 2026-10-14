@@ -82,6 +82,15 @@ class Lead(UUIDPk, Timestamped, Base):
     memberships: Mapped[list["BatchLead"]] = relationship(back_populates="lead", cascade="all, delete-orphan")
 
     @property
+    def business_type_id(self) -> int | None:
+        value = (self.raw or {}).get("BusinessTypeID")
+        return value if isinstance(value, int) else None
+
+    @property
+    def business_type_name(self) -> str | None:
+        return (self.raw or {}).get("BusinessType")
+
+    @property
     def inspection_pending(self) -> bool:
         return (self.raw or {}).get("RatingValue") == "AwaitingInspection"
 

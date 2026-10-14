@@ -133,6 +133,7 @@ def sync_fsa(
     seed: int | None = None,
     operator: str | None = None,
     transport=None,
+    business_type_ids: list[int] | None = None,
 ) -> dict:
     """从 FSA 拉取地方当局的经营者，去重后加入批次；可选固定种子抽样。返回计数与来源版本。"""
     import random
@@ -141,14 +142,30 @@ def sync_fsa(
     from app.integrations import fsa
 
     seed = seed if seed is not None else secrets.randbits(31)
-    page = fsa.fetch_establishments(authority_id, business_type_id, transport=transport)
-    rows = [fsa.to_lead_row(e) for e in page.establishments]
-    if exclude_awaiting:
-        rows = [r for r in rows if r["raw"].get("RatingValue") != "AwaitingInspection"]
-    rows.sort(key=lambda r: r["source_key"])
+    type_ids = sorted(set(business_type_ids if business_type_ids is not None else [business_type_id]))
+    if not type_ids or not set(type_ids) <= {1, 7843, 7844}:
+        raise ValueError("不支持的商户类型")
+    # 所有类别获取成功后才写入，任一类别失败不留下部分名单。
+    pages = {type_id: fsa.fetch_establishments(authority_id, type_id, transport=transport) for type_id in type_ids}
+    versions = {str(type_id): page.extract_date for type_id, page in pages.items()}
+    extract_date = next((page.extract_date for page in pages.values() if page.extract_date), None)
+    unique_rows: dict[str, dict] = {}
+    categories = []
+    for type_id, page in pages.items():
+        mapped = [fsa.to_lead_row(e) for e in page.establishments]
+        if any(row["raw"].get("BusinessTypeID") != type_id for row in mapped):
+            raise ValueError("FSA 返回的商户类型与请求不一致")
+        available = [r for r in mapped if not exclude_awaiting or r["raw"].get("RatingValue") != "AwaitingInspection"]
+        categories.append({"id": type_id, "fetched": page.total, "pool": len(available)})
+        unique_rows.update((row["source_key"], row) for row in available)
+    rows = sorted(unique_rows.values(), key=lambda row: row["source_key"])
     pool = len(rows)
-    if sample_n is not None and sample_n < len(rows):
+    sampled = sample_n is not None and sample_n < pool
+    if sampled:
+        assert sample_n is not None
         rows = random.Random(seed).sample(rows, sample_n)
+    for category in categories:
+        category["selected"] = sum(row["raw"]["BusinessTypeID"] == category["id"] for row in rows)
     existing_members = {m.lead_id for m in db.scalars(select(BatchLead).where(BatchLead.batch_id == batch.id)).all()}
     created = linked = skipped = 0
     for i, r in enumerate(rows, 1):
@@ -176,19 +193,25 @@ def sync_fsa(
         db.add(BatchLead(batch_id=batch.id, lead_id=lead.id, sample_order=i))
         existing_members.add(lead.id)
     batch.source_name = "fsa"
-    batch.source_version = page.extract_date
+    batch.source_version = extract_date
+    previous_types = {
+        int(value)
+        for value in (batch.business_type or "").removeprefix("fsa:").split(",")
+        if (batch.business_type or "").startswith("fsa:") and value in {"1", "7843", "7844"}
+    }
+    batch.business_type = "fsa:" + ",".join(map(str, sorted(previous_types | set(type_ids))))
     batch.source_licence = batch.source_licence or "OGL-3.0"
     batch.sampling_method = (
-        f"FSA localAuthorityId={authority_id} businessTypeId={business_type_id}"
+        f"FSA localAuthorityId={authority_id} businessTypeIds={type_ids} versions={versions}"
         + ("，排除 AwaitingInspection" if exclude_awaiting else "")
-        + (f"，按 source_key 排序后 random.Random({seed}).sample({sample_n})" if sample_n else "，全量")
+        + (f"，按 source_key 排序后 random.Random({seed}).sample({sample_n})" if sampled else "，全量")
     )
     batch.sampling_seed = seed
     batch.candidate_count = len(existing_members)
     db.add(
         ImportRun(
             batch_id=batch.id,
-            file_name=f"fsa:{authority_id}:{business_type_id}",
+            file_name=f"fsa:{authority_id}:" + ",".join(map(str, type_ids)),
             file_sha256=hashlib.sha256(json.dumps([r["source_key"] for r in rows]).encode()).hexdigest(),
             operator=operator,
             errors=[],
@@ -201,13 +224,15 @@ def sync_fsa(
     )
     db.commit()
     return {
-        "fetched": page.total,
+        "fetched": sum(page.total for page in pages.values()),
+        "categories": categories,
+        "business_type_ids": type_ids,
         "pool": pool,
         "selected": len(rows),
         "created": created,
         "linked": linked,
         "skipped": skipped,
-        "source_version": page.extract_date,
+        "source_version": extract_date,
         "sampling_seed": seed,
     }
 
@@ -277,7 +302,7 @@ def enrich_overture(
 
 # ---------- 自动筛选（名称规则 + Overture 品牌） ----------
 
-SCREEN_RULES_VERSION = "name-rule-v1"
+SCREEN_RULES_VERSION = "name-rule-v2"
 CAFE_WORDS = re.compile(
     r"\b(cafe|caf\u00e9|coffee|tearoom|tea room|espresso|bakery|patisserie|deli|juice|bubble tea)\b", re.I
 )
@@ -353,7 +378,10 @@ def auto_screen(db: Session, batch: Batch, only_unchecked: bool = True) -> dict:
             cls, why = ScreeningClass.excluded_institution, f"{SCREEN_RULES_VERSION}: 名称含机构/社区词"
         elif CAFE_WORDS.search(name):
             cls, why = ScreeningClass.excluded_cafe, f"{SCREEN_RULES_VERSION}: 名称含咖啡店词（可能误杀，人工可改）"
-        elif PUB_WORDS.search(name):
+        elif PUB_WORDS.search(name) and not (
+            (batch.business_type or "").startswith("fsa:")
+            and "7843" in (batch.business_type or "").removeprefix("fsa:").split(",")
+        ):
             cls, why = ScreeningClass.excluded_pub, f"{SCREEN_RULES_VERSION}: 名称含酒吧词"
         if cls is not None:
             lead.screening_class = cls
