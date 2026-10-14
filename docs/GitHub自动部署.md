@@ -13,7 +13,7 @@
 | [docker-compose-traefik.yaml](../infra/docker-compose-traefik.yaml) | 基础 HTTPS 入口及共享 `matrix-network`；公网 Dashboard 默认关闭 |
 | [docker-compose.production.yaml](../infra/docker-compose.production.yaml) | 独立业务栈，只使用镜像；没有公网数据库／API／内部服务端口 |
 | [gateway.py](../infra/deploy/gateway.py) | 服务器固定发布入口，锁、备份、一次迁移、验证、回滚 |
-| [send_release.py](../infra/deploy/send_release.py) | CI 校验四个镜像 digest 后通过受限 SSH 提交清单 |
+| [send_release.py](../infra/deploy/send_release.py) | CI 校验五个镜像 digest 后通过受限 SSH 提交清单 |
 | [compatibility.json](../infra/deploy/compatibility.json) | 目标迁移版本及旧数据格式回滚声明 |
 | [bootstrap_server.py](../infra/deploy/bootstrap_server.py) | 管理员首次配置或显式更新发布规范 |
 | [validate.py](../infra/deploy/validate.py) | 无真实凭据的 Compose 与迁移声明检查 |

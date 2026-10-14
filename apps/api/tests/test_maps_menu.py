@@ -391,3 +391,37 @@ def test_force_headless_never_opens_window_and_partial_images_are_kept(monkeypat
     calls.clear()
     report = browser.capture_with_fallback({}, tmp_path, tmp_path, "", force_headless=True)
     assert calls == [True] and report["actual_headless"]
+
+
+@pytest.mark.parametrize("consent,available,expected", [(False, False, True), (True, False, False), (True, True, True)])
+def test_consent_page_is_rejected_before_reading_store_identity(consent, available, expected):
+    from app.integrations import maps_menu_browser as browser
+
+    class Page:
+        url = "https://consent.google.com/m" if consent else "https://www.google.com/maps/"
+        clicked = False
+
+        def get_by_role(self, role, name):
+            assert role == "button" and name.fullmatch("Reject all")
+            return self
+
+        def count(self):
+            return int(available)
+
+        @property
+        def first(self):
+            return self
+
+        def click(self):
+            self.clicked = True
+            self.url = "https://www.google.com/maps/"
+
+        def wait_for_url(self, predicate, timeout):
+            assert predicate(self.url) and timeout == 30000
+
+        def wait_for_load_state(self, state):
+            assert state == "domcontentloaded"
+
+    page = Page()
+    assert browser.dismiss_consent(page) == expected
+    assert page.clicked == (consent and available)

@@ -14,6 +14,7 @@ MAX_BYTES = 15 * 1024 * 1024
 MESSAGES = {
     "downloaded": "菜单图片已获取；日期和内容仍需核对",
     "limited_view": "Google Maps 返回有限视图；当前会话无法获取菜单，不一定需要登录",
+    "consent_required": "Google Cookie 页面未能完成处理，请检查浏览器执行器",
     "captcha": "Google 要求人工验证，请在专用浏览器处理后重试",
     "place_mismatch": "页面名称或地址与目标门店不一致，未导入图片",
     "menu_unavailable": "当前页面未找到菜单页签，可改用官网菜单",
@@ -108,6 +109,19 @@ def download(source: str, out: Path, proxy: str) -> dict:
     raise RuntimeError("下载失败")
 
 
+def dismiss_consent(page) -> bool:
+    """只处理 Google 的已知同意页；不把中间页面当成门店。"""
+    if urlsplit(page.url).hostname != "consent.google.com":
+        return True
+    reject = page.get_by_role("button", name=re.compile(r"^(Reject all|全部拒绝|拒绝全部)$", re.I))
+    if not reject.count():
+        return False
+    reject.first.click()
+    page.wait_for_url(lambda url: urlsplit(url).hostname != "consent.google.com", timeout=30000)
+    page.wait_for_load_state("domcontentloaded")
+    return True
+
+
 def capture(
     job: dict,
     profile: Path,
@@ -138,6 +152,9 @@ def capture(
                 page = context.pages[0] if context.pages else context.new_page()
                 progress("打开 Google Maps 门店")
                 page.goto(job["maps_url"], wait_until="domcontentloaded", timeout=45000)
+                if not dismiss_consent(page):
+                    report["status"] = "consent_required"
+                    return report
                 if "/sorry/" in page.url or page.locator('iframe[src*="recaptcha"]').count():
                     report["status"] = "captcha"
                     return report
