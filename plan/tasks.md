@@ -190,3 +190,8 @@
 - [x] 独立 Traefik 与服务器业务 Compose、固定数据卷、单次迁移、健康验证及兼容回滚。
 - [x] 已配置服务器受限部署身份、固定主机密钥、GitHub Secrets／Variables 和短期 GHCR 凭据。
 - [x] 部署脚本失败路径与实际 Compose 参数校验通过（15 个测试），270 后端、两个 provider 各 11 测试、8 前端测试及构建通过；首次真实 [Actions 发布](https://github.com/yuanyuexiang/Beacon/actions/runs/38281693112) 成功，HTTPS、Web／API SHA 和健康检查通过（2026-10-13）。
+
+## D50：服务器 Maps 执行器
+
+- [ ] 独立 Chrome/Xvfb 容器、持久化会话、认证与 CI/CD。
+- [ ] 服务器连接与真实菜单获取验证。

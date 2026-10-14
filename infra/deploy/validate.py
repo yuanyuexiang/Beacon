@@ -49,7 +49,10 @@ def main():
         config = Path(folder)
         (config / "secrets").mkdir()
         (config / "runtime.env").write_text("BEACON_LLM_PROVIDER=fake\n")
-        for name in ("gmail", "meta"):
+        for name in ("gmail", "meta", "maps"):
+            if name == "maps":
+                (config / "secrets/maps-worker-token").write_text("ci-not-a-real-secret-" * 3)
+                continue
             (config / "secrets" / (name + "-service-token")).write_text("ci-not-a-real-secret-" * 3)
         env = {
             **os.environ,
@@ -60,7 +63,7 @@ def main():
             "BEACON_SECRET_KEY": "ci-not-a-real-session-secret-0123456789",
             "BEACON_RELEASE_SHA": "a" * 40,
         }
-        for name in ("api", "web", "gmail", "meta"):
+        for name in ("api", "web", "gmail", "meta", "maps"):
             env[name.upper() + "_IMAGE"] = f"ghcr.io/yuanyuexiang/beacon-{name}@sha256:" + "a" * 64
         result = subprocess.run(
             [

@@ -159,3 +159,7 @@ Docker API 与宿主机浏览器解耦；Mac 默认复用 data/browser-profiles/
 ## D49 GitHub CI 与 GHCR 自动部署
 
 main push → 临时库后端与前端/provider/部署测试 → 四镜像 GHCR digest → 独立部署身份提交发布清单 → 备份、单次迁移、健康与 HTTPS/SHA 验证 → 启动 worker。PR 仅测试，测试阶段没有发布审批。Compose／固定 gateway 更新先同步服务器，不允许未确认脚本在发布时替换基础入口。失败及 schema 兼容回滚场景使用本地模拟测试，真实 Actions 与服务器验收另记任务清单。见 [操作说明](../docs/GitHub自动部署.md)。
+
+## D50：服务器 Maps 执行器（2026-10-14）
+
+用户授权部署独立 Maps worker：Chrome + Xvfb 虚拟显示器，非 root 浏览器进程，专用持久化会话与临时目录；只主动通过 HTTPS 领取单家任务，不开放调试端口、不自动登录。独立 GHCR 镜像纳入 main CI/CD；执行器密钥服务器生成，浏览器数据卷参与停机备份。工作台显示浏览器开关在服务器对应虚拟屏幕，不在客户端弹窗。首次全新会话与实际菜单获取待部署验收，不承诺 Google 页面提供菜单标签。

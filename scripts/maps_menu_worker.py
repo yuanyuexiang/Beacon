@@ -23,6 +23,7 @@ def execute(client, job, args):
     base = f"/api/internal/maps-menu/{job['lead_id']}/{job['run_id']}"
 
     def progress(stage):
+        heartbeat(args)
         response = client.post(base + "/progress", json={"lease": job["lease"], "stage": stage})
         response.raise_for_status()
 
@@ -61,6 +62,11 @@ def execute(client, job, args):
         print(f"菜单任务结束：{report['status']}，获取 {len(report['images'])} 张图片", flush=True)
 
 
+def heartbeat(args):
+    if args.heartbeat_file:
+        Path(args.heartbeat_file).touch(mode=0o600)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-base", default="http://127.0.0.1:8000")
@@ -69,6 +75,7 @@ def main():
     parser.add_argument("--temp-dir", default="data/maps-worker-tmp")
     parser.add_argument("--proxy", default="socks5h://127.0.0.1:7890")
     parser.add_argument("--headless", action="store_true", help="强制无头运行，忽略工作台显示浏览器开关")
+    parser.add_argument("--heartbeat-file", help="成功连接 API 后更新的健康检查文件")
     parser.add_argument("--once", action="store_true", help="领取并执行一项任务后退出，用于验证")
     args = parser.parse_args()
     target = urlsplit(args.api_base)
@@ -77,7 +84,6 @@ def main():
     token_path = Path(args.token_file)
     if not token_path.is_file():
         parser.error("执行器密钥文件不存在；请按操作手册配置")
-    token_path.chmod(0o600)
     token = token_path.read_text().strip()
     if len(token) < 32:
         parser.error("执行器密钥至少 32 字符")
@@ -92,6 +98,7 @@ def main():
                 response = client.post("/api/internal/maps-menu/claim")
                 response.raise_for_status()
                 job = response.json()["job"]
+                heartbeat(args)
                 if job:
                     execute(client, job, args)
                     if args.once:

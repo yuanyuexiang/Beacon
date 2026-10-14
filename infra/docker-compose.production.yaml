@@ -131,6 +131,24 @@ services:
       api: { condition: service_healthy }
       meta-service: { condition: service_healthy }
 
+  maps-worker:
+    <<: *service
+    image: ${MAPS_IMAGE:?Maps image digest required}
+    init: true
+    shm_size: 1gb
+    environment:
+      MAPS_API_BASE: https://${BEACON_DOMAIN:?domain required}
+    secrets: [maps_worker_token]
+    volumes: ["maps-data:/data"]
+    depends_on:
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import pathlib,time;assert time.time()-pathlib.Path('/tmp/maps-heartbeat').stat().st_mtime < 180"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
   migrate:
     <<: *service
     profiles: [tools]
@@ -155,8 +173,11 @@ volumes:
   data: { name: beacon-data }
   gmail-data: { name: beacon-gmail-data }
   meta-data: { name: beacon-meta-data }
+  maps-data: { name: beacon-maps-data }
 
 secrets:
+  maps_worker_token:
+    file: ${BEACON_CONFIG_DIR:-/opt/beacon/config}/secrets/maps-worker-token
   gmail_service_token:
     file: ${BEACON_CONFIG_DIR:-/opt/beacon/config}/secrets/gmail-service-token
   meta_service_token:

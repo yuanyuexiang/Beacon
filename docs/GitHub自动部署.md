@@ -98,3 +98,5 @@ actionlint .github/workflows/ci-cd.yml
 ## 实际验收记录
 
 2026-10-13：提交 `3acfcb7` 的 [GitHub Actions](https://github.com/yuanyuexiang/Beacon/actions/runs/38281693112) 全流程成功。270 后端、两个 provider 各 11 测试、15 个部署测试及 8 前端测试通过；四个镜像推送 GHCR 后，服务器完成一致性备份、迁移、应用健康检查、公网 HTTPS 与双端提交版本验证，再启动两个 worker。首次调试的两次 create 参数失败均发生在迁移之前，已验证初始库无迁移后归档失败记录，并加入实际 CLI 参数校验。
+
+D50 扩展：新增第五个 GHCR 镜像 `beacon-maps`、`maps-worker` 与 `beacon-maps-data` 备份。升级前先同步 bootstrap；首轮兼容旧 release 时补充 Maps 镜像引用，使新固定 Compose 能停止或回滚上一版本。密钥保留在服务器，不写入 Actions secrets。

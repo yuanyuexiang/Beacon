@@ -64,6 +64,13 @@ def provision(root, body):
         values.update(body["application"])
         runtime.write_text("\n".join(key + "=" + env_quote(value) for key, value in values.items()) + "\n")
         runtime.chmod(0o600)
+    maps_token = config / "secrets/maps-worker-token"
+    if not maps_token.exists():
+        maps_token.write_text(secrets.token_urlsafe(48) + "\n")
+        maps_token.chmod(0o600)
+    if "BEACON_MAPS_WORKER_TOKEN=" not in runtime.read_text():
+        with runtime.open("a") as stream:
+            stream.write("BEACON_MAPS_WORKER_TOKEN=" + env_quote(maps_token.read_text().strip()) + "\n")
     for name in ("gmail", "meta"):
         token = config / "secrets" / (name + "-service-token")
         if not token.exists():

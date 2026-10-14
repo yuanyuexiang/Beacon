@@ -22,8 +22,8 @@ import urllib.request
 from pathlib import Path
 
 APP_SERVICES = ["api", "web", "gmail-service", "meta-service"]
-WORKERS = ["gmail-worker", "outreach-worker"]
-VOLUMES = ["beacon-data", "beacon-gmail-data", "beacon-meta-data"]
+WORKERS = ["gmail-worker", "outreach-worker", "maps-worker"]
+VOLUMES = ["beacon-data", "beacon-gmail-data", "beacon-meta-data", "beacon-maps-data"]
 MAX_REQUEST = 32768
 CREATE_ARGS = ["--no-build", "--pull", "never"]
 
@@ -58,8 +58,8 @@ def validate_request(body, compose_hash, gateway_hash):
     if body.get("compose_sha256") != compose_hash or body.get("gateway_sha256") != gateway_hash:
         raise DeploymentError("服务器部署规范与仓库不同，需同步基础设施配置后重试")
     images = body.get("images")
-    if not isinstance(images, dict) or set(images) != {"api", "web", "gmail", "meta"}:
-        raise DeploymentError("发布必须包含四个镜像")
+    if not isinstance(images, dict) or set(images) != {"api", "web", "gmail", "meta", "maps"}:
+        raise DeploymentError("发布必须包含五个镜像")
     for name, image in images.items():
         pattern = rf"ghcr\.io/yuanyuexiang/beacon-{name}@sha256:[0-9a-f]{{64}}"
         if not isinstance(image, str) or not re.fullmatch(pattern, image):
@@ -377,7 +377,7 @@ class Gateway:
                     input_text=body["registry_token"] + "\n",
                     timeout=60,
                 )
-                self.compose(release, "pull", "postgres", *APP_SERVICES)
+                self.compose(release, "pull", "postgres", *APP_SERVICES, "maps-worker")
                 self.compose(
                     release,
                     "up",
@@ -389,6 +389,11 @@ class Gateway:
                     "120",
                     "postgres",
                 )
+                # D50 adds a worker without changing storage or schema. Supply its image
+                # to the previous release so the new fixed Compose can also roll it back.
+                if old_release and "maps" not in old["images"]:
+                    with (old_release / "release.env").open("a") as stream:
+                        stream.write("MAPS_IMAGE=" + manifest["images"]["maps"] + "\n")
                 old_revision = self.revision(release)
                 atomic_json(
                     pending,
@@ -417,6 +422,7 @@ class Gateway:
                     "api",
                     "gmail-service",
                     "meta-service",
+                    "maps-worker",
                 )
                 self.backup(release, manifest)
                 atomic_json(

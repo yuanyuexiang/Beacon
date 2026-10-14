@@ -20,7 +20,8 @@ def request():
         "run_id": 22,
         "run_number": 2,
         "images": {
-            name: f"ghcr.io/yuanyuexiang/beacon-{name}@sha256:" + "c" * 64 for name in ("api", "web", "gmail", "meta")
+            name: f"ghcr.io/yuanyuexiang/beacon-{name}@sha256:" + "c" * 64
+            for name in ("api", "web", "gmail", "meta", "maps")
         },
         "compose_sha256": "compose",
         "gateway_sha256": "gateway",
@@ -214,3 +215,16 @@ def test_actual_create_command_is_accepted_by_compose_cli(tmp_path):
     command = next(command for command in g.calls if "create" in command)
     options = command[command.index("create") + 1 :]
     subprocess.run(["docker", "compose", "create", *options, "--help"], capture_output=True, check=True)
+
+
+def test_upgrade_supplies_maps_image_to_previous_release_for_rollback(tmp_path):
+    g = FakeGateway(tmp_path)
+    previous = json.loads((g.state / "current.json").read_text())
+    previous["images"].pop("maps")
+    atomic_json(g.state / "current.json", previous)
+    g.deploy(g.body())
+    assert (
+        "MAPS_IMAGE=ghcr.io/yuanyuexiang/beacon-maps@sha256:" in (g.root / "releases/previous/release.env").read_text()
+    )
+    assert "maps-worker" in gateway.WORKERS
+    assert "beacon-maps-data" in gateway.VOLUMES

@@ -14,7 +14,7 @@ def main():
     root = Path.cwd()
     prefix = "ghcr.io/yuanyuexiang/beacon-"
     images = {}
-    for name in ("api", "web", "gmail", "meta"):
+    for name in ("api", "web", "gmail", "meta", "maps"):
         value = json.loads((root / "images" / (name + ".json")).read_text())
         image = value["image"]
         if not re.fullmatch(re.escape(prefix + name) + r"@sha256:[0-9a-f]{64}", image):
