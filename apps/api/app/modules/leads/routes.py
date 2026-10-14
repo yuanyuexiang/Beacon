@@ -12,11 +12,112 @@ from app.core.auth import current_operator
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.models import Operator
-from app.modules.leads import runs, service
+from app.modules.leads import runs, service, workflows
 from app.modules.leads.models import Batch, Lead, ScreeningClass
 from app.modules.leads.schemas import BatchIn, BatchOut, ImportResult, LeadOut, LeadPatch
 
 router = APIRouter(tags=["leads"])
+
+
+def idle_batch(batch_key: str, db: Session = Depends(get_db)):
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(404, "批次不存在")
+    with workflows.lock(db, batch):
+        workflows.ensure_idle(db, batch)
+        yield batch
+
+
+def idle_run(run_id: uuid.UUID, db: Session = Depends(get_db)):
+    run = db.get(runs.BatchRun, run_id)
+    if run is None:
+        raise HTTPException(404, "运行不存在")
+    batch = db.get(Batch, run.batch_id)
+    assert batch is not None
+    with workflows.lock(db, batch):
+        workflows.ensure_idle(db, batch)
+        yield run
+
+
+@router.get("/batches/{batch_key}/workflow", response_model=workflows.WorkflowOut | None)
+def get_workflow(batch_key: str, db: Session = Depends(get_db)):
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(404, "批次不存在")
+    return workflows.latest(db, batch)
+
+
+@router.post("/batches/{batch_key}/workflow", response_model=workflows.WorkflowOut, status_code=201)
+def start_workflow(
+    batch_key: str, body: workflows.WorkflowIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+):
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(404, "批次不存在")
+    with workflows.lock(db, batch):
+        task = workflows.start(db, batch, body, op.username)
+        audit.record(
+            db, op, "start_list_workflow", "list_workflow", task.id, after={"kind": task.kind, "params": task.params}
+        )
+        db.commit()
+        return task
+
+
+@router.post("/batches/{batch_key}/workflow/{task_id}/advance", response_model=workflows.WorkflowOut)
+def advance_workflow(
+    batch_key: str, task_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+):
+    batch = service.get_batch_by_key(db, batch_key)
+    task = db.get(workflows.Workflow, task_id)
+    if batch is None or task is None or task.batch_id != batch.id:
+        raise HTTPException(404, "任务不存在")
+    with workflows.lock(db, batch):
+        result = workflows.advance(db, batch, task)
+        audit.record(
+            db, op, "advance_list_workflow", "list_workflow", task.id, after={"step": task.step, "status": task.status}
+        )
+        db.commit()
+        return result
+
+
+@router.post("/batches/{batch_key}/workflow/{task_id}/cancel", response_model=workflows.WorkflowOut)
+def cancel_workflow(
+    batch_key: str, task_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+):
+    batch = service.get_batch_by_key(db, batch_key)
+    task = db.get(workflows.Workflow, task_id)
+    if batch is None or task is None or task.batch_id != batch.id:
+        raise HTTPException(404, "任务不存在")
+    with workflows.lock(db, batch):
+        if task.status not in {"completed", "cancelled"}:
+            task.status, task.error = "cancelled", None
+            audit.record(db, op, "cancel_list_workflow", "list_workflow", task.id)
+            db.commit()
+        return task
+
+
+class CreateListIn(BatchIn):
+    workflow: workflows.WorkflowIn
+
+
+@router.post("/lists", status_code=201)
+def create_list(body: CreateListIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> dict:
+    if body.workflow.kind != "create":
+        raise HTTPException(422, "建立名单必须使用 create 任务")
+    if service.get_batch_by_key(db, body.batch_key):
+        raise HTTPException(409, "名单名称已存在")
+    batch = Batch(**body.model_dump(exclude={"workflow"}))
+    db.add(batch)
+    db.flush()
+    with workflows.lock(db, batch):
+        # 新名单及任务一起落库；校验失败时不会留下空名单。
+        audit.record(db, op, "create", "batch", batch.id, after=body.model_dump(exclude={"workflow"}))
+        task = workflows.start(db, batch, body.workflow, op.username)
+        audit.record(
+            db, op, "start_list_workflow", "list_workflow", task.id, after={"kind": task.kind, "params": task.params}
+        )
+        db.commit()
+        return {"batch": BatchOut.model_validate(batch), "workflow": workflows.WorkflowOut.model_validate(task)}
 
 
 @router.post("/batches", response_model=BatchOut, status_code=201)
@@ -50,7 +151,7 @@ def delete_batch_preview(
     return deletion.preview(db, batch)
 
 
-@router.delete("/batches/{batch_key}")
+@router.delete("/batches/{batch_key}", dependencies=[Depends(idle_batch)])
 def delete_batch(
     batch_key: str, confirm: str = "", db: Session = Depends(get_db), op: Operator = Depends(current_operator)
 ) -> dict:
@@ -72,7 +173,11 @@ def delete_batch(
     return result
 
 
-@router.post("/imports", response_model=ImportResult)
+def idle_import(batch_key: str = Form(...), db: Session = Depends(get_db)):
+    yield from idle_batch(batch_key, db)
+
+
+@router.post("/imports", response_model=ImportResult, dependencies=[Depends(idle_import)])
 async def import_leads(
     batch_key: str = Form(...),
     file: UploadFile = File(...),
@@ -232,7 +337,7 @@ def _run_out(db: Session, run: runs.BatchRun) -> RunOut:
     return out
 
 
-@router.post("/batches/{batch_key}/runs", response_model=RunOut, status_code=201)
+@router.post("/batches/{batch_key}/runs", response_model=RunOut, status_code=201, dependencies=[Depends(idle_batch)])
 def start_batch_run(
     batch_key: str, body: RunIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
 ) -> RunOut:
@@ -250,7 +355,7 @@ def start_batch_run(
     return _run_out(db, run)
 
 
-@router.post("/runs/{run_id}/resume", response_model=RunOut)
+@router.post("/runs/{run_id}/resume", response_model=RunOut, dependencies=[Depends(idle_run)])
 def resume_batch_run(
     run_id: uuid.UUID,
     body: RunIn | None = None,
@@ -275,7 +380,7 @@ class ContinueIn(BaseModel):
     max_jobs: int = 5
 
 
-@router.post("/runs/{run_id}/continue", response_model=RunOut)
+@router.post("/runs/{run_id}/continue", response_model=RunOut, dependencies=[Depends(idle_run)])
 def continue_batch_run(
     run_id: uuid.UUID, body: ContinueIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
 ) -> RunOut:
@@ -327,7 +432,7 @@ def fsa_authorities(db: Session = Depends(get_db), op: Operator = Depends(curren
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"FSA 接口不可用：{e.__class__.__name__}: {e}") from e
 
 
-@router.post("/batches/{batch_key}/sync/fsa")
+@router.post("/batches/{batch_key}/sync/fsa", dependencies=[Depends(idle_batch)])
 def sync_fsa(
     batch_key: str, body: FsaSyncIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
 ) -> dict:
@@ -369,7 +474,7 @@ class OvertureIn(BaseModel):
     overwrite: bool = False
 
 
-@router.post("/batches/{batch_key}/enrich/overture")
+@router.post("/batches/{batch_key}/enrich/overture", dependencies=[Depends(idle_batch)])
 def enrich_overture(
     batch_key: str, body: OvertureIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
 ) -> dict:
@@ -386,7 +491,7 @@ def enrich_overture(
     return result
 
 
-@router.post("/batches/{batch_key}/screen")
+@router.post("/batches/{batch_key}/screen", dependencies=[Depends(idle_batch)])
 def auto_screen(batch_key: str, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> dict:
     """规则筛选建议：咖啡店/连锁/机构/酒吧标为排除并写明规则版本；其余保持 unchecked 交人工。"""
     batch = service.get_batch_by_key(db, batch_key)

@@ -7,21 +7,16 @@ import { api, json } from "@/lib/api";
 import { CheckCircleOutlined, CloudDownloadOutlined, GlobalOutlined, ShopOutlined, UserOutlined } from "@ant-design/icons";
 import { HeroBand, SCREEN_ZH, ScreenTag, StatCard } from "@/components/ui";
 import { label } from "@/lib/format";
+import { ListWorkflow, workflowUnfinished, WORKFLOW_TITLES, workflowSummary } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
 type Lead = { business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
-type Run = { id: string; status: string; totals: { pending: number; running: number; succeeded: number; failed: number } | null };
 type Authority = { id: number; name: string; region: string | null; count: number | null };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
 type CreateValues = { batch_key?: string; region?: string; notes?: string; sample_n?: number | null; exclude_awaiting?: boolean; business_type_ids?: number[] };
-type BuildRequest = { key: string; method: "auto" | "csv"; authority_id?: number; sample_n: number | null; seed: number; exclude_awaiting: boolean; business_type_ids: number[]; file?: File };
 const BUSINESS_TYPES = [{ value: 1, label: "餐厅、咖啡馆、食堂" }, { value: 7844, label: "外卖店、三明治店" }, { value: 7843, label: "酒吧、Pub、夜店" }];
 const businessLabel = (id?: number | null, name?: string | null) => BUSINESS_TYPES.find((t) => t.value === id)?.label || name || "未记录";
-const scopeLabel = (ids: number[]) => ids.map((id) => businessLabel(id)).join(" / ");
-type FsaResult = { fetched: number; pool: number; selected: number; created: number; linked: number; skipped?: number; categories?: { id: number; fetched: number; selected: number }[] };
-const fsaSummary = (r: FsaResult, ids: number[]) => `${scopeLabel(ids)}共 ${r.fetched} 家，筛选后可选 ${r.pool} 家，选入 ${r.selected} 家（新增 ${r.created}，关联已有 ${r.linked}${r.skipped != null ? `，跳过 ${r.skipped}` : ""}）${r.categories?.length && r.categories.length > 1 ? `；分类选入：${r.categories.map((c) => `${businessLabel(c.id)} ${c.selected} 家`).join("，")}` : ""}`;
-const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0] & 0x7fffffff;
 const listName = (region?: string) => `${(region || "名单").slice(0, 35)}-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 17)}`;
 
 const SCREENING = ["unchecked", "candidate", "unknown", "excluded_cafe", "excluded_chain", "excluded_canteen", "excluded_community", "excluded_institution", "excluded_pub", "excluded_closed", "excluded_other"];
@@ -51,13 +46,17 @@ function LeadsInner() {
   const [createMethod, setCreateMethod] = useState<"auto" | "csv" | "empty">("auto");
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [creating, setCreating] = useState(false);
-  const [buildRequest, setBuildRequest] = useState<BuildRequest | null>(null);
+  const [workflow, setWorkflow] = useState<ListWorkflow | null>(null);
+  const [workflowLoading, setWorkflowLoading] = useState(true);
+  const [workflowLoadError, setWorkflowLoadError] = useState(false);
+  const [mode, setMode] = useState<"enrich" | "append" | "progress">("enrich");
+  const activeKey = useRef(batchKey);
+  activeKey.current = batchKey;
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const locked = creating || !!busy || workflowLoading || workflowLoadError || workflowUnfinished(workflow);
   const generatedName = useRef("");
-  // step 是下一步待执行位置；失败重试沿用同一名单和随机种子。
-
-  const [autoProg, setAutoProg] = useState<{ step: number; lines: string[]; error?: string } | null>(null);
-  const [contactProg, setContactProg] = useState<string | null>(null);
-  useEffect(() => { if (newOpen && !autoProg) createForm.resetFields(); }, [newOpen, autoProg, createForm]);
+  useEffect(() => { if (newOpen) createForm.resetFields(); }, [newOpen, createForm]);
   const err = (e: Error) => message.error(e.message);
   // 地区取自 FSA 地方当局名录；接口不可用时退回手工输入
   const loadAuthorities = useCallback(() => {
@@ -72,98 +71,96 @@ function LeadsInner() {
   }, []);
   useEffect(() => { loadBatches(); }, [loadBatches]);
   useEffect(() => { loadLeads(batchKey); router.replace(batchKey ? `/leads?batch=${encodeURIComponent(batchKey)}` : "/leads"); }, [batchKey, loadLeads, router]);
-  // 打开“补充数据”时，按批次的地区预选 FSA 地方当局
+  const loadWorkflow = useCallback(async (key: string) => {
+    const task = await api<ListWorkflow | null>(`/api/batches/${encodeURIComponent(key)}/workflow`);
+    if (activeKey.current === key) { setWorkflow(task); setWorkflowLoadError(false); }
+    return task;
+  }, []);
   useEffect(() => {
-    if (!buildOpen) return;
+    setWorkflow(null);
+    setWorkflowLoadError(false);
+    if (!batchKey) { setWorkflowLoading(false); return; }
+    setWorkflowLoading(true);
+    loadWorkflow(batchKey).catch((e: Error) => { if (activeKey.current === batchKey) setWorkflowLoadError(true); err(e); }).finally(() => { if (activeKey.current === batchKey) setWorkflowLoading(false); });
+  }, [batchKey, loadWorkflow]);
+  useEffect(() => {
+    if (!batchKey || creating) return;
+    const timer = setInterval(() => { loadWorkflow(batchKey).catch(() => {}); }, 5000);
+    return () => clearInterval(timer);
+  }, [batchKey, creating, loadWorkflow]);
+  const currentBatch = batches.find((b) => b.batch_key === batchKey);
+  const appendAuthority = authorities.find((a) => a.name === currentBatch?.region);
+  useEffect(() => {
+    if (!buildOpen || mode !== "append") return;
     loadAuthorities();
-    const batch = batches.find((b) => b.batch_key === batchKey);
-    const region = batch?.region;
-    if (fsaForm.getFieldValue("business_type_ids") == null) {
-      const ids = batch?.business_type?.startsWith("fsa:") ? batch.business_type.slice(4).split(",").map(Number).filter((id) => BUSINESS_TYPES.some((t) => t.value === id)) : [1];
-      fsaForm.setFieldValue("business_type_ids", ids.length ? ids : [1]);
-    }
-    const match = authorities.find((a) => a.name === region);
-    if (match && fsaForm.getFieldValue("authority_id") == null) fsaForm.setFieldsValue({ authority_id: match.id });  // 不覆盖手工选择
-  }, [buildOpen, authorities, batches, batchKey, fsaForm, loadAuthorities]);
+    const ids = currentBatch?.business_type?.startsWith("fsa:") ? currentBatch.business_type.slice(4).split(",").map(Number).filter((id) => BUSINESS_TYPES.some((t) => t.value === id)) : [1];
+    fsaForm.setFieldsValue({ sample_n: 50, exclude_awaiting: false, business_type_ids: ids.length ? ids : [1] });
+  }, [buildOpen, mode, currentBatch?.business_type, fsaForm, loadAuthorities]);
 
-  // 批量查找联系方式：每次请求处理 20 家（后端并行读官网），循环续跑直到没有待处理的，避免单个请求过长
-  const collectContacts = async (key: string, onProgress: (text: string) => void): Promise<string> => {
-    const k = encodeURIComponent(key);
-    let r = await api<Run>(`/api/batches/${k}/runs`, json({ steps: ["contacts"], max_jobs: 20 }));
-    const total = (t: Run["totals"]) => (t ? t.pending + t.running + t.succeeded + t.failed : 0);
-    while (r.status === "running" && (r.totals?.pending ?? 0) > 0) {
-      onProgress(`已处理 ${(r.totals?.succeeded ?? 0) + (r.totals?.failed ?? 0)}/${total(r.totals)} 家`);
-      r = await api<Run>(`/api/runs/${r.id}/continue`, json({ max_jobs: 20 }));
-    }
-    const t = r.totals;
-    if (!total(t)) return "没有需要查找的门店（已排除、没有官网和 Overture 数据，或之前已查过）";
-    return `查找 ${total(t)} 家：成功 ${t?.succeeded ?? 0}${t?.failed ? `，失败 ${t.failed}` : ""}`;
-  };
-
-  const executeBuild = async (request: BuildRequest, startStep = 0, previousLines: string[] = []) => {
-    const key = encodeURIComponent(request.key);
-    const lines = previousLines.slice(0, startStep);
-    let step = startStep;
+  const executeWorkflow = async (key: string, task: ListWorkflow) => {
     setCreating(true);
-    setAutoProg({ step, lines });
+    setMode("progress");
+    setBuildOpen(true);
+    setWorkflow(task);
     try {
-      if (request.method === "csv") {
-        const fd = new FormData();
-        fd.append("batch_key", request.key);
-        fd.append("file", request.file!);
-        const result = await api<{ created_count: number; linked_count: number; skipped_count: number; error_count: number }>("/api/imports", { method: "POST", body: fd });
-        setAutoProg({ step: 4, lines: [`新增 ${result.created_count}，关联 ${result.linked_count}，跳过 ${result.skipped_count}，错误 ${result.error_count}；有错误的行请修正后重新导入。`] });
-        return;
-      }
-      if (step === 0) {
-        const f = await api<FsaResult>(`/api/batches/${key}/sync/fsa`, json({ authority_id: request.authority_id, business_type_ids: request.business_type_ids, exclude_awaiting: request.exclude_awaiting, sample_n: request.sample_n, seed: request.seed }));
-        lines.push(fsaSummary(f, request.business_type_ids));
-        setAutoProg({ step: (step = 1), lines: [...lines] });
-      }
-      if (step === 1) {
-        const o = await api<{ leads: number; matched: number; website_set: number; phone_found: number }>(`/api/batches/${key}/enrich/overture`, json({}));
-        lines.push(`匹配 ${o.matched}/${o.leads}，补官网 ${o.website_set}，有电话 ${o.phone_found}`);
-        setAutoProg({ step: (step = 2), lines: [...lines] });
-      }
-      if (step === 2) {
-        const sc = await api<{ counts: Record<string, number> }>(`/api/batches/${key}/screen`, { method: "POST" });
-        lines.push(Object.entries(sc.counts).map(([k, n]) => `${SCREEN_ZH[k] ?? k} ${n}`).join("，"));
-        setAutoProg({ step: (step = 3), lines: [...lines] });
-      }
-      const summary = await collectContacts(request.key, (text) => setAutoProg({ step: 3, lines: [...lines, text] }));
-      lines.push(summary);
-      setAutoProg({ step: 4, lines: [...lines] });
+      let next = task;
+      do {
+        next = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow/${next.id}/advance`, { method: "POST" });
+        if (!alive.current || activeKey.current !== key) break;
+        setWorkflow(next);
+      } while (next.status === "pending");
     } catch (e) {
-      setAutoProg({ step, lines: [...lines], error: (e as Error).message });
+      err(e as Error);
+      await loadWorkflow(key).catch(() => {});
     } finally {
-      setCreating(false);
-      loadLeads(request.key);
-      loadBatches();
+      if (alive.current) { setCreating(false); loadLeads(key); loadBatches(); }
     }
   };
-
+  const startWorkflow = async (kind: "enrich" | "append", values?: CreateValues) => {
+    if (!batchKey) return;
+    const key = batchKey;
+    setCreating(true);
+    try {
+      const task = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow`, json({ kind, ...(kind === "append" ? { authority_id: appendAuthority?.id, authority_name: currentBatch?.region, business_type_ids: values?.business_type_ids || [1], sample_n: values?.sample_n || null, exclude_awaiting: values?.exclude_awaiting ?? false } : {}) }));
+      await executeWorkflow(key, task);
+    } catch (e) { err(e as Error); } finally { setCreating(false); }
+  };
+  const cancelWorkflow = () => {
+    if (!batchKey || !workflow) return;
+    const key = batchKey, id = workflow.id;
+    Modal.confirm({ title: "结束这个未完成任务？", content: "已加入的门店和已完成的结果会保留。结束后可开始新任务。", okText: "结束任务", cancelText: "返回", onOk: async () => {
+      const task = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow/${id}/cancel`, { method: "POST" });
+      if (activeKey.current === key) { setWorkflow(task); setBuildOpen(false); }
+    } });
+  };
   const createBatch = async (v: CreateValues) => {
     const authority = authorities.find((a) => a.name === v.region);
     if (createMethod === "auto" && !authority) return message.error("请选择可用地区；名录暂不可用时可重试加载或改为导入 CSV。");
     if (createMethod === "csv" && !csvFile) return message.error("请先选择 CSV 文件");
     const key = v.batch_key?.trim() || listName(v.region);
+    const metadata = { batch_key: key, region: v.region, notes: v.notes, country: "GB", source_name: createMethod === "auto" ? "fsa" : createMethod === "csv" ? "csv" : "manual", source_licence: createMethod === "auto" ? "OGL-3.0" : null };
     setCreating(true);
     try {
-      await api("/api/batches", json({ batch_key: key, region: v.region, notes: v.notes, country: "GB", source_name: createMethod === "auto" ? "fsa" : createMethod === "csv" ? "csv" : "manual", source_licence: createMethod === "auto" ? "OGL-3.0" : null }));
-      setBatchKey(key);
-      loadBatches();
-      if (createMethod === "empty") {
-        message.success("空名单已创建，可稍后导入或补充数据");
-        setCreating(false);
-        return setNewOpen(false);
+      if (createMethod === "auto") {
+        const result = await api<{ workflow: ListWorkflow }>("/api/lists", json({ ...metadata, workflow: { kind: "create", authority_id: authority!.id, authority_name: authority!.name, business_type_ids: v.business_type_ids || [1], sample_n: v.sample_n || null, exclude_awaiting: v.exclude_awaiting ?? false } }));
+        activeKey.current = key;
+        setBatchKey(key);
+        setNewOpen(false);
+        loadBatches();
+        await executeWorkflow(key, result.workflow);
+      } else {
+        await api("/api/batches", json(metadata));
+        activeKey.current = key;
+        setBatchKey(key);
+        setNewOpen(false);
+        if (createMethod === "csv") {
+          const fd = new FormData(); fd.append("batch_key", key); fd.append("file", csvFile!);
+          const r = await api<{ created_count: number; linked_count: number; error_count: number }>("/api/imports", { method: "POST", body: fd });
+          message.info(`CSV 导入：新增 ${r.created_count}，关联 ${r.linked_count}，错误 ${r.error_count}。可继续完善名单。`);
+        } else message.success("空名单已创建，可追加商户或导入 CSV");
+        loadLeads(key); loadBatches();
       }
-      const request: BuildRequest = { key, method: createMethod, business_type_ids: [...(v.business_type_ids || [1])], authority_id: authority?.id, sample_n: v.sample_n || null, seed: randomSeed(), exclude_awaiting: v.exclude_awaiting ?? false, file: csvFile || undefined };
-      setBuildRequest(request);
-      await executeBuild(request);
-    } catch (e) {
-      setCreating(false);
-      err(e as Error);
-    }
+    } catch (e) { err(e as Error); loadBatches(); } finally { setCreating(false); }
   };
 
   const openDelete = () => {
@@ -194,12 +191,15 @@ function LeadsInner() {
     <>
       <HeroBand kicker="LEADS" title="批次与线索" subtitle="用 FSA 名录自动建立候选，Overture 补官网，规则预筛后交人工确认类型。"
         extra={<>
-          <Select style={{ width: 260 }} value={batchKey} disabled={creating} onChange={setBatchKey} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
-          <Button type="primary" aria-label="建立名单" icon={<CloudDownloadOutlined />} disabled={!mounted || creating} onClick={() => { setAutoProg(null); setBuildRequest(null); setCsvFile(null); setCreateMethod("auto"); generatedName.current = ""; setNewOpen(true); loadAuthorities(); }}>建立名单</Button>
-          <Button danger disabled={!batchKey || creating} onClick={openDelete}>删除批次</Button>
-          <Button disabled={!batchKey || creating} onClick={() => { fsaForm.resetFields(["authority_id", "business_type_ids"]); setContactProg(null); setBuildOpen(true); }}>补充数据</Button>
+          <Select style={{ width: 260 }} value={batchKey} disabled={creating || !!busy} onChange={setBatchKey} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
+          <Button type="primary" aria-label="建立名单" icon={<CloudDownloadOutlined />} disabled={!mounted || locked} onClick={() => { setCsvFile(null); setCreateMethod("auto"); generatedName.current = ""; setNewOpen(true); loadAuthorities(); }}>建立名单</Button>
+          <Button danger disabled={!batchKey || locked} onClick={openDelete}>删除批次</Button>
+          <Button disabled={!batchKey || locked || !leads.length} onClick={() => { setMode("enrich"); setBuildOpen(true); }}>完善名单</Button>
+          <Button disabled={!batchKey || locked} onClick={() => { setMode("append"); setBuildOpen(true); }}>追加商户</Button>
         </>} />
 
+      {workflowLoadError && <Alert type="warning" showIcon message="任务进度暂时读取失败" description="重新读取后再处理这份名单。" action={<Button onClick={() => batchKey && loadWorkflow(batchKey).catch(err)}>重试读取</Button>} style={{ marginBottom: 16 }} />}
+      {workflowUnfinished(workflow) && <Alert showIcon type={workflow?.status === "failed" ? "error" : "info"} style={{ marginBottom: 16 }} message={workflow?.status === "failed" ? "这份名单有未完成任务，已完成的结果已保留" : "这份名单有任务等待继续或正在处理"} description="任务参数与进度已保存。继续时使用原地区、数量和步骤。" action={<Button disabled={!!busy || creating} onClick={() => { setMode("progress"); setBuildOpen(true); }}>查看 / 继续任务</Button>} />}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}><StatCard icon={<ShopOutlined />} title="门店" value={stats.total} hint="本批次去重门店" /></Col>
         <Col xs={12} md={6}><StatCard icon={<GlobalOutlined />} color="#d97706" title="有官网" value={stats.website} hint={stats.total ? `${Math.round((stats.website / stats.total) * 100)}% 覆盖` : undefined} /></Col>
@@ -211,10 +211,10 @@ function LeadsInner() {
         <Input.Search allowClear placeholder="搜索名称 / 邮编" style={{ width: 220 }} onSearch={setQ} onChange={(e) => !e.target.value && setQ("")} />
         <Select allowClear placeholder="商户类型" style={{ width: 200 }} value={businessType} onChange={setBusinessType} options={BUSINESS_TYPES} />
         <Select allowClear placeholder="筛选分类" style={{ width: 160 }} value={screen} onChange={setScreen} options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} />
-        <Upload accept=".csv" showUploadList={false} customRequest={({ file }) => { if (!batchKey) return message.warning("先选择批次"); const fd = new FormData(); fd.append("batch_key", batchKey); fd.append("file", file as File); run("csv", api("/api/imports", { method: "POST", body: fd }), (r: { created_count: number; linked_count: number; skipped_count: number; error_count: number }) => `导入：新增 ${r.created_count}，关联 ${r.linked_count}，跳过 ${r.skipped_count}，错误 ${r.error_count}`); }}>
-          <Button disabled={!batchKey}>追加 CSV</Button>
+        <Upload disabled={!batchKey || locked} accept=".csv" showUploadList={false} customRequest={({ file }) => { if (!batchKey) return message.warning("先选择批次"); const fd = new FormData(); fd.append("batch_key", batchKey); fd.append("file", file as File); run("csv", api("/api/imports", { method: "POST", body: fd }), (r: { created_count: number; linked_count: number; skipped_count: number; error_count: number }) => `导入：新增 ${r.created_count}，关联 ${r.linked_count}，跳过 ${r.skipped_count}，错误 ${r.error_count}`); }}>
+          <Button disabled={!batchKey || locked}>追加 CSV</Button>
         </Upload>
-        <Button disabled={!batchKey} loading={busy === "run"} onClick={() => run("run", api(`/api/batches/${encodeURIComponent(batchKey!)}/runs`, json({ steps: ["fetch", "analyze"] })), (r: { status: string; totals: Record<string, number> }) => `批量运行 ${label(r.status)}：${JSON.stringify(r.totals)}`)}>批量抓取 + 分析</Button>
+        <Button disabled={!batchKey || locked} loading={busy === "run"} onClick={() => run("run", api(`/api/batches/${encodeURIComponent(batchKey!)}/runs`, json({ steps: ["fetch", "analyze"] })), (r: { status: string; totals: Record<string, number> }) => `批量运行 ${label(r.status)}：${JSON.stringify(r.totals)}`)}>批量抓取 + 分析</Button>
         <a href={batchKey ? `/api/batches/${encodeURIComponent(batchKey!)}/export.csv` : undefined}><Button disabled={!batchKey}>导出 CSV</Button></a>
       </Space>}>
         <Table<Lead> rowKey="id" size="small" dataSource={filtered} pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
@@ -231,23 +231,7 @@ function LeadsInner() {
       </Card>
 
       <Modal title="建立名单" forceRender={mounted} open={newOpen} onCancel={() => { if (!creating) setNewOpen(false); }} footer={null} destroyOnHidden maskClosable={false} closable={!creating}>
-        {autoProg ? (
-          <>
-            <Steps direction="vertical" size="small" current={buildRequest?.method === "csv" ? (autoProg.step === 4 ? 1 : 0) : autoProg.step} status={autoProg.error ? "error" : autoProg.step === 4 ? "finish" : "process"} items={buildRequest?.method === "csv" ? [{ title: "导入 CSV", description: autoProg.lines[0] }] : [
-              { title: "获取餐厅", description: autoProg.lines[0] },
-              { title: "补充官网与电话", description: autoProg.lines[1] },
-              { title: "预筛", description: autoProg.lines[2] },
-              { title: "查找联系方式", description: autoProg.lines[3] },
-            ]} />
-            {autoProg.error && <Alert type="error" showIcon style={{ marginBottom: 12 }} message="这一步失败，名单已保留" description={`${autoProg.error}。可直接重试这一步，已完成的步骤不用重做。关闭后可在“补充数据”中继续处理。`} />}
-            {autoProg.step === 4 && <Alert type="success" showIcon style={{ marginBottom: 12 }} message={buildRequest?.method === "csv" ? "CSV 导入处理完成" : "名单与联系方式已建好"} description="请核对处理结果并确认门店类型。联系方式只是记录，渠道准入仍需逐条核对。" />}
-            <Space style={{ width: "100%", justifyContent: "flex-end" }}>
-              {autoProg.error && buildRequest && <Button type="primary" onClick={() => executeBuild(buildRequest, autoProg.step, autoProg.lines)}>重试这一步</Button>}
-              <Button aria-label={creating ? "正在处理" : "完成"} disabled={creating} loading={creating} onClick={() => setNewOpen(false)}>{creating ? "正在处理…" : "完成"}</Button>
-            </Space>
-          </>
-        ) : (
-          <Form form={createForm} layout="vertical" initialValues={{ sample_n: 50, exclude_awaiting: false, business_type_ids: [1] }} onFinish={createBatch} onValuesChange={(changed, values) => {
+          <Form name="create-list" form={createForm} layout="vertical" initialValues={{ sample_n: 50, exclude_awaiting: false, business_type_ids: [1] }} onFinish={createBatch} onValuesChange={(changed, values) => {
             if ("region" in changed && (!values.batch_key || values.batch_key === generatedName.current)) {
               generatedName.current = listName(values.region);
               createForm.setFieldValue("batch_key", generatedName.current);
@@ -270,7 +254,6 @@ function LeadsInner() {
             </> }]} />
             <Button type="primary" htmlType="submit" block loading={creating} disabled={createMethod === "auto" && (authFailed || !authorities.length)}>{createMethod === "auto" ? "创建并开始获取" : createMethod === "csv" ? "创建并导入" : "创建空名单"}</Button>
           </Form>
-        )}
       </Modal>
 
       <Modal title={`删除批次 · ${batchKey ?? ""}`} open={delOpen} onCancel={() => setDelOpen(false)} okText="永久删除" okButtonProps={{ danger: true, disabled: !delPreview || delConfirm !== batchKey, loading: delBusy }} onOk={doDelete} cancelText="取消" destroyOnHidden>
@@ -299,34 +282,37 @@ function LeadsInner() {
         )}
       </Modal>
 
-      {mounted && <Drawer forceRender title={`补充数据 · ${batchKey ?? ""}`} open={buildOpen} onClose={() => setBuildOpen(false)} width={520}>
-        {authFailed && <Alert type="warning" message="地区名录暂不可用，其他补充步骤仍可操作" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 16 }} />}
-        <Card size="small" title="第 1 步：从 FSA 名录建立候选" style={{ marginBottom: 16 }}>
-          <Form form={fsaForm} initialValues={{ sample_n: 50, exclude_awaiting: false }} layout="vertical" onFinish={(v) => run("fsa", api(`/api/batches/${encodeURIComponent(batchKey!)}/sync/fsa`, json({ authority_id: v.authority_id, business_type_ids: v.business_type_ids || [1], exclude_awaiting: v.exclude_awaiting ?? false, sample_n: v.sample_n || null, seed: randomSeed() })), (r: FsaResult) => fsaSummary(r, v.business_type_ids || [1]))}>
-            <Form.Item name="authority_id" label="地方当局" extra="地区总数包含所有食品经营场所；本次只获取所选商户类型。" rules={[{ required: true }]}>
-              <Select showSearch placeholder="默认取批次的地区，可改" optionFilterProp="label" loading={!authorities.length && !authFailed}
-                options={authorities.map((a) => ({ value: a.id, label: `${a.name}${a.region ? `（${a.region}）` : ""} · 全部食品经营场所 ${a.count ?? "未知"} 家` }))} />
-            </Form.Item>
-            <Form.Item name="business_type_ids" label="商户类型" rules={[{ required: true, type: "array", min: 1, message: "请至少选择一种商户类型" }]}><Select mode="multiple" options={BUSINESS_TYPES} /></Form.Item>
-            <Form.Item name="sample_n" label="获取餐厅数量" extra="所选类型合计随机选取指定数量，留空获取全部；已在名单中的门店不会重复新增。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>
-            <Collapse ghost items={[{ key: "filters", label: "高级筛选", children: <Form.Item name="exclude_awaiting" label="排除尚未首次检查的商家" valuePropName="checked" initialValue={false}><Switch /></Form.Item> }]} />
-            <Button type="primary" htmlType="submit" loading={busy === "fsa"} block>拉取并建立候选</Button>
+      {mounted && <Drawer forceRender title={`${mode === "append" ? "追加商户" : mode === "enrich" ? "完善名单" : "名单任务"} · ${batchKey ?? ""}`} open={buildOpen} onClose={() => setBuildOpen(false)} width={520}>
+        {mode === "progress" ? workflow ? <>
+          <p>目标名单：<b>{batchKey}</b> · {workflow.kind === "enrich" ? "完善现有门店" : workflow.kind === "append" ? "追加商户" : "建立名单"}</p>
+          {workflow.params.authority_name && <p>地区：{workflow.params.authority_name} · 本次数量：{workflow.params.sample_n ?? "全部"}<br />类型：{workflow.params.business_type_ids?.map((id) => businessLabel(id)).join(" / ")}</p>}
+          <Steps direction="vertical" size="small" current={workflow.step} status={workflow.status === "failed" ? "error" : workflow.status === "completed" ? "finish" : "process"} items={workflow.steps.map((stage, i) => ({ title: WORKFLOW_TITLES[stage], description: workflowSummary(stage, workflow.results[i]) }))} />
+          {workflow.error && <Alert type="error" showIcon message="这一步未完成" description={workflow.error} style={{ margin: "16px 0" }} />}
+          {workflow.status === "completed" ? <Alert type="success" showIcon message="处理完成" description="请核对门店类型与联系方式，渠道准入仍需逐条确认。" style={{ marginTop: 16 }} /> : workflow.status === "cancelled" ? <Alert type="info" message="任务已结束，已有结果保留" /> : <>
+            <p style={{ color: "#6b7280" }}>关闭面板后本页会继续执行。刷新或离开页面后，可从保存的步骤继续；已完成步骤不重做。</p>
+            <Space>
+              <Button type="primary" loading={creating} disabled={creating || !!busy} onClick={() => executeWorkflow(batchKey!, workflow)}>{workflow.status === "failed" ? "重试未完成步骤" : "继续任务"}</Button>
+              <Button disabled={creating || !!busy} onClick={cancelWorkflow}>结束任务</Button>
+            </Space>
+          </>}
+        </> : <p>正在读取任务进度…</p> : mode === "enrich" ? <>
+          <Alert showIcon type="info" message={`完善名单内现有 ${leads.length} 家门店`} description="补充空缺官网与电话、预筛未确认门店、查找未完成的联系方式。保留已填写的官网和已有人工判断。" style={{ marginBottom: 16 }} />
+          <Steps direction="vertical" size="small" items={[{ title: "补充官网与电话" }, { title: "规则预筛" }, { title: "查找联系方式" }]} />
+          <Button type="primary" block disabled={locked} loading={creating} style={{ marginTop: 16 }} onClick={() => startWorkflow("enrich")}>开始完善名单</Button>
+        </> : <>
+          <Alert showIcon type="info" message={`追加到 ${currentBatch?.region || "未设置地区"}`} description="先排除本名单已有商户，再从所选类型中抽取新成员。其他地区请建立新名单。追加后自动补全官网与联系方式。" style={{ marginBottom: 16 }} />
+          {authFailed && <Alert type="warning" message="地区名录暂不可用" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 16 }} />}
+          {!authFailed && authorities.length > 0 && !appendAuthority && <Alert type="warning" message="当前名单未关联有效 FSA 地区，请建立新名单或追加 CSV" style={{ marginBottom: 16 }} />}
+          <Form name="append-list" form={fsaForm} layout="vertical" initialValues={{ sample_n: 50, business_type_ids: [1], exclude_awaiting: false }} onFinish={(v) => startWorkflow("append", v)}>
+            <Form.Item label="地区" htmlFor="append-list-region"><Input id="append-list-region" disabled value={currentBatch?.region ?? "未设置"} /></Form.Item>
+            <Form.Item name="business_type_ids" label="商户类型" rules={[{ required: true, type: "array", min: 1, message: "请至少选择一种类型" }]}><Select mode="multiple" options={BUSINESS_TYPES} /></Form.Item>
+            <Form.Item name="sample_n" label="追加商户数量" extra="数量指本次新加入名单的商户；留空追加剩余全部。可选商户不足时取全部。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 剩余全部" /></Form.Item>
+            <Collapse ghost items={[{ key: "filters", label: "高级筛选", children: <Form.Item name="exclude_awaiting" label="排除尚未首次检查的商家" valuePropName="checked"><Switch /></Form.Item> }]} />
+            <Button type="primary" htmlType="submit" block disabled={locked || !appendAuthority} loading={creating}>追加并完善</Button>
           </Form>
-        </Card>
-        <Card size="small" title="第 2 步：Overture 补官网与电话" style={{ marginBottom: 16 }}>
-          <p style={{ color: "#6b7280", marginTop: 0 }}>按批次坐标范围下载 Overture 地点（首次下载约 1 分钟，范围大时更久，之后复用缓存），只填空缺官网，来源与置信度记入线索。</p>
-          <Button loading={busy === "ov"} block onClick={() => run("ov", api(`/api/batches/${encodeURIComponent(batchKey!)}/enrich/overture`, json({})), (r: { leads: number; matched: number; website_set: number; phone_found: number; places: number }) => `Overture：${r.places} 个地点，匹配 ${r.matched}/${r.leads}，补官网 ${r.website_set}，有电话 ${r.phone_found}`)}>运行 Overture 补全</Button>
-        </Card>
-        <Card size="small" title="第 3 步：规则预筛" style={{ marginBottom: 16 }}>
-          <p style={{ color: "#6b7280", marginTop: 0 }}>连锁（含 Overture 品牌）、咖啡店、机构按现有规则预筛；名单明确选择酒吧类时，不仅凭酒吧名称词排除。已有筛选结果保留，其余待核对。</p>
-          <Button loading={busy === "screen"} block onClick={() => run("screen", api(`/api/batches/${encodeURIComponent(batchKey!)}/screen`, { method: "POST" }), (r: { counts: Record<string, number> }) => `预筛：${Object.entries(r.counts).map(([k, v]) => `${k} ${v}`).join("，")}`)}>运行规则预筛</Button>
-        </Card>
-        <Card size="small" title="第 4 步：查找联系方式">
-          <p style={{ color: "#6b7280", marginTop: 0 }}>对未被排除的门店，从官网和 Overture 数据里找邮箱、电话、WhatsApp、社媒账号和联系表单并自动记录（准入保持未知，不放行）。每家几秒；已查过的不重复查；同类过多（疑似分店列表）的留给人工在详情页勾选。</p>
-          <Button loading={busy === "contacts"} block onClick={() => { if (!batchKey) return; setBusy("contacts"); setContactProg("开始…"); collectContacts(batchKey, setContactProg).then((t) => { message.success(t); setContactProg(t); loadLeads(batchKey); }).catch((e: Error) => { err(e); setContactProg(`中断：${e.message}。再点一次可从未完成的继续`); }).finally(() => setBusy(null)); }}>批量查找联系方式</Button>
-          {contactProg && <p style={{ color: "#6b7280", margin: "8px 0 0" }}>{contactProg}</p>}
-        </Card>
+        </>}
       </Drawer>}
+
     </>
   );
 }

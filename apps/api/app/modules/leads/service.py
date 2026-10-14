@@ -134,6 +134,8 @@ def sync_fsa(
     operator: str | None = None,
     transport=None,
     business_type_ids: list[int] | None = None,
+    only_new: bool = False,
+    commit: bool = True,
 ) -> dict:
     """从 FSA 拉取地方当局的经营者，去重后加入批次；可选固定种子抽样。返回计数与来源版本。"""
     import random
@@ -159,6 +161,18 @@ def sync_fsa(
         categories.append({"id": type_id, "fetched": page.total, "pool": len(available)})
         unique_rows.update((row["source_key"], row) for row in available)
     rows = sorted(unique_rows.values(), key=lambda row: row["source_key"])
+    existing_members = {m.lead_id for m in db.scalars(select(BatchLead).where(BatchLead.batch_id == batch.id)).all()}
+    existing_keys = (
+        set(db.scalars(select(Lead.source_key).where(Lead.id.in_(existing_members))).all())
+        if existing_members
+        else set()
+    )
+    already_in_list = sum(row["source_key"] in existing_keys for row in rows)
+    if only_new:
+        rows = [row for row in rows if row["source_key"] not in existing_keys]
+    if only_new:
+        for category in categories:
+            category["pool"] = sum(row["raw"]["BusinessTypeID"] == category["id"] for row in rows)
     pool = len(rows)
     sampled = sample_n is not None and sample_n < pool
     if sampled:
@@ -166,7 +180,6 @@ def sync_fsa(
         rows = random.Random(seed).sample(rows, sample_n)
     for category in categories:
         category["selected"] = sum(row["raw"]["BusinessTypeID"] == category["id"] for row in rows)
-    existing_members = {m.lead_id for m in db.scalars(select(BatchLead).where(BatchLead.batch_id == batch.id)).all()}
     created = linked = skipped = 0
     for i, r in enumerate(rows, 1):
         lead = db.scalar(select(Lead).where(Lead.source_key == r["source_key"]))
@@ -222,8 +235,10 @@ def sync_fsa(
             error_count=0,
         )
     )
-    db.commit()
+    if commit:
+        db.commit()
     return {
+        "already_in_list": already_in_list,
         "fetched": sum(page.total for page in pages.values()),
         "categories": categories,
         "business_type_ids": type_ids,

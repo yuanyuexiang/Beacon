@@ -70,3 +70,6 @@ D49：测试阶段 main 提交自动 CI/CD，镜像使用 GHCR，不使用 ECR�
 D50：服务器独立 Maps worker 已纳入 GHCR CI/CD，Chrome + Xvfb、专用持久化会话、服务器独立密钥及心跳健康检查。服务器链路已实测，当前匿名 Google 会话仍可能 limited_view 或无 Menu，未证明菜单图片采集成功；见操作手册 D50 验收。
 
 2026-10-14 发布策略调整（用户明确要求，取代 D49 的 main 自动上线规则）：先本地测试，用户明确确认后才发布服务器。main 自动 CI／GHCR 构建保留，部署仅 workflow_dispatch 且 deploy=true；默认 false。禁止在未确认时触发发布。
+
+
+D54（2026-10-14）：名单建立、完善与追加采用持久化流水线；完善跳过 FSA，追加固定地区且先排除已有成员，再按新成员数量抽样。任务按请求推进，刷新后主动继续，成功步骤不重做；同一名单写操作互斥。CSV 导入与空名单保留。界面回归 `uv run --project apps/api --extra maps-worker python scripts/verify_list_workflows_ui.py` 使用模拟 API，不写实际名单。迁移 head `da54a0010001`，本地已更新，用户验收前不发布。详见操作手册 D54。
