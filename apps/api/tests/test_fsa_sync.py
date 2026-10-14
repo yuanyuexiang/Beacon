@@ -182,7 +182,7 @@ def test_multitype_upstream_failure_does_not_write_partial_list(client, db):
     login(client, db)
     create_batch(client, "partial")
     batch = db.scalar(select(Batch).where(Batch.batch_key == "partial"))
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(fsa.FsaConnectionError):
         service.sync_fsa(db, batch, 277, business_type_ids=[1, 7844], transport=_typed_transport(fail_type=7844))
     assert client.get("/api/leads?batch_key=partial").json() == []
     assert batch.business_type is None
