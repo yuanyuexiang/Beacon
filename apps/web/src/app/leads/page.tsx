@@ -106,7 +106,7 @@ function LeadsInner() {
       }
       if (step === 0) {
         const f = await api<{ fetched: number; pool: number; selected: number; created: number; linked: number }>(`/api/batches/${key}/sync/fsa`, json({ authority_id: request.authority_id, business_type_id: 1, exclude_awaiting: request.exclude_awaiting, sample_n: request.sample_n, seed: request.seed }));
-        lines.push(`名录 ${f.fetched} 家，可选 ${f.pool}，选入 ${f.selected}（新增 ${f.created}，关联已有 ${f.linked}）`);
+        lines.push(`餐厅、咖啡馆、食堂共 ${f.fetched} 家，筛选后可选 ${f.pool} 家，选入 ${f.selected} 家（新增 ${f.created}，关联已有 ${f.linked}）`);
         setAutoProg({ step: (step = 1), lines: [...lines] });
       }
       if (step === 1) {
@@ -242,10 +242,10 @@ function LeadsInner() {
           }}>
             <Form.Item label="创建方式"><Radio.Group value={createMethod} onChange={(e) => setCreateMethod(e.target.value)} options={[{ value: "auto", label: "自动获取" }, { value: "csv", label: "导入 CSV" }, { value: "empty", label: "仅建空名单" }]} /></Form.Item>
             {authFailed && createMethod === "auto" && <Alert type="warning" showIcon message="地区名录暂不可用" description="可以重试加载，或选择导入 CSV。" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 12 }} />}
-            <Form.Item name="region" label="地区" rules={[{ required: createMethod === "auto", message: "请选择地区" }]}>
-              {authFailed && createMethod !== "auto" ? <Input placeholder="可选，例如 Camden" /> : <Select showSearch allowClear placeholder={createMethod === "auto" ? "搜索英国地区，例如 Camden" : "可选，选择名单所属地区"} optionFilterProp="label" loading={!authorities.length && !authFailed} options={authorities.map((a) => ({ value: a.name, label: `${a.name}${a.region ? `（${a.region}）` : ""} · ${a.count ?? "?"} 家` }))} />}
+            <Form.Item name="region" label="地区" extra={createMethod === "auto" ? "地区总数包含所有食品经营场所；本次只获取餐厅、咖啡馆、食堂，数量通常少于地区总数。" : undefined} rules={[{ required: createMethod === "auto", message: "请选择地区" }]}>
+              {authFailed && createMethod !== "auto" ? <Input placeholder="可选，例如 Camden" /> : <Select showSearch allowClear placeholder={createMethod === "auto" ? "搜索英国地区，例如 Camden" : "可选，选择名单所属地区"} optionFilterProp="label" loading={!authorities.length && !authFailed} options={authorities.map((a) => ({ value: a.name, label: `${a.name}${a.region ? `（${a.region}）` : ""} · 全部食品经营场所 ${a.count ?? "未知"} 家` }))} />}
             </Form.Item>
-            {createMethod === "auto" && <Form.Item name="sample_n" label="获取餐厅数量" extra="默认随机选取 50 家，留空获取该地区全部餐厅（可能上千家）；数量不代表优质客户数量。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>}
+            {createMethod === "auto" && <Form.Item name="sample_n" label="获取餐厅数量" extra="默认随机选取 50 家，留空获取该地区全部餐厅、咖啡馆、食堂（可能上千家）；数量不代表优质客户数量。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>}
             <Form.Item name="batch_key" label="名单名称" rules={[{ max: 64, message: "最多 64 个字符" }, { validator: (_, value) => value && !value.trim() ? Promise.reject(new Error("名称不能只有空格")) : Promise.resolve() }]} extra="根据地区自动生成，可修改；留空也会自动生成。"><Input maxLength={64} placeholder="选择地区后自动生成" /></Form.Item>
             {createMethod === "csv" && <Form.Item label="CSV 文件" required extra="至少包含 name，以及 source_key、source_id 或 fhrsid 中的一项。">
               <Upload accept=".csv" fileList={csvFile ? [{ uid: "selected", name: csvFile.name, status: "done" }] : []} maxCount={1} beforeUpload={(file) => { setCsvFile(file); return false; }} onRemove={() => { setCsvFile(null); }}><Button>选择 CSV 文件</Button></Upload>
@@ -288,12 +288,12 @@ function LeadsInner() {
       {mounted && <Drawer forceRender title={`补充数据 · ${batchKey ?? ""}`} open={buildOpen} onClose={() => setBuildOpen(false)} width={520}>
         {authFailed && <Alert type="warning" message="地区名录暂不可用，其他补充步骤仍可操作" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 16 }} />}
         <Card size="small" title="第 1 步：从 FSA 名录建立候选" style={{ marginBottom: 16 }}>
-          <Form form={fsaForm} initialValues={{ sample_n: 50, exclude_awaiting: false }} layout="vertical" onFinish={(v) => run("fsa", api(`/api/batches/${encodeURIComponent(batchKey!)}/sync/fsa`, json({ authority_id: v.authority_id, business_type_id: 1, exclude_awaiting: v.exclude_awaiting ?? false, sample_n: v.sample_n || null, seed: randomSeed() })), (r: { fetched: number; pool: number; selected: number; created: number; linked: number; skipped: number }) => `FSA：名录 ${r.fetched}，池 ${r.pool}，选入 ${r.selected}，新增 ${r.created}，关联 ${r.linked}，跳过 ${r.skipped}`)}>
-            <Form.Item name="authority_id" label="地方当局" rules={[{ required: true }]}>
+          <Form form={fsaForm} initialValues={{ sample_n: 50, exclude_awaiting: false }} layout="vertical" onFinish={(v) => run("fsa", api(`/api/batches/${encodeURIComponent(batchKey!)}/sync/fsa`, json({ authority_id: v.authority_id, business_type_id: 1, exclude_awaiting: v.exclude_awaiting ?? false, sample_n: v.sample_n || null, seed: randomSeed() })), (r: { fetched: number; pool: number; selected: number; created: number; linked: number; skipped: number }) => `餐厅、咖啡馆、食堂共 ${r.fetched} 家，筛选后可选 ${r.pool} 家，选入 ${r.selected} 家，新增 ${r.created}，关联 ${r.linked}，跳过 ${r.skipped}`)}>
+            <Form.Item name="authority_id" label="地方当局" extra="地区总数包含所有食品经营场所；本次只获取餐厅、咖啡馆、食堂。" rules={[{ required: true }]}>
               <Select showSearch placeholder="默认取批次的地区，可改" optionFilterProp="label" loading={!authorities.length && !authFailed}
-                options={authorities.map((a) => ({ value: a.id, label: `${a.name}${a.region ? `（${a.region}）` : ""} · ${a.count ?? ""}` }))} />
+                options={authorities.map((a) => ({ value: a.id, label: `${a.name}${a.region ? `（${a.region}）` : ""} · 全部食品经营场所 ${a.count ?? "未知"} 家` }))} />
             </Form.Item>
-            <Form.Item name="sample_n" label="获取餐厅数量" extra="随机选取指定数量，留空获取全部；已在名单中的门店不会重复新增。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>
+            <Form.Item name="sample_n" label="获取餐厅数量" extra="从餐厅、咖啡馆、食堂中随机选取指定数量，留空获取该类别全部；已在名单中的门店不会重复新增。"><InputNumber min={1} max={5000} precision={0} style={{ width: "100%" }} placeholder="留空 = 全部" /></Form.Item>
             <Collapse ghost items={[{ key: "filters", label: "高级筛选", children: <Form.Item name="exclude_awaiting" label="排除尚未首次检查的商家" valuePropName="checked" initialValue={false}><Switch /></Form.Item> }]} />
             <Button type="primary" htmlType="submit" loading={busy === "fsa"} block>拉取并建立候选</Button>
           </Form>
