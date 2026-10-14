@@ -66,3 +66,5 @@ Gmail 服务配置：首次 Compose 启动前运行 `python3 scripts/configure_g
 后续 TK、FB、INS、LIN 渠道开发先阅读 [社媒渠道接入与后续开发指南](plan/social-channel-integration.md)。D48 首期已实现 Meta 独立 HTTP 服务、FB／INS 普通文字回复、账号配置、Webhook 与审批队列，凭据待用户补齐；真实授权和收发尚未验收。公开主页 URL 不等于 API 收件人，平台消息权限与业务准入分别检查。操作见 [社媒服务](docs/社媒渠道服务.md)。
 
 D49：测试阶段 main 提交自动 CI/CD，镜像使用 GHCR，不使用 ECR，也不设发布审批。服务器业务配置与 Traefik 分开，发布检查完整 digest、固定脚本 hash、备份与迁移、HTTPS 和实际提交版本。修改相关配置前读 [自动部署说明](docs/GitHub自动部署.md)。检查 `uv run --project apps/api python infra/deploy/validate.py`、`uv run --project apps/api python -m pytest tests/deploy -q`、`actionlint .github/workflows/ci-cd.yml`。不要在发布中删数据卷、自动数据库降级或覆盖未确认的 pending 发布。
+
+D50：服务器独立 Maps worker 已纳入 GHCR CI/CD，Chrome + Xvfb、专用持久化会话、服务器独立密钥及心跳健康检查。服务器链路已实测，当前匿名 Google 会话仍可能 limited_view 或无 Menu，未证明菜单图片采集成功；见操作手册 D50 验收。

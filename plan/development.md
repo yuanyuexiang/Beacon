@@ -163,3 +163,8 @@ main push → 临时库后端与前端/provider/部署测试 → 四镜像 GHCR 
 ## D50：服务器 Maps 执行器（2026-10-14）
 
 用户授权部署独立 Maps worker：Chrome + Xvfb 虚拟显示器，非 root 浏览器进程，专用持久化会话与临时目录；只主动通过 HTTPS 领取单家任务，不开放调试端口、不自动登录。独立 GHCR 镜像纳入 main CI/CD；执行器密钥服务器生成，浏览器数据卷参与停机备份。工作台显示浏览器开关在服务器对应虚拟屏幕，不在客户端弹窗。首次全新会话与实际菜单获取待部署验收，不承诺 Google 页面提供菜单标签。
+
+
+D50 验收（2026-10-14）：`f70492d` 首次独立执行器发布成功；`0b1765d` 修复全新会话的 Google Cookie 同意页误判并发布成功（[Actions](https://github.com/yuanyuexiang/Beacon/actions/runs/38502830485)）。Maps 容器健康，API 返回 configured=true、worker_online=true，Chrome 155.0.8059.79。Alishaan 单家真实任务领取、Chrome 页面访问和结果回填完成；拒绝非必要 Cookie 后 Google 返回 limited_view，0 张图片。另以独立匿名会话查看 College Bar，也没有 Menu 页签。两家页面探针不能推断其他门店成功率；当前仅验收服务器执行链路，不声称菜单采集成功。初次测试误存的 Cookie 标题观测已按该测试 run ID 精确移除，原线索信息保留。
+
+部署测试 16 项通过，Maps 测试 34 项通过；完整前后端与 provider CI 检查通过。会话不依赖个人电脑运行，不自动登录或处理验证码；服务器取得菜单图片的成功案例仍待验证。

@@ -96,3 +96,5 @@ Gmail 服务配置：首次 Compose 启动前运行 `python3 scripts/configure_g
 D48 社媒服务：首次 Compose 启动前另运行 `python3 scripts/configure_meta_service.py`。FB／INS 独立 HTTP 服务与持久化队列已实现，默认暂停，凭据待用户配置；真实权限、Webhook 订阅及收发另行验收。操作见 [社媒渠道服务](docs/社媒渠道服务.md)，开发前读 [接入指南](plan/social-channel-integration.md)。服务测试：`cd services/meta && uv sync --python 3.12 && uv run pytest -q && uv run ruff check meta_service tests entrypoint.py`。
 
 D49 GitHub 自动部署：main 提交自动检查、构建 GHCR 并部署测试服务器，PR 仅检查。生产文件 `infra/docker-compose.production.yaml` 与独立 Traefik 基础栈分开。操作及首次配置见 [GitHub 自动部署](docs/GitHub自动部署.md)。部署验证命令：`uv run --project apps/api python infra/deploy/validate.py`、`uv run --project apps/api python -m pytest tests/deploy -q`、`uv run --project apps/api ruff check --config apps/api/pyproject.toml infra/deploy tests/deploy`、`actionlint .github/workflows/ci-cd.yml`。禁止提交管理 PEM、CI 私钥、服务器登录文件或 runtime.env；Compose／gateway 修改需先同步服务器固定规范，不能自动绕过 hash 或 pending 检查。
+
+D50 服务器 Maps 执行器：`services/maps/` 独立镜像，Playwright Chrome + Xvfb；纳入 production Compose、GHCR 发布与浏览器数据卷备份。验证 `shellcheck services/maps/entrypoint.sh`、`cd apps/api && uv run pytest tests/test_maps_menu.py -q`；服务器实际有限视图和菜单缺失不能算采集成功，见操作手册 D50。
