@@ -43,6 +43,7 @@ class LeadOut(BaseModel):
     screening_reason: str | None
     entity_status: EntityStatus
     entity_evidence: str | None
+    inspection_pending: bool = False
     contact_count: int = 0  # 已记录的联系方式数（仅列表接口填充）
     created_at: datetime
 

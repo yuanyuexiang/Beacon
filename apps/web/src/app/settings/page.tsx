@@ -6,7 +6,7 @@ import GmailSettings from "@/components/GmailSettings";
 import { BRAND, HeroBand } from "@/components/ui";
 
 const FLOW = [
-  { icon: <ShopOutlined />, title: "建名单", text: "批次与线索 → 新建批次 → 从 FSA 建立候选（地方当局、抽样数、种子）→ Overture 补官网 → 规则预筛。" },
+  { icon: <ShopOutlined />, title: "建名单", text: "批次与线索 → 建立名单 → 选择地区、餐厅数量和名单名称 → 自动获取餐厅、补充官网与电话、预筛、查找联系方式；已有名单可通过“补充数据”继续处理。" },
   { icon: <FileProtectOutlined />, title: "菜单证据", text: "线索详情 → AI 自动补全官网与菜单（异常复核），或手动抓取 / 上传 → 分析 → 逐条核对名称价格、确认问题 → 完成审核。" },
   { icon: <AuditOutlined />, title: "样稿与文案", text: "生成局部样稿与短文案（只引用已确认问题）→ 审批；内容或源数据变化会使审批失效。" },
   { icon: <SafetyCertificateOutlined />, title: "准入与任务", text: "记录渠道准入（allowed 必须有证据与规则版本）→ 创建任务 → 邮件或已连接社媒会话预览确认后发送，其余渠道人工回填。" },

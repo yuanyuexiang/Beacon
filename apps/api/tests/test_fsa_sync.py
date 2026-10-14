@@ -90,3 +90,42 @@ def test_sync_endpoint_reports_upstream_failure(client, db, monkeypatch):
     r = client.post("/api/batches/b1/sync/fsa", json={"authority_id": 106})
     assert r.status_code == 502 and "FSA" in r.json()["detail"]
     assert client.post("/api/batches/nope/sync/fsa", json={"authority_id": 106}).status_code == 404
+
+
+def test_default_includes_pending_inspection_and_records_replayable_seed(client, db, monkeypatch):
+    from sqlalchemy import select
+
+    from app.modules.leads.models import Batch
+
+    login(client, db)
+    create_batch(client, "default-list")
+    original_fetch = fsa.fetch_establishments
+    # 使用脱网名录，默认包含两家待首次检查商家。
+    monkeypatch.setattr(
+        fsa,
+        "fetch_establishments",
+        lambda *a, **k: original_fetch(106, 1, transport=_transport(n=7, awaiting=2)),
+    )
+    response = client.post("/api/batches/default-list/sync/fsa", json={"authority_id": 106, "sample_n": 7})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["pool"] == 7 and result["selected"] == 7
+    batch = db.scalar(select(Batch).where(Batch.batch_key == "default-list"))
+    assert batch.sampling_seed == result["sampling_seed"] and isinstance(batch.sampling_seed, int)
+    assert 0 <= batch.sampling_seed <= 2**31 - 1
+    rows = client.get("/api/leads?batch_key=default-list").json()
+    assert sum(row["inspection_pending"] for row in rows) == 2
+    assert client.get(f"/api/leads/{rows[0]['id']}").status_code == 200
+
+
+def test_generated_sampling_seed_can_reproduce_the_same_selection(client, db):
+    from sqlalchemy import select
+
+    from app.modules.leads.models import Batch
+
+    login(client, db)
+    create_batch(client, "generated")
+    batch = db.scalar(select(Batch).where(Batch.batch_key == "generated"))
+    first = service.sync_fsa(db, batch, 106, sample_n=3, transport=_transport())
+    second = service.sync_fsa(db, batch, 106, sample_n=3, seed=first["sampling_seed"], transport=_transport())
+    assert second["created"] == 0 and second["skipped"] == 3

@@ -128,7 +128,7 @@ def sync_fsa(
     batch: Batch,
     authority_id: int,
     business_type_id: int = 1,
-    exclude_awaiting: bool = True,
+    exclude_awaiting: bool = False,
     sample_n: int | None = None,
     seed: int | None = None,
     operator: str | None = None,
@@ -136,9 +136,11 @@ def sync_fsa(
 ) -> dict:
     """从 FSA 拉取地方当局的经营者，去重后加入批次；可选固定种子抽样。返回计数与来源版本。"""
     import random
+    import secrets
 
     from app.integrations import fsa
 
+    seed = seed if seed is not None else secrets.randbits(31)
     page = fsa.fetch_establishments(authority_id, business_type_id, transport=transport)
     rows = [fsa.to_lead_row(e) for e in page.establishments]
     if exclude_awaiting:
@@ -146,7 +148,7 @@ def sync_fsa(
     rows.sort(key=lambda r: r["source_key"])
     pool = len(rows)
     if sample_n is not None and sample_n < len(rows):
-        rows = random.Random(seed if seed is not None else 0).sample(rows, sample_n)
+        rows = random.Random(seed).sample(rows, sample_n)
     existing_members = {m.lead_id for m in db.scalars(select(BatchLead).where(BatchLead.batch_id == batch.id)).all()}
     created = linked = skipped = 0
     for i, r in enumerate(rows, 1):
@@ -206,6 +208,7 @@ def sync_fsa(
         "linked": linked,
         "skipped": skipped,
         "source_version": page.extract_date,
+        "sampling_seed": seed,
     }
 
 

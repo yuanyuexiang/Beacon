@@ -310,7 +310,7 @@ def list_runs(batch_key: str, db: Session = Depends(get_db), op: Operator = Depe
 class FsaSyncIn(BaseModel):
     authority_id: int
     business_type_id: int = 1
-    exclude_awaiting: bool = True
+    exclude_awaiting: bool = False
     sample_n: int | None = None
     seed: int | None = None
 

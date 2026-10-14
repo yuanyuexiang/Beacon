@@ -81,6 +81,10 @@ class Lead(UUIDPk, Timestamped, Base):
 
     memberships: Mapped[list["BatchLead"]] = relationship(back_populates="lead", cascade="all, delete-orphan")
 
+    @property
+    def inspection_pending(self) -> bool:
+        return (self.raw or {}).get("RatingValue") == "AwaitingInspection"
+
 
 class BatchLead(UUIDPk, Base):
     __tablename__ = "batch_lead"
