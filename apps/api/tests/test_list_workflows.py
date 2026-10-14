@@ -345,3 +345,26 @@ def test_saved_legacy_task_replays_its_original_parameters(setup, db):
     assert resumed["results"][0]["selected"] == 3
     expected = set(random.Random(123).sample([f"fsa:{1000 + i}" for i in range(7)], 3))
     assert {row["source_key"] for row in client.get("/api/leads?batch_key=new").json()} == expected
+
+
+def test_failed_workflow_allows_operations_and_new_task_archives_failure(setup, db, monkeypatch):
+    client = setup
+    task = _new(client).json()["workflow"]
+    task = _advance(client, task)
+    monkeypatch.setattr(service, "enrich_overture", lambda *a, **k: (_ for _ in ()).throw(ValueError("offline")))
+    failed = _advance(client, task)
+    assert failed["status"] == "failed"
+    assert client.post("/api/batches/new/screen").status_code == 200
+    assert (
+        client.post(
+            "/api/imports", data={"batch_key": "new"}, files={"file": ("a.csv", b"name,source_key\nX,manual:x\n")}
+        ).status_code
+        == 200
+    )
+    new_task = client.post("/api/batches/new/workflow", json={"kind": "enrich"})
+    assert new_task.status_code == 201
+    db.expire_all()
+    previous = db.get(workflows.Workflow, uuid.UUID(failed["id"]))
+    assert previous.status == "cancelled" and previous.error == "offline"
+    assert _advance(client, failed)["status"] == "cancelled"
+    assert len(client.get("/api/leads?batch_key=new").json()) == 4

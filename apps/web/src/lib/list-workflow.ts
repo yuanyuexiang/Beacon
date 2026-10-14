@@ -5,6 +5,7 @@ export type ListWorkflow = {
   step: number; steps: string[]; params: { authority_name?: string; sample_n?: number | null; business_type_ids?: number[] };
   results: Record<string, unknown>[]; error: string | null;
 };
+export const workflowBlocksActions = (task: ListWorkflow | null) => !!task && ["pending", "running"].includes(task.status);
 export const workflowUnfinished = (task: ListWorkflow | null) => !!task && !["completed", "cancelled"].includes(task.status);
 export const WORKFLOW_TITLES: Record<string, string> = { fsa: "获取商户", overture: "补充官网与电话", screen: "规则预筛", contacts: "查找联系方式" };
 export function workflowSummary(stage: string, result?: Record<string, unknown>): string | undefined {

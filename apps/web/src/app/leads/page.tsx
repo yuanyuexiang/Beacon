@@ -7,7 +7,7 @@ import { api, json } from "@/lib/api";
 import { CheckCircleOutlined, CloudDownloadOutlined, GlobalOutlined, ShopOutlined, UserOutlined } from "@ant-design/icons";
 import { HeroBand, SCREEN_ZH, ScreenTag, StatCard } from "@/components/ui";
 import { label } from "@/lib/format";
-import { ListWorkflow, workflowUnfinished, WORKFLOW_TITLES, workflowSummary, getAllBatchLeads } from "@/lib/list-workflow";
+import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
 type Lead = { business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
@@ -54,7 +54,7 @@ function LeadsInner() {
   activeKey.current = batchKey;
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const locked = creating || !!busy || workflowLoading || workflowLoadError || workflowUnfinished(workflow);
+  const locked = creating || !!busy || workflowLoading || workflowLoadError || workflowBlocksActions(workflow);
   const generatedName = useRef("");
   useEffect(() => { if (newOpen) createForm.resetFields(); }, [newOpen, createForm]);
   const err = (e: Error) => message.error(e.message);
@@ -199,7 +199,7 @@ function LeadsInner() {
         </>} />
 
       {workflowLoadError && <Alert type="warning" showIcon message="任务进度暂时读取失败" description="重新读取后再处理这份名单。" action={<Button onClick={() => batchKey && loadWorkflow(batchKey).catch(err)}>重试读取</Button>} style={{ marginBottom: 16 }} />}
-      {workflowUnfinished(workflow) && <Alert showIcon type={workflow?.status === "failed" ? "error" : "info"} style={{ marginBottom: 16 }} message={workflow?.status === "failed" ? "这份名单有未完成任务，已完成的结果已保留" : "这份名单有任务等待继续或正在处理"} description="任务参数与进度已保存。继续时使用原地区、数量和步骤。" action={<Button disabled={!!busy || creating} onClick={() => { setMode("progress"); setBuildOpen(true); }}>查看 / 继续任务</Button>} />}
+      {workflowUnfinished(workflow) && <Alert showIcon type={workflow?.status === "failed" ? "warning" : "info"} style={{ marginBottom: 16 }} message={workflow?.status === "failed" ? "部分补充数据未完成，名单可以继续使用" : "这份名单有任务等待继续或正在处理"} description={workflow?.status === "failed" ? "已取得的数据保留；可重试失败项，也可追加商户、完善名单或处理现有线索。" : "任务参数与进度已保存，继续时从未完成步骤接续。"} action={<Button disabled={!!busy || creating} onClick={() => { setMode("progress"); setBuildOpen(true); }}>查看 / 继续任务</Button>} />}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={12} md={6}><StatCard icon={<ShopOutlined />} title="门店" value={stats.total} hint="本批次去重门店" /></Col>
         <Col xs={12} md={6}><StatCard icon={<GlobalOutlined />} color="#d97706" title="有官网" value={stats.website} hint={stats.total ? `${Math.round((stats.website / stats.total) * 100)}% 覆盖` : undefined} /></Col>
@@ -287,9 +287,9 @@ function LeadsInner() {
           <p>目标名单：<b>{batchKey}</b> · {workflow.kind === "enrich" ? "完善现有门店" : workflow.kind === "append" ? "追加商户" : "建立名单"}</p>
           {workflow.params.authority_name && <p>地区：{workflow.params.authority_name} · 本次数量：{workflow.params.sample_n ?? "全部"}<br />类型：{workflow.params.business_type_ids?.map((id) => businessLabel(id)).join(" / ")}</p>}
           <Steps direction="vertical" size="small" current={workflow.step} status={workflow.status === "failed" ? "error" : workflow.status === "completed" ? "finish" : "process"} items={workflow.steps.map((stage, i) => ({ title: WORKFLOW_TITLES[stage], description: workflowSummary(stage, workflow.results[i]) }))} />
-          {workflow.error && <Alert type="error" showIcon message="这一步未完成" description={workflow.error} style={{ margin: "16px 0" }} />}
+          {workflow.error && <Alert type="warning" showIcon message="部分数据未补齐，不影响名单使用" description={workflow.error.replace(/^ValueError:\s*/, "")} style={{ margin: "16px 0" }} />}
           {workflow.status === "completed" ? <Alert type="success" showIcon message="处理完成" description="请核对门店类型与联系方式，渠道准入仍需逐条确认。" style={{ marginTop: 16 }} /> : workflow.status === "cancelled" ? <Alert type="info" message="任务已结束，已有结果保留" /> : <>
-            <p style={{ color: "#6b7280" }}>关闭面板后本页会继续执行。刷新或离开页面后，可从保存的步骤继续；已完成步骤不重做。</p>
+            <p style={{ color: "#6b7280" }}>{workflow.status === "failed" ? "本次补充已停止。关闭面板即可继续操作名单；重试只处理未完成项。" : "关闭面板后本页会继续执行。刷新或离开页面后，可从保存的步骤继续；已完成步骤不重做。"}</p>
             <Space>
               <Button type="primary" loading={creating} disabled={creating || !!busy} onClick={() => executeWorkflow(batchKey!, workflow)}>{workflow.status === "failed" ? "重试未完成步骤" : "继续任务"}</Button>
               <Button disabled={creating || !!busy} onClick={cancelWorkflow}>结束任务</Button>

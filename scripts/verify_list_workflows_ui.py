@@ -195,11 +195,17 @@ async def main():
         await page.get_by_role("button", name="创建并开始获取", exact=True).click()
         await page.get_by_role("button", name="重试未完成步骤", exact=True).wait_for()
         await expect(
+            page.get_by_text(
+                "本次补充已停止。关闭面板即可继续操作名单；重试只处理未完成项。",
+                exact=True,
+            )
+        ).to_be_visible()
+        await expect(
             page.get_by_role("button", name="追加商户", exact=True)
-        ).to_be_disabled()
+        ).to_be_enabled()
         await expect(
             page.get_by_role("button", name="建立名单", exact=True)
-        ).to_be_disabled()
+        ).to_be_enabled()
         assert len([s for _, _, s in advances if s == "fsa"]) == 1
         assert tasks["ui-workflow"]["params"]["sample_n"] is None
         assert sorted(tasks["ui-workflow"]["params"]["business_type_ids"]) == [

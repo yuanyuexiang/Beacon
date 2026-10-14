@@ -89,7 +89,7 @@ def lock(db: Session, batch: Batch):
 
 def ensure_idle(db: Session, batch: Batch) -> None:
     task = latest(db, batch)
-    if task and task.status not in {"completed", "cancelled"}:
+    if task and task.status in {"pending", "running"}:
         raise HTTPException(409, "名单有未完成任务，请先继续任务，或结束任务后再操作")
 
 
@@ -113,6 +113,10 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
             authority = int(match.group(1)) if match else None
         if authority is not None and authority != body.authority_id:
             raise HTTPException(422, "地区与已保存任务不一致")
+    previous_task = latest(db, batch)
+    if previous_task and previous_task.status == "failed":
+        # 开始新任务时归档旧失败任务，保留成果和错误，避免旧任务后来重入。
+        previous_task.status = "cancelled"
     params = body.model_dump(exclude={"kind"}) if body.kind != "enrich" else {}
     if body.kind != "enrich":
         params["seed"] = None
@@ -190,7 +194,10 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
             if (run.totals or {}).get("failed"):
                 task.results = task.results[: task.step] + [result]
                 db.commit()
-                raise ValueError(f"{(run.totals or {})['failed']} 家联系方式查找未完成；重试只处理失败项")
+                raise ValueError(
+                    f"{(run.totals or {})['failed']} 家官网页面未完全读取；"
+                    "成功结果已保留，可以继续使用名单，或只重试失败项"
+                )
         task.results = task.results[: task.step] + [result]
         task.step += 1
         task.status = "completed" if task.step == len(task.steps) else "pending"
@@ -198,7 +205,7 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
     except Exception as exc:
         db.rollback()
         db.refresh(task)
-        task.status, task.error = "failed", f"{exc.__class__.__name__}: {exc}"[:2000]
+        task.status, task.error = "failed", str(exc)[:2000]
         db.commit()
     db.refresh(task)
     return task

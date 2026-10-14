@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ListWorkflow, workflowSummary, workflowUnfinished, getAllBatchLeads } from "../src/lib/list-workflow";
+import { ListWorkflow, workflowSummary, workflowUnfinished, getAllBatchLeads, workflowBlocksActions } from "../src/lib/list-workflow";
 
 import { api } from "../src/lib/api";
 vi.mock("../src/lib/api", () => ({ api: vi.fn() }));
@@ -35,4 +35,11 @@ describe("全量名单读取", () => {
     mocked.mockResolvedValueOnce(Array(500).fill({ id: 1 })).mockRejectedValueOnce(new Error("network"));
     await expect(getAllBatchLeads("full")).rejects.toThrow("network");
   });
+});
+
+
+it("失败可以重试但不会阻止名单操作", () => {
+  expect(workflowBlocksActions({ status: "failed" } as ListWorkflow)).toBe(false);
+  expect(workflowUnfinished({ status: "failed" } as ListWorkflow)).toBe(true);
+  expect(workflowBlocksActions({ status: "running" } as ListWorkflow)).toBe(true);
 });
