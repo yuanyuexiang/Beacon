@@ -94,6 +94,9 @@ from app.modules.sales.routes import router as sales_router  # noqa: E402
 
 protected.include_router(outreach_router)
 protected.include_router(gmail_router)
+from app.modules.leads.policy import router as policy_router  # noqa: E402
+
+protected.include_router(policy_router)
 protected.include_router(leads_router)
 protected.include_router(directory_router)
 protected.include_router(auto_research_router)

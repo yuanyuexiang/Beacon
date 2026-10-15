@@ -385,35 +385,31 @@ INSTITUTION_WORDS = re.compile(
 PUB_WORDS = re.compile(r"\b(pub|tavern|arms|inn)\b", re.I)
 
 
-def auto_screen(db: Session, batch: Batch, only_unchecked: bool = True) -> dict:
-    """按名称规则与 Overture brand 给出筛选建议：咖啡店/连锁/机构/酒吧标为排除，其余保持 unchecked 交人工。
-    只改未筛选的记录。"""
+def auto_screen(db: Session, batch: Batch, only_unchecked: bool = True, policy_data: dict | None = None) -> dict:
+    from app.modules.leads import policy
+
+    selected = policy.Policy.model_validate(policy_data) if policy_data else policy.current(db)
     counts: dict[str, int] = {}
+    preserved = 0
     for lead in list_leads(db, batch.id, None, None, 0):
-        if only_unchecked and lead.screening_class != ScreeningClass.unchecked:
-            continue
-        name = lead.name or ""
-        brand = ((lead.raw or {}).get("overture") or {}).get("brand")
-        cls, why = None, None
-        low = name.lower()
-        if any(c in low for c in CHAIN_NAMES):
-            cls, why = ScreeningClass.excluded_chain, f"{SCREEN_RULES_VERSION}: 名称匹配连锁清单"
-        elif brand:
-            cls, why = ScreeningClass.excluded_chain, f"{SCREEN_RULES_VERSION}: Overture brand={brand}"
-        elif INSTITUTION_WORDS.search(name):
-            cls, why = ScreeningClass.excluded_institution, f"{SCREEN_RULES_VERSION}: 名称含机构/社区词"
-        elif CAFE_WORDS.search(name):
-            cls, why = ScreeningClass.excluded_cafe, f"{SCREEN_RULES_VERSION}: 名称含咖啡店词（可能误杀，人工可改）"
-        elif PUB_WORDS.search(name) and not (
-            (batch.business_type or "").startswith("fsa:")
-            and "7843" in (batch.business_type or "").removeprefix("fsa:").split(",")
+        raw = dict(lead.raw or {})
+        previous = raw.get("screening_auto")
+        # 只重算仍与上次自动结果相同的记录；历史人工判断和手动修改保留。
+        owned = (
+            previous
+            and previous.get("class") == lead.screening_class.value
+            and previous.get("reason") == lead.screening_reason
+        )
+        legacy = (lead.screening_reason or "").startswith("name-rule-v2:")
+        if raw.get("screening_manual") or (
+            only_unchecked and lead.screening_class != ScreeningClass.unchecked and not owned and not legacy
         ):
-            cls, why = ScreeningClass.excluded_pub, f"{SCREEN_RULES_VERSION}: 名称含酒吧词"
-        if cls is not None:
-            lead.screening_class = cls
-            lead.screening_reason = why
-            counts[cls.value] = counts.get(cls.value, 0) + 1
-        else:
-            counts["unchecked"] = counts.get("unchecked", 0) + 1
+            preserved += 1
+            continue
+        cls, reason, matches = policy.evaluate(lead, selected)
+        lead.screening_class, lead.screening_reason = cls, reason
+        raw["screening_auto"] = {"version": selected.version, "class": cls.value, "reason": reason, "matches": matches}
+        lead.raw = raw
+        counts[cls.value] = counts.get(cls.value, 0) + 1
     db.commit()
-    return {"rules": SCREEN_RULES_VERSION, "counts": counts}
+    return {"rules": selected.version, "counts": counts, "preserved": preserved}

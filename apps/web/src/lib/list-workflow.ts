@@ -7,12 +7,13 @@ export type ListWorkflow = {
 };
 export const workflowBlocksActions = (task: ListWorkflow | null) => !!task && ["pending", "running"].includes(task.status);
 export const workflowUnfinished = (task: ListWorkflow | null) => !!task && !["completed", "cancelled"].includes(task.status);
-export const WORKFLOW_TITLES: Record<string, string> = { pool: "从门店池选入商户", fsa: "获取商户", overture: "补充官网与电话", screen: "规则预筛", contacts: "查找联系方式" };
+export const WORKFLOW_TITLES: Record<string, string> = { pool: "从门店池选入商户", fsa: "获取商户", overture: "补充官网与电话", google: "Google Places 按需补充", screen: "客户筛选策略", contacts: "查找联系方式" };
 export function workflowSummary(stage: string, result?: Record<string, unknown>): string | undefined {
   if (!result) return undefined;
   if (stage === "fsa" || stage === "pool") return `名录 ${result.fetched} 家，已有 ${result.already_in_list ?? 0} 家，剩余可选 ${result.pool} 家，本次选入 ${result.selected} 家（新增 ${result.created}，关联已有 ${result.linked}）`;
   if (stage === "overture") return `匹配 ${result.matched}/${result.leads}，补官网 ${result.website_set}，有电话 ${result.phone_found}`;
-  if (stage === "screen") return "仅预筛未确认的门店，已有判断保留";
+  if (stage === "google") return `官网核验通过 ${result.verified ?? 0}，待复核 ${result.review ?? 0}，失败 ${result.failed ?? 0}${result.note ? `；${result.note}` : ""}`;
+  if (stage === "screen") return "按保存的策略预筛，人工确认保留；待复核继续查找联系方式";
   const t = result.totals as Record<string, number> | undefined;
   return t ? `成功 ${t.succeeded ?? 0}，失败 ${t.failed ?? 0}，待处理 ${(t.pending ?? 0) + (t.running ?? 0)}` : undefined;
 }

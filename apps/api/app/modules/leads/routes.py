@@ -267,6 +267,10 @@ def patch_lead(
     before = {k: getattr(lead, k) for k in changes}
     for k, v in changes.items():
         setattr(lead, k, v)
+    if "website" in changes:
+        lead.raw = {**(lead.raw or {}), "website_manual": True}
+    if "screening_class" in changes or "screening_reason" in changes:
+        lead.raw = {**(lead.raw or {}), "screening_manual": True}
     if "entity_status" in changes:
         lead.entity_reviewed_by = op.username
     audit.record(db, op, "patch", "lead", lead.id, before=before, after=changes)

@@ -15,7 +15,8 @@ PLACE_ID = re.compile(r"^[A-Za-z0-9_-]{1,256}\Z")
 PHOTO_NAME = re.compile(r"^places/([A-Za-z0-9_-]{1,256})/photos/[A-Za-z0-9_-]{1,2048}\Z")
 SEARCH_FIELDS = "places.id,places.displayName,places.formattedAddress,places.googleMapsUri,places.attributions"
 DETAIL_FIELDS = (
-    "id,displayName,formattedAddress,googleMapsUri,businessStatus,priceLevel,priceRange,photos,attributions,websiteUri"
+    "id,displayName,formattedAddress,googleMapsUri,businessStatus,priceLevel,priceRange,photos,attributions,"
+    "websiteUri,primaryType,primaryTypeDisplayName,internationalPhoneNumber"
 )
 
 
@@ -101,6 +102,9 @@ class Place(BaseModel):
     formattedAddress: str | None = None
     googleMapsUri: str | None = None
     websiteUri: str | None = None
+    primaryType: str | None = None
+    primaryTypeDisplayName: LocalizedText | None = None
+    internationalPhoneNumber: str | None = None
     businessStatus: str | None = None
     priceLevel: str | None = None
     priceRange: PriceRange | None = None
@@ -236,6 +240,23 @@ class PlacesClient:
             return place
         except ValueError as e:
             raise PlacesError("Google Places 详情格式异常") from e
+
+    def enrichment_details(self, place_id: str) -> Place:
+        if not PLACE_ID.fullmatch(place_id):
+            raise PlacesError("地点标识无效", 400)
+        value = self._request(
+            "GET",
+            "/places/" + place_id,
+            "Place Details Enterprise",
+            fields="id,displayName,formattedAddress,websiteUri,primaryType,primaryTypeDisplayName,internationalPhoneNumber,attributions",
+        )
+        try:
+            place = Place.model_validate(value)
+            if place.id != place_id:
+                raise ValueError
+            return place
+        except ValueError as exc:
+            raise PlacesError("Google Places 补充详情格式异常") from exc
 
     def photo(self, name: str) -> tuple[bytes, str]:
         if not PHOTO_NAME.fullmatch(name):

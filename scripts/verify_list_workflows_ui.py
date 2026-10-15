@@ -33,7 +33,7 @@ def make_task(key, body):
         "status": "pending",
         "step": 0,
         "steps": (["pool"] if body["kind"] != "enrich" else [])
-        + ["overture", "screen", "contacts"],
+        + ["overture", "google", "screen", "contacts"],
         "params": {**body, "seed": None} if body["kind"] != "enrich" else {},
         "results": [],
         "error": None,
@@ -141,6 +141,8 @@ async def handle(route):
                         "website_set": 2,
                         "phone_found": 1,
                     }
+                elif stage == "google":
+                    r = {"verified": 1, "review": 1, "failed": 0, "done": True}
                 elif stage == "screen":
                     r = {"counts": {"unchecked": len(leads[key])}}
                 else:
@@ -254,6 +256,7 @@ async def main():
         await page.get_by_text("处理完成", exact=True).wait_for()
         assert [s for _, _, s in advances[before:]] == [
             "overture",
+            "google",
             "screen",
             "contacts",
         ]

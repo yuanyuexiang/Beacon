@@ -12,7 +12,7 @@ import WebsiteMenus from "@/components/WebsiteMenus";
 import MapsMenu from "@/components/MapsMenu";
 import GooglePlaces from "@/components/GooglePlaces";
 
-type Lead = { id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
+type Lead = { operating_type?: { category: string; reason: string; citations: { quote: string }[] }; google_enrichment?: { status: string; error?: string }; verified_websites?: { url: string }[]; website_history?: { url: string; source?: string }[]; id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
 type Issue = { issue_code: string; fact: string; severity: string; confirmed: boolean | null; confirmed_by: string | null; note: string | null; deleted?: boolean; evidence: Record<string, unknown> };
@@ -130,6 +130,12 @@ export default function LeadDetail() {
         </Form>
       </Card>
       <AutoResearch key={`auto-${id}`} id={id} onFinished={async () => { const updated = await api<Lead>(`/api/leads/${id}`); form.setFieldsValue({ website: updated.website }); setContactLookup(null); setContactPicked([]); await reload(); }} />
+      {(lead.operating_type || lead.google_enrichment || lead.verified_websites?.length || lead.website_history?.length) && <Card title="补充数据与经营类型" style={{ marginBottom: 16 }}>
+        {lead.operating_type && <p>官网证据识别：{({ restaurant: "餐厅", cafe: "咖啡馆", takeaway: "外卖店", pub: "Pub／酒吧", institution: "机构餐饮", unknown: "待识别" } as Record<string, string>)[lead.operating_type.category]} · {lead.operating_type.reason}<br />{lead.operating_type.citations.map((c, i) => <span key={i}>原文：{c.quote}<br /></span>)}</p>}
+        {lead.google_enrichment && <p>Google 补充：{({ verified: "官网已通过 AI 与原文核验", review: "证据不足，请在下方 Google Places 中复核", failed: "补充失败，可重试" } as Record<string, string>)[lead.google_enrichment.status]} {lead.google_enrichment.error}</p>}
+        {lead.verified_websites?.map((w) => <p key={w.url}>经官网原文验证：<a href={w.url} target="_blank" rel="noreferrer">{w.url}</a></p>)}
+        {lead.website_history?.map((w) => <p key={w.url}>历史官网（{w.source ?? "原记录"}）：<a href={w.url} target="_blank" rel="noreferrer">{w.url}</a></p>)}
+      </Card>}
       <GooglePlaces key={id} id={id} name={lead.name} address={lead.address} postcode={lead.postcode} website={lead.website} onWebsiteChanged={async () => { setContactLookup(null); setContactPicked([]); const updated = await api<Lead>(`/api/leads/${id}`); form.setFieldsValue({ website: updated.website }); await reload(); }} />
       <Modal title="Companies House 主体候选" open={entityOpen} onCancel={() => setEntityOpen(false)} footer={null} width={1080}>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>{entityLookup?.notice ?? "候选仅供人工核对。"}采用后只填入表单，核对后点“保存”才生效。</Typography.Paragraph>

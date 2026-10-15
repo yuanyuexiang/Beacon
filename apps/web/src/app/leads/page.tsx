@@ -10,7 +10,7 @@ import { label } from "@/lib/format";
 import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
-type Lead = { business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
+type Lead = { operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
 type Authority = { id: number; name: string; region: string | null; count: number | null; pool_count: number; last_success_at: string | null; type_versions: Record<string, unknown> };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
@@ -210,7 +210,9 @@ function LeadsInner() {
 
       <Card size="small" title="线索" extra={<Space>
         <Input.Search allowClear placeholder="搜索名称 / 邮编" style={{ width: 220 }} onSearch={setQ} onChange={(e) => !e.target.value && setQ("")} />
-        <Select allowClear placeholder="商户类型" style={{ width: 200 }} value={businessType} onChange={setBusinessType} options={BUSINESS_TYPES} />
+        <Select allowClear placeholder="FSA 登记类型" style={{ width: 200 }} value={businessType} onChange={setBusinessType} options={BUSINESS_TYPES} />
+        <Button disabled={!batchKey || !!busy || workflowBlocksActions(workflow)} onClick={async () => { if (!batchKey) return; try { await api(`/api/batches/${encodeURIComponent(batchKey)}/screen`, json({})); message.success("已按当前策略重新预筛，人工判断保留"); await loadLeads(); } catch (e) { message.error((e as Error).message); } }}>重新预筛</Button>
+        <a href="/settings">配置筛选策略</a>
         <Select allowClear placeholder="筛选分类" style={{ width: 160 }} value={screen} onChange={setScreen} options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} />
         <Upload disabled={!batchKey || locked} accept=".csv" showUploadList={false} customRequest={({ file }) => { if (!batchKey) return message.warning("先选择批次"); const fd = new FormData(); fd.append("batch_key", batchKey); fd.append("file", file as File); run("csv", api("/api/imports", { method: "POST", body: fd }), (r: { created_count: number; linked_count: number; skipped_count: number; error_count: number }) => `导入：新增 ${r.created_count}，关联 ${r.linked_count}，跳过 ${r.skipped_count}，错误 ${r.error_count}`); }}>
           <Button disabled={!batchKey || locked}>追加 CSV</Button>
@@ -221,7 +223,8 @@ function LeadsInner() {
         <Table<Lead> rowKey="id" size="small" dataSource={filtered} pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           columns={[
             { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
-            { title: "商户类型", width: 160, render: (_, r) => businessLabel(r.business_type_id, r.business_type_name) },
+            { title: "FSA 登记类型", width: 160, render: (_, r) => businessLabel(r.business_type_id, r.business_type_name) },
+            { title: "经营类型／Google 核验", width: 170, render: (_, r) => <span title={r.operating_type?.reason}>{({ restaurant: "餐厅", cafe: "咖啡馆", takeaway: "外卖店", pub: "Pub／酒吧", institution: "机构餐饮" } as Record<string, string>)[r.operating_type?.category ?? ""] ?? "待识别"}{r.google_enrichment && <div style={{ color: "#888", fontSize: 12 }}>{({ verified: "官网已核验", review: "Google 待复核", failed: "Google 补充失败" } as Record<string, string>)[r.google_enrichment.status]}</div>}</span> },
             { title: "来源键", dataIndex: "source_key", width: 120 },
             { title: "邮编", dataIndex: "postcode", width: 100 },
             { title: "官网", dataIndex: "website", ellipsis: true, render: (v, r) => (v ? <a href={v} target="_blank" rel="noreferrer"><GlobalOutlined style={{ marginRight: 6, color: "#d97706" }} />{v.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <Link href={`/leads/${r.id}`} title="进入详情页搜索并核对官网">搜索补官网</Link>) },
@@ -298,8 +301,8 @@ function LeadsInner() {
             </Space>
           </>}
         </> : <p>正在读取任务进度…</p> : mode === "enrich" ? <>
-          <Alert showIcon type="info" message={`完善名单内现有 ${leads.length} 家门店`} description="补充空缺官网与电话、预筛未确认门店、查找未完成的联系方式。保留已填写的官网和已有人工判断。" style={{ marginBottom: 16 }} />
-          <Steps direction="vertical" size="small" items={[{ title: "补充官网与电话" }, { title: "规则预筛" }, { title: "查找联系方式" }]} />
+          <Alert showIcon type="info" message={`完善名单内现有 ${leads.length} 家门店`} description="Overture 补充后按设置使用 Google 核验官网，再运行筛选策略与联系方式查找。保留人工官网及人工判断，旧官网可追溯。" style={{ marginBottom: 16 }} />
+          <Steps direction="vertical" size="small" items={[{ title: "补充官网与电话" }, { title: "Google Places 按需补充" }, { title: "客户筛选策略" }, { title: "查找联系方式" }]} />
           <Button type="primary" block disabled={locked} loading={creating} style={{ marginTop: 16 }} onClick={() => startWorkflow("enrich")}>开始完善名单</Button>
         </> : <>
           <Alert showIcon type="info" message={`追加到 ${currentBatch?.region || "未设置地区"}`} description="从门店池选入所选类型的全部剩余商户，自动排除本名单已有成员。其他地区请建立新名单。追加后自动补全官网与联系方式。" style={{ marginBottom: 16 }} />

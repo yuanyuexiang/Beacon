@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.core.models_base import Base, Timestamped, UUIDPk
 from app.modules.directory import service as directory
-from app.modules.leads import runs, service
+from app.modules.leads import policy, runs, service
 from app.modules.leads.models import Batch
 
 
@@ -130,10 +130,11 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
         params["seed"] = None
         params["selection"] = "ordered"
         params["source"] = "directory"
+    params["policy"] = policy.current(db).model_dump()
     task = Workflow(
         batch_id=batch.id,
         kind=body.kind,
-        steps=(["pool"] if body.kind != "enrich" else []) + ["overture", "screen", "contacts"],
+        steps=(["pool"] if body.kind != "enrich" else []) + ["overture", "google", "screen", "contacts"],
         params=params,
         results=[],
         started_by=by,
@@ -180,8 +181,17 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
             )
         elif stage == "overture":
             result = service.enrich_overture(db, batch)
+        elif stage == "google":
+            from app.modules.leads import places_enrichment
+
+            result = places_enrichment.advance(db, batch, task)
+            if not result["done"]:
+                task.results = task.results[: task.step] + [result]
+                task.status = "pending"
+                db.commit()
+                return task
         elif stage == "screen":
-            result = service.auto_screen(db, batch)
+            result = service.auto_screen(db, batch, policy_data=task.params.get("policy"))
         else:
             if task.contact_run_id is None:
                 run = runs.BatchRun(

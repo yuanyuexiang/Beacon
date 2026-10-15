@@ -74,7 +74,7 @@ def test_create_and_resume_persist_params_skip_successful_fsa(setup, db, monkeyp
     monkeypatch.setattr(fsa, "fetch_establishments", lambda *a, **k: pytest.fail("成功步骤不应重跑"))
     resumed = _advance(client, saved)
     assert resumed["step"] == 2
-    finished = _advance(client, _advance(client, resumed))
+    finished = _advance(client, _advance(client, _advance(client, resumed)))
     assert finished["status"] == "completed"
     assert _advance(client, finished) == finished
     assert len(client.get("/api/leads?batch_key=new").json()) == 3
@@ -97,7 +97,8 @@ def test_enrich_never_fetches_fsa_and_append_selects_new_members(setup, db, monk
     while append["status"] != "completed":
         append = _advance(client, append)
     enrich = client.post("/api/batches/new/workflow", json={"kind": "enrich"}).json()
-    assert enrich["steps"] == ["overture", "screen", "contacts"] and enrich["params"] == {}
+    assert enrich["steps"] == ["overture", "google", "screen", "contacts"]
+    assert enrich["params"]["policy"]["google_request_limit"] == 20
     monkeypatch.setattr(fsa, "fetch_establishments", lambda *a, **k: pytest.fail("完善不应获取名录"))
     while enrich["status"] != "completed":
         enrich = _advance(client, enrich)
@@ -160,7 +161,7 @@ def test_atomic_pool_checkpoint_rolls_back_members_on_crash(setup, db, monkeypat
 def test_contact_failure_reuses_run_and_successful_jobs(setup, db, monkeypatch):
     client = setup
     task = _new(client).json()["workflow"]
-    for _ in range(3):
+    for _ in range(4):
         task = _advance(client, task)
     # 给门店设置官网，三条 job 中一条首次失败。
     leads = db.scalars(select(Lead)).all()
@@ -176,10 +177,10 @@ def test_contact_failure_reuses_run_and_successful_jobs(setup, db, monkeypatch):
 
     monkeypatch.setattr(runs, "_collect_contacts", collect)
     failed = _advance(client, task)
-    assert failed["status"] == "failed" and failed["results"][3]["totals"]["failed"] == 1
-    run_id = failed["results"][3]["run_id"]
+    assert failed["status"] == "failed" and failed["results"][4]["totals"]["failed"] == 1
+    run_id = failed["results"][4]["run_id"]
     finished = _advance(client, failed)
-    assert finished["status"] == "completed" and finished["results"][3]["run_id"] == run_id
+    assert finished["status"] == "completed" and finished["results"][4]["run_id"] == run_id
     assert sorted(attempts.values()) == [1, 1, 2]
     assert len(db.scalars(select(runs.BatchRun)).all()) == 1
 
@@ -225,7 +226,7 @@ def test_wrong_region_cross_batch_and_invalid_create_leave_no_batch(setup, db):
 def test_crashed_contact_job_recovers_without_waiting_30_minutes(setup, db, monkeypatch):
     client = setup
     task = _new(client).json()["workflow"]
-    for _ in range(3):
+    for _ in range(4):
         task = _advance(client, task)
     workflow = db.get(workflows.Workflow, uuid.UUID(task["id"]))
     batch = db.get(Batch, workflow.batch_id)

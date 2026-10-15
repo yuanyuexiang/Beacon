@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.modules.leads.models import EntityStatus, ScreeningClass
 
@@ -46,6 +46,28 @@ class LeadOut(BaseModel):
     business_type_id: int | None = None
     business_type_name: str | None = None
     inspection_pending: bool = False
+    operating_type: dict | None = None
+    google_enrichment: dict | None = None
+    verified_websites: list[dict] = Field(default_factory=list)
+    website_history: list[dict] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def source_metadata(cls, value):
+        from app.modules.leads.models import Lead
+
+        if isinstance(value, Lead):
+            raw = value.raw or {}
+            row = {k: getattr(value, k) for k in cls.model_fields if hasattr(value, k)}
+            row.update(
+                operating_type=raw.get("operating_type"),
+                google_enrichment=raw.get("places_enrichment"),
+                verified_websites=raw.get("verified_websites", []),
+                website_history=raw.get("website_history", []),
+            )
+            return row
+        return value
+
     contact_count: int = 0  # 已记录的联系方式数（仅列表接口填充）
     created_at: datetime
 

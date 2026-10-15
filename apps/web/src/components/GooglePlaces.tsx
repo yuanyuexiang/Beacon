@@ -133,6 +133,7 @@ export default function GooglePlaces({ id, name, address, postcode, website, onW
       </Space>
     </Modal>
     {p && <div style={{ padding: 16, marginTop: 16, border: "1px solid #dadce0", borderRadius: 8, background: "#fff" }}>
+      <Typography.Paragraph>Google 经营类型：{p.primaryTypeDisplayName?.text || p.primaryType || "未提供"} · 电话：{p.internationalPhoneNumber || "未提供"}</Typography.Paragraph>
       <Typography.Paragraph>当前官网：{website ? <a href={website} target="_blank" rel="noreferrer">{website}</a> : "未登记"}</Typography.Paragraph>
       <Typography.Paragraph>Google 官网候选：{p.websiteUri ? <Space wrap><a href={p.websiteUri} target="_blank" rel="noreferrer">{p.websiteUri}</a>{p.websiteUri !== website ? <Button disabled={busy || photoExpired} onClick={() => { setOfficialChecked(false); setWebsiteAddressChecked(false); setWebsiteEvidence(""); setWebsiteOpen(true); }}>核对并采用官网</Button> : <Typography.Text type="secondary">与当前官网一致</Typography.Text>}</Space> : "未提供"}</Typography.Paragraph>
       <Descriptions size="small" column={{ xs: 1, md: 2 }} items={[

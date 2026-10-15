@@ -103,12 +103,12 @@ def test_auto_screen_rules_and_brand(client, db):
     r = client.post("/api/batches/b1/screen")
     assert r.status_code == 200, r.text
     c = r.json()["counts"]
-    assert c == {"excluded_chain": 3, "excluded_cafe": 1, "excluded_institution": 1, "excluded_pub": 1, "unchecked": 1}
+    assert c == {"unchecked": 7}
     leads = {x["name"]: x for x in client.get("/api/leads?batch_key=b1").json()}
     assert leads["Fish Central"]["screening_class"] == "unchecked"
     assert (
-        leads["Brandy Place"]["screening_class"] == "excluded_chain"
-        and "brand=Some Chain" in leads["Brandy Place"]["screening_reason"]
+        leads["Brandy Place"]["screening_class"] == "unchecked"
+        and "不能据此确定为连锁" in leads["Brandy Place"]["screening_reason"]
     )
     # 人工已改的不再覆盖
     client.patch(

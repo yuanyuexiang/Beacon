@@ -149,7 +149,9 @@ def _parse(token: str, lead: Lead, op: Operator, purpose: str) -> str:
         raise HTTPException(409, "结果已失效或门店信息已改变，请重新搜索或刷新", headers=NO_STORE) from e
 
 
-def _client(db: Session, op: Operator, lead_id: uuid.UUID) -> google.PlacesClient:
+def _client(
+    db: Session, op: Operator, lead_id: uuid.UUID, *, workflow_id: str | None = None, request_limit: int = 20
+) -> google.PlacesClient:
     settings = get_settings()
 
     def reserve(sku: google.SKU) -> None:
@@ -159,10 +161,21 @@ def _client(db: Session, op: Operator, lead_id: uuid.UUID) -> google.PlacesClien
         count = select(func.count()).select_from(AuditLog).where(AuditLog.action == "google_places_request")
         daily = db.scalar(count.where(AuditLog.at >= _day_start())) or 0
         recent = db.scalar(count.where(AuditLog.at >= now - timedelta(minutes=1))) or 0
+        used = db.scalar(count.where(AuditLog.after["workflow_id"].astext == workflow_id)) if workflow_id else 0
+        if workflow_id and (used or 0) >= request_limit:
+            db.rollback()
+            raise google.PlacesError("本次任务 Google 调用预算已用完，剩余门店可另开补充任务", 429)
         if daily >= settings.google_places_daily_limit or recent >= 20:
             db.rollback()
             raise google.PlacesError("Google 查询次数已达上限，请稍后或次日重试", 429)
-        audit.record(db, op, "google_places_request", "lead", lead_id, after={"sku": sku, "attempts": 1})
+        audit.record(
+            db,
+            op,
+            "google_places_request",
+            "lead",
+            lead_id,
+            after={"sku": sku, "attempts": 1, **({"workflow_id": workflow_id} if workflow_id else {})},
+        )
         db.commit()
 
     return google.PlacesClient(settings.google_places_api_key, settings.google_places_proxy, reserve=reserve)
