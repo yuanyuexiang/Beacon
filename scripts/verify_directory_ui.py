@@ -102,7 +102,7 @@ async def handle(route):
     requests.append((request.method, path, body))
     status = 200
     if path == "/api/auth/me":
-        result = {"username": "ui-test"}
+        result = {"id": "ui", "username": "ui-test", "role": "admin", "display_name": None, "must_change_password": False}
     elif path == "/api/directory/status":
         result = {"online": online}
     elif path == "/api/directory/authorities":

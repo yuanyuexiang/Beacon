@@ -1,7 +1,9 @@
 "use client";
-import { Button, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from "antd";
+import Button from "@/components/AccessButton";
+import { ConfigProvider, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from "antd";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { useOperator } from "@/lib/auth";
 import { api, json } from "@/lib/api";
 import { channelLabel, approvalText, label } from "@/lib/format";
 import { HeroBand, SCREEN_ZH, ScreenTag } from "@/components/ui";
@@ -32,6 +34,7 @@ type Content = { id: string; kind: string; version: number; status: string; appr
 const SCREENING = ["unchecked", "candidate", "unknown", "excluded_cafe", "excluded_chain", "excluded_canteen", "excluded_community", "excluded_institution", "excluded_pub", "excluded_closed", "excluded_other"];
 
 export default function LeadDetail() {
+  const { me } = useOperator();
   const { id } = useParams<{ id: string }>();
   const [lead, setLead] = useState<Lead | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -100,7 +103,7 @@ export default function LeadDetail() {
   const progress = content.some((c) => c.approval_valid) ? 5 : content.length ? 4 : reviewedAnalyses.length ? 3 : Object.values(analyses).some((l) => l.length) ? 2 : assets.some((a) => a.fetch_status === "fetched") ? 1 : 0;
 
   return (
-    <div>
+    <ConfigProvider componentDisabled={me?.role === "viewer"}><div>
       <HeroBand kicker="LEAD" title={lead.name} subtitle={<>{lead.source_key} · {lead.postcode ?? ""} · {lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: "#fab736" }}>{lead.website}</a> : "无官网"}</>}
         extra={<><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /><Tag style={{ marginInlineEnd: 0 }}>主体 {label(lead.entity_status)}</Tag></>}>
       </HeroBand>
@@ -320,6 +323,6 @@ export default function LeadDetail() {
           </Card>
         ))}
       </Card>
-    </div>
+    </div></ConfigProvider>
   );
 }

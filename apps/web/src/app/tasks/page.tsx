@@ -1,7 +1,9 @@
 "use client";
-import { Badge, Button, Card, DatePicker, Form, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
+import Button from "@/components/AccessButton";
+import { ConfigProvider, Badge, Card, DatePicker, Form, Input, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useOperator } from "@/lib/auth";
 import { api, json } from "@/lib/api";
 import SocialOutreach from "@/components/SocialOutreach";
 import GmailOutreach from "@/components/GmailOutreach";
@@ -19,6 +21,7 @@ const CHANNELS = ["email", "whatsapp", "phone", "instagram", "facebook", "tiktok
 const TASK_COLORS: Record<string, string> = { pending: "blue", opened: "gold", sent_manual: "green", sent_email: "green", sent_social: "green", paused: "orange", cancelled: "default" };
 
 export default function TasksPage() {
+  const { me } = useOperator();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [leadId, setLeadId] = useState<string>();
   const [eligs, setEligs] = useState<Elig[]>([]);
@@ -57,11 +60,11 @@ export default function TasksPage() {
   );
 
   return (
-    <>
+    <ConfigProvider componentDisabled={me?.role === "viewer"}>
       <HeroBand kicker="MANUAL OUTREACH" title="触达任务与回复" subtitle="邮件和已连接社媒会话支持预览确认后发送；其他渠道人工回填。执行前重新复核准入、审批和抑制。"
         extra={<>
-          <Select showSearch style={{ width: 320 }} placeholder="选择门店以管理准入与回填" optionFilterProp="label" value={leadId} onChange={pick} options={leads.map((l) => ({ value: l.id, label: `${l.name}（${l.source_key}）` }))} />
-          {leadId && <Link href={`/leads/${leadId}`}><Button>查看详情</Button></Link>}
+          <Select disabled={false} showSearch style={{ width: 320 }} placeholder="选择门店以管理准入与回填" optionFilterProp="label" value={leadId} onChange={pick} options={leads.map((l) => ({ value: l.id, label: `${l.name}（${l.source_key}）` }))} />
+          {leadId && <Link href={`/leads/${leadId}`}><Button readOnlySafe>查看详情</Button></Link>}
         </>} />
       <Card size="small">
         <Tabs items={[
@@ -114,6 +117,6 @@ export default function TasksPage() {
           ) },
         ]} />
       </Card>
-    </>
+    </ConfigProvider>
   );
 }

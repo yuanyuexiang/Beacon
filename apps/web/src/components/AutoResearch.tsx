@@ -1,5 +1,6 @@
 "use client";
-import { Alert, Button, Card, Collapse, Space, Table, Tag, Typography } from "antd";
+import Button from "@/components/AccessButton";
+import { Alert, Card, Collapse, Space, Table, Tag, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, json } from "@/lib/api";
 

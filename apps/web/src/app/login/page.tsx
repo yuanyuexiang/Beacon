@@ -1,5 +1,5 @@
 "use client";
-import { Button, Form, Input, Typography, message } from "antd";
+import { Alert, Button, Form, Input, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { api, json } from "@/lib/api";
@@ -12,6 +12,7 @@ const REGIONS = ["英国", "法国", "德国", "西班牙", "意大利", "美国
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
   return (
     <div style={{ minHeight: "100vh", display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(400px, 0.85fr)", background: "#111" }} className="login-grid">
       <style>{`
@@ -67,8 +68,9 @@ export default function LoginPage() {
             <Typography.Title level={2} style={{ margin: 0, fontWeight: 700 }}>操作者登录</Typography.Title>
             <Typography.Text type="secondary">请使用管理员分配的操作者账号</Typography.Text>
           </div>
+          {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
           <Form layout="vertical" size="large" requiredMark={false} className="login-input"
-            onFinish={(v) => { setLoading(true); api("/api/auth/login", json(v)).then(() => router.replace("/")).catch((e) => { message.error(e.message); setLoading(false); }); }}>
+            onFinish={(v) => { setLoading(true); api<{ must_change_password: boolean }>("/api/auth/login", json(v)).then((m) => router.replace(m.must_change_password ? "/account" : "/")).catch((e) => { setError(e.message); setLoading(false); }); }}>
             <Form.Item name="username" label={<span style={{ fontWeight: 600 }}>操作者</span>} rules={[{ required: true, message: "请输入操作者" }]}>
               <Input autoComplete="username" placeholder="admin" />
             </Form.Item>

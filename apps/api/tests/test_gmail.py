@@ -245,3 +245,24 @@ def test_oauth_callback_log_does_not_include_authorization_code():
     )
     OAuthAccessFilter().filter(record)
     assert "private-code" not in record.getMessage() and "private-state" not in record.getMessage()
+
+
+@pytest.mark.parametrize("change", ["disabled", "viewer", "password_reset"])
+def test_queue_rechecks_operator_permission_before_submission(client, db, setup, change):
+    from app.core.models import Operator
+
+    task, calls, _ = setup
+    delivery = preview(client, task)
+    assert approve(client, delivery, queued=True).status_code == 200
+    op = db.scalar(select(Operator).where(Operator.username == "tester"))
+    if change == "disabled":
+        op.is_active = False
+    elif change == "viewer":
+        op.role = "viewer"
+    else:
+        op.must_change_password = True
+    db.commit()
+    service.tick(db)
+    row = db.get(EmailDelivery, uuid.UUID(delivery["id"]))
+    assert row.status == "blocked" and "发送权限" in row.last_error
+    assert not any(path == "/send" for _, path, _ in calls)

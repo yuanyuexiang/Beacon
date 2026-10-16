@@ -1,5 +1,6 @@
 "use client";
-import { Alert, Button, Checkbox, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import Button from "@/components/AccessButton";
+import { Alert, Checkbox, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { ChannelAccount, Conversation, SocialDelivery, deliveryLabels, replyCandidates } from "@/lib/outreach";

@@ -12,6 +12,7 @@ from app.core.auth import bootstrap_operator, current_operator
 from app.core.config import get_settings
 from app.core.db import get_engine, get_sessionmaker
 from app.core.routes import router as core_router
+from app.core.users import router as users_router
 
 
 class OAuthAccessFilter(logging.Filter):
@@ -49,7 +50,8 @@ api = APIRouter(prefix="/api")
 async def places_no_store(request: Request, call_next):
     response = await call_next(request)
     if (
-        "/google-places" in request.url.path
+        request.url.path.startswith(("/api/auth", "/api/users"))
+        or "/google-places" in request.url.path
         or "/maps-menu" in request.url.path
         or "/gmail" in request.url.path
         or "/outreach" in request.url.path
@@ -92,6 +94,7 @@ from app.modules.outreach.routes import public_router as outreach_public_router 
 from app.modules.outreach.routes import router as outreach_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
+protected.include_router(users_router)
 protected.include_router(outreach_router)
 protected.include_router(gmail_router)
 from app.modules.leads.policy import router as policy_router  # noqa: E402
@@ -121,6 +124,10 @@ include_module_routers()
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith(("/api/auth", "/api/users")):
+        return JSONResponse(
+            status_code=422, content={"detail": "账号信息格式无效：请检查字段；新密码或临时密码需为 12～128 个字符"}
+        )
     if request.url.path.startswith("/api/outreach"):
         return JSONResponse(status_code=422, content={"detail": "配置格式无效，请核对字段及账号类型"})
     from fastapi.exception_handlers import request_validation_exception_handler

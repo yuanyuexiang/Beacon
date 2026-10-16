@@ -16,6 +16,10 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     /* 非 JSON */
   }
   if (!res.ok) {
+    if (typeof window !== "undefined" && path !== "/api/auth/login") {
+      if (res.status === 401) window.dispatchEvent(new Event("beacon-auth-invalid"));
+      if (res.headers.get("X-Beacon-Action") === "change-password") window.dispatchEvent(new Event("beacon-password-required"));
+    }
     const detail = (body as { detail?: unknown })?.detail;
     throw new ApiError(res.status, typeof detail === "string" ? detail : JSON.stringify(detail ?? body));
   }

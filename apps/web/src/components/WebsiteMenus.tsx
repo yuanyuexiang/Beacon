@@ -1,5 +1,6 @@
 "use client";
-import { Alert, Button, Modal, Space, Table, Typography, message } from "antd";
+import Button from "@/components/AccessButton";
+import { Alert, Modal, Space, Table, Typography, message } from "antd";
 import { useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 

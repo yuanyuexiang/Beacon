@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useOperator } from "@/lib/auth";
 import { api, json } from "@/lib/api";
 import { CheckCircleOutlined, CloudDownloadOutlined, GlobalOutlined, ShopOutlined, UserOutlined } from "@ant-design/icons";
 import { HeroBand, SCREEN_ZH, ScreenTag, StatCard } from "@/components/ui";
@@ -22,6 +23,8 @@ const listName = (region?: string) => `${(region || "名单").slice(0, 35)}-${ne
 const SCREENING = ["unchecked", "candidate", "unknown", "excluded_cafe", "excluded_chain", "excluded_canteen", "excluded_community", "excluded_institution", "excluded_pub", "excluded_closed", "excluded_other"];
 
 function LeadsInner() {
+  const { me } = useOperator();
+  const canWrite = me?.role === "admin" || me?.role === "member";
   const sp = useSearchParams();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -55,7 +58,7 @@ function LeadsInner() {
   activeKey.current = batchKey;
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const locked = creating || !!busy || workflowLoading || workflowLoadError || workflowBlocksActions(workflow);
+  const locked = !canWrite || creating || !!busy || workflowLoading || workflowLoadError || workflowBlocksActions(workflow);
   const generatedName = useRef("");
   useEffect(() => { if (newOpen) createForm.resetFields(); }, [newOpen, createForm]);
   const err = (e: Error) => message.error(e.message);
@@ -211,8 +214,8 @@ function LeadsInner() {
       <Card size="small" title="线索" extra={<Space>
         <Input.Search allowClear placeholder="搜索名称 / 邮编" style={{ width: 220 }} onSearch={setQ} onChange={(e) => !e.target.value && setQ("")} />
         <Select allowClear placeholder="FSA 登记类型" style={{ width: 200 }} value={businessType} onChange={setBusinessType} options={BUSINESS_TYPES} />
-        <Button disabled={!batchKey || !!busy || workflowBlocksActions(workflow)} onClick={async () => { if (!batchKey) return; try { await api(`/api/batches/${encodeURIComponent(batchKey)}/screen`, json({})); message.success("已按当前策略重新预筛，人工判断保留"); await loadLeads(); } catch (e) { message.error((e as Error).message); } }}>重新预筛</Button>
-        <a href="/settings">配置筛选策略</a>
+        <Button disabled={!canWrite || !batchKey || !!busy || workflowBlocksActions(workflow)} onClick={async () => { if (!batchKey) return; try { await api(`/api/batches/${encodeURIComponent(batchKey)}/screen`, json({})); message.success("已按当前策略重新预筛，人工判断保留"); await loadLeads(); } catch (e) { message.error((e as Error).message); } }}>重新预筛</Button>
+        {me?.role === "admin" && <a href="/settings">配置筛选策略</a>}
         <Select allowClear placeholder="筛选分类" style={{ width: 160 }} value={screen} onChange={setScreen} options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} />
         <Upload disabled={!batchKey || locked} accept=".csv" showUploadList={false} customRequest={({ file }) => { if (!batchKey) return message.warning("先选择批次"); const fd = new FormData(); fd.append("batch_key", batchKey); fd.append("file", file as File); run("csv", api("/api/imports", { method: "POST", body: fd }), (r: { created_count: number; linked_count: number; skipped_count: number; error_count: number }) => `导入：新增 ${r.created_count}，关联 ${r.linked_count}，跳过 ${r.skipped_count}，错误 ${r.error_count}`); }}>
           <Button disabled={!batchKey || locked}>追加 CSV</Button>
@@ -296,8 +299,8 @@ function LeadsInner() {
           {workflow.status === "completed" ? <Alert type="success" showIcon message="处理完成" description="请核对门店类型与联系方式，渠道准入仍需逐条确认。" style={{ marginTop: 16 }} /> : workflow.status === "cancelled" ? <Alert type="info" message="任务已结束，已有结果保留" /> : <>
             <p style={{ color: "#6b7280" }}>{workflow.status === "failed" ? "本次补充已停止。关闭面板即可继续操作名单；重试只处理未完成项。" : "关闭面板后本页会继续执行。刷新或离开页面后，可从保存的步骤继续；已完成步骤不重做。"}</p>
             <Space>
-              <Button type="primary" loading={creating} disabled={creating || !!busy} onClick={() => executeWorkflow(batchKey!, workflow)}>{workflow.status === "failed" ? "重试未完成步骤" : "继续任务"}</Button>
-              <Button disabled={creating || !!busy} onClick={cancelWorkflow}>结束任务</Button>
+              <Button type="primary" loading={creating} disabled={!canWrite || creating || !!busy} onClick={() => executeWorkflow(batchKey!, workflow)}>{workflow.status === "failed" ? "重试未完成步骤" : "继续任务"}</Button>
+              <Button disabled={!canWrite || creating || !!busy} onClick={cancelWorkflow}>结束任务</Button>
             </Space>
           </>}
         </> : <p>正在读取任务进度…</p> : mode === "enrich" ? <>

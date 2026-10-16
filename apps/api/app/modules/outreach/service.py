@@ -159,6 +159,10 @@ def preview(db: Session, task_id: uuid.UUID, conversation_id: uuid.UUID, op: Ope
 
 
 def recheck(db: Session, d: OutreachDelivery) -> tuple[ManualTask, ChannelAccount]:
+    from app.core.auth import may_send
+
+    if d.status in {"ready", "queued", "sending"} and not may_send(db, d.approved_by):
+        raise sales.SalesError("发送确认人的账号已停用、待改密或不再具有发送权限，请重新预览确认")
     a = db.scalar(
         select(ChannelAccount)
         .where(ChannelAccount.id == d.account_id)

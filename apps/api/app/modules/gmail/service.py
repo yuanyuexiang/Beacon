@@ -100,6 +100,10 @@ def preview(db: Session, task_id: uuid.UUID, subject: str, op: Operator, batch_k
 
 
 def recheck(db: Session, delivery: EmailDelivery) -> ManualTask:
+    from app.core.auth import may_send
+
+    if delivery.status in {"ready", "queued", "sending"} and not may_send(db, delivery.approved_by):
+        raise sales.SalesError("发送确认人的账号已停用、待改密或不再具有发送权限，请重新预览确认")
     task, elig, content = checked_task(db, delivery.task_id)
     if delivery.payload["to"] != [elig.contact_ref] or delivery.payload["body"] != content.body_text:
         raise sales.SalesError("邮箱或已审批内容改变，请重新预览确认")

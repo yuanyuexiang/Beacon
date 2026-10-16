@@ -2,6 +2,7 @@
 import { Alert, Button, Card, Collapse, Drawer, Form, Modal, Select, Space, Switch, Table, Tag, Input, message } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useOperator } from "@/lib/auth";
 import { api, json } from "@/lib/api";
 import { HeroBand } from "@/components/ui";
 
@@ -16,6 +17,8 @@ type Entry = { fhrsid: number; name: string; address: string | null; postcode: s
 type Values = { authority_id: number; business_type_ids: number[]; auto_sync: boolean; interval_hours: number };
 
 export default function DirectoryPage() {
+  const { me } = useOperator();
+  const canManage = me?.role === "admin";
   const [regions, setRegions] = useState<Region[]>([]);
   const [authorities, setAuthorities] = useState<Authority[]>([]);
   const [selected, setSelected] = useState<number>();
@@ -83,12 +86,12 @@ export default function DirectoryPage() {
   return <>
     <HeroBand kicker="DIRECTORY" title="门店池" subtitle="先同步 FSA 来源数据，再从池中建立名单。来源变化与销售记录分别保存。" extra={<>
       <Select style={{ width: 250 }} placeholder="选择关注地区" value={selected} onChange={(id) => { setSelected(id); setPage(1); }} options={regions.map((r) => ({ value: r.id, label: `${r.name} · ${r.pool_count} 家` }))} />
-      <Button type="primary" onClick={() => openForm(null).catch(error)}>添加地区</Button>
-      <Button disabled={!region || !!busy || ["queued", "running"].includes(latest?.status || "")} loading={busy === "sync"} onClick={sync}>立即同步</Button>
-      <Button disabled={!region} onClick={() => openForm(region!).catch(error)}>同步设置</Button>
+      <Button type="primary" disabled={!canManage} onClick={() => openForm(null).catch(error)}>添加地区</Button>
+      <Button disabled={!canManage || !region || !!busy || ["queued", "running"].includes(latest?.status || "")} loading={busy === "sync"} onClick={sync}>立即同步</Button>
+      <Button disabled={!canManage || !region} onClick={() => openForm(region!).catch(error)}>同步设置</Button>
     </>} />
     {online === false && <Alert type="warning" showIcon message="同步服务暂不可用，排队任务会保留" description="已成功同步的门店池仍可浏览和建立名单，服务恢复后接续同步。" style={{ marginBottom: 16 }} />}
-    {region ? <Card size="small" style={{ marginBottom: 16 }} title={`${region.name} · 来源状态`} extra={<Space><Button onClick={showHistory}>同步记录</Button><Link href="/leads"><Button>建立销售名单</Button></Link></Space>}>
+    {region ? <Card size="small" style={{ marginBottom: 16 }} title={`${region.name} · 来源状态`} extra={<Space><Button onClick={showHistory}>同步记录</Button><Link href="/leads"><Button disabled={me?.role === "viewer"}>建立销售名单</Button></Link></Space>}>
       <Space wrap><Tag color={latest?.status === "failed" ? "orange" : "blue"}>{statusLabels[latest?.status || ""] || "尚未同步"}</Tag><span>最后成功：{time(region.last_success_at)}</span><span>{region.auto_sync ? `每 ${region.interval_hours} 小时同步 · 下次 ${time(region.next_sync_at)}` : "定期同步已关闭"}</span></Space>
       <p style={{ color: "#6b7280" }}>定期同步范围：{region.business_type_ids.map(typeLabel).join(" / ")}。各类型最后成功：{Object.entries(region.type_versions).map(([id, version]) => `${typeLabel(Number(id))} ${time(version.synced_at)}`).join("；") || "尚未同步"}</p>
       <p>门店池现有 {region.pool_count} 家：{Object.entries(region.counts).map(([id, count]) => `${typeLabel(Number(id))} ${count} 家`).join("，") || "等待首次同步"}</p>

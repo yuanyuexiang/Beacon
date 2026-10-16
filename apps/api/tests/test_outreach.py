@@ -266,3 +266,24 @@ def test_provider_pre_submit_rejection_is_blocked_not_unknown(client, db, setup,
     service.tick(db)
     db.expire_all()
     assert db.get(OutreachDelivery, uuid.UUID(d["id"])).status == "blocked"
+
+
+@pytest.mark.parametrize("change", ["disabled", "viewer", "password_reset"])
+def test_queue_rechecks_operator_permission_before_submission(client, db, setup, change):
+    from app.core.models import Operator
+
+    task, _, conversation, calls, _ = setup
+    delivery = preview(client, task, conversation)
+    assert approve(client, delivery, queued=True).status_code == 200
+    op = db.scalar(select(Operator).where(Operator.username == "tester"))
+    if change == "disabled":
+        op.is_active = False
+    elif change == "viewer":
+        op.role = "viewer"
+    else:
+        op.must_change_password = True
+    db.commit()
+    service.tick(db)
+    row = db.get(OutreachDelivery, uuid.UUID(delivery["id"]))
+    assert row.status == "blocked" and "发送权限" in row.last_error
+    assert not any(path == "/send" for _, path, _ in calls)

@@ -29,7 +29,7 @@ async def handle(route):
     path = urlsplit(route.request.url).path
     status = 200
     if path == "/api/auth/me":
-        data = {"id": "ui", "username": "ui-test", "is_active": True}
+        data = {"id": "ui", "username": "ui-test", "role": "admin", "display_name": None, "must_change_password": False}
     elif path == "/api/lead-policy":
         if route.request.method == "PUT":
             body = route.request.post_data_json

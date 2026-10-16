@@ -102,3 +102,5 @@ D49 GitHub 自动部署：main 提交自动检查、构建 GHCR 并部署测试�
 D50 服务器 Maps 执行器：`services/maps/` 独立镜像，Playwright Chrome + Xvfb；纳入 production Compose、GHCR 发布与浏览器数据卷备份。验证 `shellcheck services/maps/entrypoint.sh`、`cd apps/api && uv run pytest tests/test_maps_menu.py -q`；服务器实际有限视图和菜单缺失不能算采集成功，见操作手册 D50。
 
 D58：设置页可配置筛选与 Google 按需补充策略；任务冻结版本，人工官网和筛选保留。浏览器回归 `uv run --project apps/api --extra maps-worker python scripts/verify_lead_policy_ui.py`（全部 API 模拟）；后端专项 `cd apps/api && uv run pytest tests/test_lead_policy.py -q`。本地验收前不发布，详见操作手册 D58。
+
+D59 用户与权限：`/account` 个人资料／改密，`/users` 管理员管理用户；管理员／业务／只读，同一工作空间。初始密码强制修改、版本化会话撤销、最后管理员保护。迁移 `d159a0010001`。专项 `cd apps/api && uv run pytest tests/test_users.py tests/test_auth.py tests/test_gmail.py tests/test_outreach.py -q`；界面 `uv run --project apps/api --extra maps-worker python scripts/verify_users_ui.py`（全模拟，无真实账号或外部发送）。详见操作手册 D59；只本地更新，用户确认前不发布。

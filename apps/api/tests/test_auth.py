@@ -9,7 +9,7 @@ from app.core.models import Operator
 
 
 def make_operator(db, username="tester", password="pw-tester-123"):
-    op = Operator(username=username, password_hash=hash_password(password), is_active=True)
+    op = Operator(username=username, password_hash=hash_password(password), is_active=True, role="admin")
     db.add(op)
     db.commit()
     return op

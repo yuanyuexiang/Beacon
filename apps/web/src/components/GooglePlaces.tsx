@@ -1,5 +1,6 @@
 "use client";
-import { Alert, Button, Card, Checkbox, Descriptions, Image, Input, Modal, Popconfirm, Space, Table, Typography, message } from "antd";
+import Button from "@/components/AccessButton";
+import { Alert, Card, Checkbox, Descriptions, Image, Input, Modal, Popconfirm, Space, Table, Typography, message } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { api, json } from "@/lib/api";
 import type { PlacesCandidate, PlacesDetailsOut, PlacesLink, PlacesPhotoOut, PlacesSearchOut, PlacesState, ProviderAttribution } from "@/lib/google-places.generated";
