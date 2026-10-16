@@ -30,7 +30,7 @@ export default function AccountPage() {
     <Card title="修改密码">
       <Form form={passwordForm} layout="vertical" disabled={busy} onFinish={(v) => act(async () => { await api("/api/auth/password", json({ current_password: v.current_password, new_password: v.new_password })); passwordForm.resetFields(); await refresh(); setSuccess("密码已修改，其他登录会话已失效"); })} style={{ maxWidth: 440 }}>
         <Form.Item name="current_password" label={me.must_change_password ? "当前临时密码" : "当前密码"} rules={[{ required: true, message: "请输入当前密码" }]}><Input.Password autoComplete="current-password" /></Form.Item>
-        <Form.Item name="new_password" label="新密码" rules={[{ required: true, message: "请输入新密码" }, { min: 12, max: 128, message: "密码需为 12～128 个字符" }]}><Input.Password autoComplete="new-password" maxLength={128} /></Form.Item>
+        <Form.Item name="new_password" label="新密码" rules={[{ required: true, message: "请输入新密码" }, { min: 8, max: 128, message: "密码需为 8～128 个字符" }]}><Input.Password autoComplete="new-password" maxLength={128} /></Form.Item>
         <Form.Item name="confirm_password" label="再次输入新密码" dependencies={["new_password"]} rules={[{ required: true }, ({ getFieldValue }) => ({ validator(_, value) { return value === getFieldValue("new_password") ? Promise.resolve() : Promise.reject(new Error("两次输入的密码不一致")); } })]}><Input.Password autoComplete="new-password" maxLength={128} /></Form.Item>
         <Space><Button type="primary" htmlType="submit" loading={busy}>修改密码</Button>{!me.must_change_password && <Button onClick={() => router.push("/")}>返回工作台</Button>}</Space>
       </Form>

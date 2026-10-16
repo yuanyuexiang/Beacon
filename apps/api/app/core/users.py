@@ -35,7 +35,7 @@ class UserCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64, pattern=r"^[a-z0-9][a-z0-9_.-]*$")
     display_name: str | None = Field(default=None, max_length=80)
     role: Role = "member"
-    initial_password: str = Field(min_length=12, max_length=128, repr=False)
+    initial_password: str = Field(min_length=8, max_length=128, repr=False)
 
     @field_validator("username", mode="before")
     @classmethod
@@ -52,7 +52,7 @@ class UserPatch(BaseModel):
 
 class PasswordReset(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    temporary_password: str = Field(min_length=12, max_length=128, repr=False)
+    temporary_password: str = Field(min_length=8, max_length=128, repr=False)
 
 
 def admin_operator(op: Operator = Depends(current_operator)) -> Operator:

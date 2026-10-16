@@ -52,7 +52,7 @@ export default function UsersPage() {
       })}>
         {mode === "create" && <Form.Item name="username" label="登录名" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9_.-]{2,63}$/, message: "3～64 位小写字母、数字、下划线、点或连字符" }]}><Input autoComplete="off" maxLength={64} /></Form.Item>}
         {mode !== "reset" && <><Form.Item name="display_name" label="显示名称" rules={[{ max: 80 }]}><Input maxLength={80} /></Form.Item><Form.Item name="role" label="角色" rules={[{ required: true }]}><Select options={roles} /></Form.Item></>}
-        {mode !== "edit" && <Form.Item name={mode === "reset" ? "temporary_password" : "initial_password"} label={mode === "reset" ? "临时密码" : "初始密码"} rules={[{ required: true }, { min: 12, max: 128, message: "密码需为 12～128 个字符" }]}><Input.Password autoComplete="new-password" maxLength={128} /></Form.Item>}
+        {mode !== "edit" && <Form.Item name={mode === "reset" ? "temporary_password" : "initial_password"} label={mode === "reset" ? "临时密码" : "初始密码"} rules={[{ required: true }, { min: 8, max: 128, message: "密码需为 8～128 个字符" }]}><Input.Password autoComplete="new-password" maxLength={128} /></Form.Item>}
         <Button type="primary" htmlType="submit" loading={busy}>{mode === "create" ? "创建用户" : mode === "reset" ? "重置密码并撤销旧会话" : "保存修改"}</Button>
       </Form>
     </Modal>

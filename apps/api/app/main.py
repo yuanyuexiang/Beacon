@@ -126,7 +126,7 @@ include_module_routers()
 async def validation_error(request: Request, exc: RequestValidationError):
     if request.url.path.startswith(("/api/auth", "/api/users")):
         return JSONResponse(
-            status_code=422, content={"detail": "账号信息格式无效：请检查字段；新密码或临时密码需为 12～128 个字符"}
+            status_code=422, content={"detail": "账号信息格式无效：请检查字段；新密码或临时密码需为 8～128 个字符"}
         )
     if request.url.path.startswith("/api/outreach"):
         return JSONResponse(status_code=422, content={"detail": "配置格式无效，请核对字段及账号类型"})

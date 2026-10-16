@@ -12,8 +12,8 @@ from app.main import app
 from tests.test_auth import make_operator
 from tests.test_imports import login
 
-INITIAL = "initial-pass-12345"
-NEW = "changed-pass-67890"
+INITIAL = "Start123"
+NEW = "Next1234"
 
 
 def create(client, username="sales", role="member"):
@@ -50,8 +50,8 @@ def test_create_first_password_gate_profile_and_no_secret_leak(client, db):
     assert c.get("/api/auth/me").json()["username"] == "sales"
     payloads = str([(a.before, a.after) for a in db.scalars(select(AuditLog)).all()])
     assert INITIAL not in payloads and NEW not in payloads and "scrypt$" not in payloads
-    invalid = client.post("/api/users", json={"username": "bad", "initial_password": "SecretShort"})
-    assert invalid.status_code == 422 and "SecretShort" not in invalid.text
+    invalid = client.post("/api/users", json={"username": "bad", "initial_password": "Short12"})
+    assert invalid.status_code == 422 and "Short12" not in invalid.text
 
 
 def test_unique_names_and_last_admin_protection(client, db):
