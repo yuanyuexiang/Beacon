@@ -93,6 +93,7 @@ def db(migrated_db: str) -> Iterator[Session]:
                 "list_workflow",
                 "batch_job",
                 "batch_run",
+                "communication_draft",
                 "audit_log",
                 "cost_entry",
                 "suppression",

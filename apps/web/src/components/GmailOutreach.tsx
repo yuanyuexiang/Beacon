@@ -7,13 +7,17 @@ import { api, json } from "@/lib/api";
 type Task = { id: string; lead_id: string; channel: string; status: string };
 type Delivery = { preview_key: string; id: string; task_id: string; status: string; payload: { to: string[]; subject: string; body: string }; gmail_message_id?: string | null; gmail_thread_id?: string | null; last_error?: string | null; sent_at?: string | null; checked_at?: string | null };
 const labels: Record<string, string> = { preview: "待确认", ready: "等待单家发送", queued: "已入队", sending: "发送中", sent: "已发送", unknown: "结果待确认", failed: "发送失败", blocked: "复核未通过", expired: "预览已过期", cancelled: "已取消" };
-export default function GmailOutreach({ tasks, name, onChanged }: { tasks: Task[]; name: (id: string) => string; onChanged: () => Promise<void> }) {
+export default function GmailOutreach({ tasks, name, onChanged, focusTaskId }: { tasks: Task[]; name: (id: string) => string; onChanged: () => Promise<void>; focusTaskId?: string }) {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [selected, setSelected] = useState<React.Key[]>([]);
+  useEffect(() => { if (focusTaskId) setSelected([focusTaskId]); }, [focusTaskId]);
   const [subject, setSubject] = useState("");
   const [previews, setPreviews] = useState<Delivery[]>([]);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ connected?: boolean; send_authorized?: boolean; policy?: { sending_enabled: boolean }; message?: string }>();
+  const [error, setError] = useState<string>();
+  useEffect(() => { api<typeof status>("/api/gmail/status").then(setStatus).catch((e) => setError(e.message)); }, []);
   const refresh = useCallback(async () => { setDeliveries(await api<Delivery[]>("/api/gmail/deliveries")); }, []);
   useEffect(() => {
     refresh().catch((e) => message.error(e.message));
@@ -21,10 +25,12 @@ export default function GmailOutreach({ tasks, name, onChanged }: { tasks: Task[
     return () => clearInterval(timer);
   }, [refresh, onChanged]);
   const act = async (work: () => Promise<void>) => {
-    setBusy(true); try { await work(); await refresh(); await onChanged(); } catch (e) { message.error((e as Error).message); } finally { setBusy(false); }
+    setBusy(true); setError(undefined); try { await work(); await refresh(); await onChanged(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   const candidates = tasks.filter((t) => t.channel === "email" && ["pending", "opened"].includes(t.status));
   return <>
+    {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
+    {status && <Alert type={status.connected && status.send_authorized && status.policy?.sending_enabled ? "success" : "warning"} showIcon message={`Gmail 账号：${status.connected ? "已连接" : "未连接"} · 发送权限：${status.send_authorized ? "已授权" : "待授权"} · 发送开关：${status.policy?.sending_enabled ? "开启" : "暂停"}`} description={status.message} style={{ marginBottom: 12 }} />}
     <Typography.Paragraph>选择已建立的邮箱任务，填写主题并完整预览。正文使用任务对应的已审批文案；<a href="/settings">发送账号和队列开关在设置中管理</a>。</Typography.Paragraph>
     <Space wrap style={{ marginBottom: 12 }}>
       <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="邮件主题" maxLength={256} style={{ width: 340 }} />

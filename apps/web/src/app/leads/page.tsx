@@ -1,8 +1,10 @@
 "use client";
-import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, Modal, Radio, Row, Select, Space, Steps, Switch, Table, Tag, Upload, message } from "antd";
+import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, Modal, Radio, Row, Select, Space, Steps, Switch, Table, Tag, Typography, Upload, message } from "antd";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PrepareOutreach from "@/components/PrepareOutreach";
+import { PROGRESS, Progress, taskLink } from "@/lib/communication";
 import { useOperator } from "@/lib/auth";
 import { api, json } from "@/lib/api";
 import { CheckCircleOutlined, CloudDownloadOutlined, GlobalOutlined, ShopOutlined, UserOutlined } from "@ant-design/icons";
@@ -11,7 +13,7 @@ import { label } from "@/lib/format";
 import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
-type Lead = { operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
+type Lead = { communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
 type Authority = { id: number; name: string; region: string | null; count: number | null; pool_count: number; last_success_at: string | null; type_versions: Record<string, unknown> };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
@@ -32,9 +34,24 @@ function LeadsInner() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [batchKey, setBatchKey] = useState<string | undefined>(sp.get("batch") ?? undefined);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [businessType, setBusinessType] = useState<number>();
-  const [screen, setScreen] = useState<string>();
-  const [q, setQ] = useState("");
+  const [businessType, setBusinessType] = useState<number | undefined>(Number(sp.get("type")) || undefined);
+  const [screen, setScreen] = useState<string | undefined>(sp.get("screen") || undefined);
+  const [q, setQ] = useState(sp.get("q") || "");
+  const [listPage, setListPage] = useState(Number(sp.get("page")) || 1);
+  const [pageSize, setPageSize] = useState(Number(sp.get("pageSize")) || 50);
+  const [selectedRows, setSelectedRows] = useState<React.Key[]>([]);
+  const [prepareOpen, setPrepareOpen] = useState(false);
+  const selectionKey = `beacon-list-selection:${me?.id}:${batchKey}`;
+  useEffect(() => { try { setSelectedRows(JSON.parse(sessionStorage.getItem(selectionKey) || "[]")); } catch { setSelectedRows([]); } }, [selectionKey]);
+  const selectRows = (keys: React.Key[]) => { setSelectedRows(keys); sessionStorage.setItem(selectionKey, JSON.stringify(keys)); };
+  const locationParams = new URLSearchParams();
+  if (batchKey) locationParams.set("batch", batchKey);
+  if (q) locationParams.set("q", q);
+  if (businessType) locationParams.set("type", String(businessType));
+  if (screen) locationParams.set("screen", screen);
+  if (listPage > 1) locationParams.set("page", String(listPage));
+  if (pageSize !== 50) locationParams.set("pageSize", String(pageSize));
+  const returnTo = `/leads${locationParams.size ? `?${locationParams}` : ""}`;
   const [authorities, setAuthorities] = useState<Authority[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
@@ -74,7 +91,8 @@ function LeadsInner() {
     getAllBatchLeads<Lead>(key).then((rows) => { if (activeKey.current === key) setLeads(rows); }).catch(err);
   }, []);
   useEffect(() => { loadBatches(); }, [loadBatches]);
-  useEffect(() => { loadLeads(batchKey); router.replace(batchKey ? `/leads?batch=${encodeURIComponent(batchKey)}` : "/leads"); }, [batchKey, loadLeads, router]);
+  useEffect(() => { loadLeads(batchKey); }, [batchKey, loadLeads]);
+  useEffect(() => { router.replace(returnTo, { scroll: false }); }, [returnTo, router]);
   const loadWorkflow = useCallback(async (key: string) => {
     const task = await api<ListWorkflow | null>(`/api/batches/${encodeURIComponent(key)}/workflow`);
     if (activeKey.current === key) { setWorkflow(task); setWorkflowLoadError(false); }
@@ -195,8 +213,10 @@ function LeadsInner() {
     <>
       <HeroBand kicker="LEADS" title="批次与线索" subtitle="从门店池建立名单，补充官网与联系方式；来源同步与销售处理分开。"
         extra={<>
-          <Select style={{ width: 260 }} value={batchKey} disabled={creating || !!busy} onChange={setBatchKey} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
+          <Select style={{ width: 260 }} value={batchKey} disabled={creating || !!busy} onChange={(key) => { setListPage(1); setBatchKey(key); }} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
           <Button type="primary" aria-label="建立名单" icon={<CloudDownloadOutlined />} disabled={!mounted || locked} onClick={() => { setCsvFile(null); setCreateMethod("auto"); generatedName.current = ""; setNewOpen(true); loadAuthorities(); }}>建立名单</Button>
+          <Button type="primary" disabled={!canWrite || !leads.length || creating || !!busy} onClick={() => setPrepareOpen(true)}>准备触达</Button>
+          <Link href={taskLink({ batch: batchKey, returnTo })}>查看沟通进展</Link>
           <Button danger disabled={!batchKey || locked} onClick={openDelete}>删除批次</Button>
           <Button disabled={!batchKey || locked || !leads.length} onClick={() => { setMode("enrich"); setBuildOpen(true); }}>完善名单</Button>
           <Button disabled={!batchKey || locked} onClick={() => { setMode("append"); setBuildOpen(true); }}>追加商户</Button>
@@ -212,22 +232,24 @@ function LeadsInner() {
       </Row>
 
       <Card size="small" title="线索" extra={<Space>
-        <Input.Search allowClear placeholder="搜索名称 / 邮编" style={{ width: 220 }} onSearch={setQ} onChange={(e) => !e.target.value && setQ("")} />
-        <Select allowClear placeholder="FSA 登记类型" style={{ width: 200 }} value={businessType} onChange={setBusinessType} options={BUSINESS_TYPES} />
-        <Button disabled={!canWrite || !batchKey || !!busy || workflowBlocksActions(workflow)} onClick={async () => { if (!batchKey) return; try { await api(`/api/batches/${encodeURIComponent(batchKey)}/screen`, json({})); message.success("已按当前策略重新预筛，人工判断保留"); await loadLeads(); } catch (e) { message.error((e as Error).message); } }}>重新预筛</Button>
+        <Input.Search allowClear key={q} defaultValue={q} placeholder="搜索名称 / 邮编" style={{ width: 220 }} onSearch={(v) => { setQ(v); setListPage(1); }} onChange={(e) => { if (!e.target.value) { setQ(""); setListPage(1); } }} />
+        <Select allowClear placeholder="FSA 登记类型" style={{ width: 200 }} value={businessType} onChange={(v) => { setBusinessType(v); setListPage(1); }} options={BUSINESS_TYPES} />
+        <Button disabled={!canWrite || !batchKey || !!busy || workflowBlocksActions(workflow)} onClick={async () => { if (!batchKey) return; try { await api(`/api/batches/${encodeURIComponent(batchKey)}/screen`, json({})); message.success("已按当前策略重新预筛，人工判断保留"); await loadLeads(batchKey); } catch (e) { message.error((e as Error).message); } }}>重新预筛</Button>
         {me?.role === "admin" && <a href="/settings">配置筛选策略</a>}
-        <Select allowClear placeholder="筛选分类" style={{ width: 160 }} value={screen} onChange={setScreen} options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} />
+        <Select allowClear placeholder="筛选分类" style={{ width: 160 }} value={screen} onChange={(v) => { setScreen(v); setListPage(1); }} options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} />
         <Upload disabled={!batchKey || locked} accept=".csv" showUploadList={false} customRequest={({ file }) => { if (!batchKey) return message.warning("先选择批次"); const fd = new FormData(); fd.append("batch_key", batchKey); fd.append("file", file as File); run("csv", api("/api/imports", { method: "POST", body: fd }), (r: { created_count: number; linked_count: number; skipped_count: number; error_count: number }) => `导入：新增 ${r.created_count}，关联 ${r.linked_count}，跳过 ${r.skipped_count}，错误 ${r.error_count}`); }}>
           <Button disabled={!batchKey || locked}>追加 CSV</Button>
         </Upload>
         <Button disabled={!batchKey || locked} loading={busy === "run"} onClick={() => run("run", api(`/api/batches/${encodeURIComponent(batchKey!)}/runs`, json({ steps: ["fetch", "analyze"] })), (r: { status: string; totals: Record<string, number> }) => `批量运行 ${label(r.status)}：${JSON.stringify(r.totals)}`)}>批量抓取 + 分析</Button>
         <a href={batchKey ? `/api/batches/${encodeURIComponent(batchKey!)}/export.csv` : undefined}><Button disabled={!batchKey}>导出 CSV</Button></a>
       </Space>}>
-        <Table<Lead> rowKey="id" size="small" dataSource={filtered} pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+        <Typography.Text type="secondary">已选择 {leads.filter((l) => selectedRows.includes(l.id)).length} 家；未勾选时，“准备触达”使用当前筛选结果 {filtered.length} 家。</Typography.Text>
+        <Table<Lead> scroll={{ x: 1700 }} rowSelection={{ selectedRowKeys: selectedRows, onChange: selectRows, preserveSelectedRowKeys: true }} rowKey="id" size="small" dataSource={filtered} pagination={{ current: listPage, pageSize, onChange: (p, size) => { setListPage(p); setPageSize(size); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           columns={[
-            { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
+            { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
             { title: "FSA 登记类型", width: 160, render: (_, r) => businessLabel(r.business_type_id, r.business_type_name) },
             { title: "经营类型／Google 核验", width: 170, render: (_, r) => <span title={r.operating_type?.reason}>{({ restaurant: "餐厅", cafe: "咖啡馆", takeaway: "外卖店", pub: "Pub／酒吧", institution: "机构餐饮" } as Record<string, string>)[r.operating_type?.category ?? ""] ?? "待识别"}{r.google_enrichment && <div style={{ color: "#888", fontSize: 12 }}>{({ verified: "官网已核验", review: "Google 待复核", failed: "Google 补充失败" } as Record<string, string>)[r.google_enrichment.status]}</div>}</span> },
+            { title: "沟通进展", width: 120, render: (_, r) => <Link href={taskLink({ lead: r.id, task: r.communication_progress?.task_id, draft: r.communication_progress?.draft_id, batch: batchKey, returnTo })}><Tag color={r.communication_progress?.status === "suppressed" ? "red" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag></Link> },
             { title: "来源键", dataIndex: "source_key", width: 120 },
             { title: "邮编", dataIndex: "postcode", width: 100 },
             { title: "官网", dataIndex: "website", ellipsis: true, render: (v, r) => (v ? <a href={v} target="_blank" rel="noreferrer"><GlobalOutlined style={{ marginRight: 6, color: "#d97706" }} />{v.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <Link href={`/leads/${r.id}`} title="进入详情页搜索并核对官网">搜索补官网</Link>) },
@@ -237,6 +259,7 @@ function LeadsInner() {
           ]} />
       </Card>
 
+      <PrepareOutreach open={prepareOpen} leadIds={(leads.some((l) => selectedRows.includes(l.id)) ? leads.filter((l) => selectedRows.includes(l.id)) : filtered).map((l) => l.id)} batchKey={batchKey} returnTo={returnTo} onClose={() => { setPrepareOpen(false); loadLeads(batchKey); }} onChanged={() => loadLeads(batchKey)} />
       <Modal title="建立名单" forceRender={mounted} open={newOpen} onCancel={() => { if (!creating) setNewOpen(false); }} footer={null} destroyOnHidden maskClosable={false} closable={!creating}>
           <Form name="create-list" form={createForm} layout="vertical" initialValues={{ exclude_awaiting: false, business_type_ids: [1] }} onFinish={createBatch} onValuesChange={(changed, values) => {
             if ("region" in changed && (!values.batch_key || values.batch_key === generatedName.current)) {

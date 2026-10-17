@@ -68,6 +68,7 @@ class LeadOut(BaseModel):
             return row
         return value
 
+    communication_progress: dict | None = None
     contact_count: int = 0  # 已记录的联系方式数（仅列表接口填充）
     created_at: datetime
 

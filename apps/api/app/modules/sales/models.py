@@ -106,6 +106,13 @@ class ManualTask(UUIDPk, Timestamped, Base):
     status: Mapped[TaskStatus] = mapped_column(
         _enum(TaskStatus, "task_status"), default=TaskStatus.pending, nullable=False
     )
+    preparation_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    source_batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("batch.id", ondelete="SET NULL")
+    )
+    assigned_to: Mapped[str | None] = mapped_column(String(64), ForeignKey("operator.username", ondelete="SET NULL"))
+    execution_mode: Mapped[str] = mapped_column(String(16), default="manual", server_default="manual", nullable=False)
+    follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[str | None] = mapped_column(String(64))
     opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     opened_by: Mapped[str | None] = mapped_column(String(64))

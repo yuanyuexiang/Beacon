@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import audit
@@ -67,6 +68,10 @@ class TaskOut(BaseModel):
     content_hash: str
     status: TaskStatus
     status_reason: str | None
+    source_batch_id: uuid.UUID | None = None
+    assigned_to: str | None = None
+    execution_mode: str = "manual"
+    follow_up_at: datetime | None = None
     created_by: str | None
     opened_at: datetime | None
     opened_by: str | None
@@ -279,7 +284,11 @@ def record_event(
     lead_id: uuid.UUID, body: EventIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
 ):
     _lead(db, lead_id)
-    ev, created = service.record_event(db, lead_id, body.model_dump(), op.username)
+    try:
+        ev, created = service.record_event(db, lead_id, body.model_dump(), op.username)
+    except (service.SalesError, IntegrityError):
+        db.rollback()
+        raise HTTPException(409, "事件键冲突，请核对当前客户或重新生成事件键") from None
     if created:
         audit.record(db, op, "event", "event", ev.id, after={"kind": ev.kind, "actions": ev.actions})
         db.commit()

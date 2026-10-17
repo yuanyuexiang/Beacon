@@ -104,3 +104,5 @@ D50 服务器 Maps 执行器：`services/maps/` 独立镜像，Playwright Chrome
 D58：设置页可配置筛选与 Google 按需补充策略；任务冻结版本，人工官网和筛选保留。浏览器回归 `uv run --project apps/api --extra maps-worker python scripts/verify_lead_policy_ui.py`（全部 API 模拟）；后端专项 `cd apps/api && uv run pytest tests/test_lead_policy.py -q`。本地验收前不发布，详见操作手册 D58。
 
 D59 用户与权限：`/account` 个人资料／改密，`/users` 管理员管理用户；管理员／业务／只读，同一工作空间。初始密码强制修改、版本化会话撤销、最后管理员保护。迁移 `d159a0010001`。专项 `cd apps/api && uv run pytest tests/test_users.py tests/test_auth.py tests/test_gmail.py tests/test_outreach.py -q`；界面 `uv run --project apps/api --extra maps-worker python scripts/verify_users_ui.py`（全模拟，无真实账号或外部发送）。详见操作手册 D59；只本地更新，用户确认前不发布。
+
+D60 名单到沟通工作台：单家／批量准备草稿、严格转换任务、负责人／来源名单／执行方式／提醒、多渠道人工执行、会话回填及沟通进展。见 [操作说明](docs/客户沟通工作台.md)。界面回归 `uv run --project apps/api --extra maps-worker python scripts/verify_communication_ui.py`（模拟 API，不触达）。迁移 head `d160a0010001`；仅本地验收，未发布服务器。

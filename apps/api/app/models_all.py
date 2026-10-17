@@ -11,5 +11,6 @@ from app.modules.leads.workflows import Workflow  # noqa: F401
 from app.modules.menus.models import AnalysisCorrection, MenuAnalysis, MenuAsset  # noqa: F401
 from app.modules.outreach.models import ChannelAccount, Conversation, ConversationEvent, OutreachDelivery  # noqa: F401
 from app.modules.sales.models import ChannelEligibility, CostEntry, Event, ManualTask, Suppression  # noqa: F401
+from app.modules.sales.preparation import Preparation  # noqa: F401
 
 __all__ = ["Base"]

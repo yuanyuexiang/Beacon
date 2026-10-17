@@ -240,10 +240,14 @@ def list_leads(
             .group_by(ChannelEligibility.lead_id)
         ).all()
     )
+    from app.modules.sales.workbench import progress
+
+    states = progress(db, [lead.id for lead in leads])
     out = []
     for lead in leads:
         row = LeadOut.model_validate(lead)
         row.contact_count = counts.get(lead.id, 0)
+        row.communication_progress = states[lead.id]
         out.append(row)
     return out
 

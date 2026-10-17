@@ -1,4 +1,7 @@
 "use client";
+import PrepareOutreach from "@/components/PrepareOutreach";
+import Link from "next/link";
+import { safeReturnTo, taskLink } from "@/lib/communication";
 import Button from "@/components/AccessButton";
 import { ConfigProvider, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from "antd";
 import { useParams } from "next/navigation";
@@ -36,6 +39,9 @@ const SCREENING = ["unchecked", "candidate", "unknown", "excluded_cafe", "exclud
 export default function LeadDetail() {
   const { me } = useOperator();
   const { id } = useParams<{ id: string }>();
+  const [prepareOpen, setPrepareOpen] = useState(false);
+  const [back, setBack] = useState(`/leads/${id}`);
+  useEffect(() => { setBack(safeReturnTo(new URLSearchParams(window.location.search).get("returnTo") || `/leads/${id}`)); }, [id]);
   const [lead, setLead] = useState<Lead | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [analyses, setAnalyses] = useState<Record<string, Analysis[]>>({});
@@ -105,7 +111,7 @@ export default function LeadDetail() {
   return (
     <ConfigProvider componentDisabled={me?.role === "viewer"}><div>
       <HeroBand kicker="LEAD" title={lead.name} subtitle={<>{lead.source_key} · {lead.postcode ?? ""} · {lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: "#fab736" }}>{lead.website}</a> : "无官网"}</>}
-        extra={<><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /><Tag style={{ marginInlineEnd: 0 }}>主体 {label(lead.entity_status)}</Tag></>}>
+        extra={<><Button type="primary" onClick={() => setPrepareOpen(true)}>准备触达</Button><Link href={taskLink({ lead: id, returnTo: back })}>查看沟通进展</Link><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /><Tag style={{ marginInlineEnd: 0 }}>主体 {label(lead.entity_status)}</Tag></>}>
       </HeroBand>
       <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: "14px 20px" } }}>
         <Steps size="small" current={progress} items={[{ title: "菜单文件" }, { title: "分析" }, { title: "人工审核" }, { title: "样稿 / 文案" }, { title: "审批" }, { title: "准入与任务" }]} />
@@ -210,7 +216,7 @@ export default function LeadDetail() {
           ]} />
       </Modal>
 
-      <Card size="small" title="菜单文件" style={{ marginBottom: 16 }} extra={
+      <Card id="menu-files" size="small" title="菜单文件" style={{ marginBottom: 16 }} extra={
         <Space wrap>
           <MapsMenu key={`maps-${id}`} id={id} onAdded={reload} />
           <WebsiteMenus id={id} website={lead.website} onAdded={reload} />
@@ -292,7 +298,7 @@ export default function LeadDetail() {
         );
       })}
 
-      <Card size="small" title="样稿与文案" extra={reviewedAnalyses.length > 0 && (
+      <Card id="outreach-content" size="small" title="样稿与文案" extra={reviewedAnalyses.length > 0 && (
         <Space>
           <Form layout="inline" onFinish={(v) => api(`/api/leads/${id}/content`, json({ kind: "sample_partial", analysis_id: reviewedAnalyses[0].id, section: v.section, item_indexes: v.n ? Array.from({ length: v.n }, (_, i) => i) : undefined })).then(reload).catch(err)}>
             <Form.Item name="section" initialValue="Sample section"><Input style={{ width: 160 }} /></Form.Item>
@@ -323,6 +329,7 @@ export default function LeadDetail() {
           </Card>
         ))}
       </Card>
+      <PrepareOutreach open={prepareOpen} leadIds={[id]} returnTo={back} onClose={() => setPrepareOpen(false)} onChanged={() => reload()} />
     </div></ConfigProvider>
   );
 }

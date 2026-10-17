@@ -8,14 +8,16 @@ import { channelLabel } from "@/lib/format";
 
 type Task = { id: string; lead_id: string; eligibility_id: string; channel: string; status: string };
 type Eligibility = { id: string; channel: string; contact_ref?: string | null };
-export default function SocialOutreach({ tasks, name, onChanged }: { tasks: Task[]; name: (id: string) => string; onChanged: () => Promise<void> }) {
+export default function SocialOutreach({ tasks, name, onChanged, focusTaskId }: { tasks: Task[]; name: (id: string) => string; onChanged: () => Promise<void>; focusTaskId?: string }) {
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [deliveries, setDeliveries] = useState<SocialDelivery[]>([]);
   const [previews, setPreviews] = useState<SocialDelivery[]>([]);
   const [selected, setSelected] = useState<React.Key[]>([]);
+  useEffect(() => { if (focusTaskId) setSelected([focusTaskId]); }, [focusTaskId]);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
   const [reconciling, setReconciling] = useState<SocialDelivery>();
   const [reconcileForm] = Form.useForm();
   const [binding, setBinding] = useState<Conversation>();
@@ -28,7 +30,7 @@ export default function SocialOutreach({ tasks, name, onChanged }: { tasks: Task
   }, []);
   useEffect(() => { refresh().catch((e) => message.error(e.message)); const timer = setInterval(() => { refresh().catch(() => {}); onChanged().catch(() => {}); }, 5000); return () => clearInterval(timer); }, [refresh, onChanged]);
   const act = async (work: () => Promise<void>) => {
-    setBusy(true); try { await work(); await refresh(); await onChanged(); } catch (e) { message.error((e as Error).message); } finally { setBusy(false); }
+    setBusy(true); setError(undefined); try { await work(); await refresh(); await onChanged(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
   const candidates = tasks.filter((t) => conversations.some((c) => replyCandidates([t], c, accounts.find((a) => a.id === c.account_id)).length));
   const previewTask = async (task: Task) => {
@@ -37,10 +39,11 @@ export default function SocialOutreach({ tasks, name, onChanged }: { tasks: Task
     return api<SocialDelivery>("/api/outreach/preview", json({ task_id: task.id, conversation_id: choices[0].id }));
   };
   return <>
+    {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     <Typography.Paragraph>Facebook / Instagram 支持已收到消息的普通文字回复。先核对会话并关联门店准入，再创建或恢复对应任务；公开主页不能直接发送。<a href="/settings">管理发送账号</a>。</Typography.Paragraph>
     {!accounts.length && <Alert type="info" message="尚未添加发送账号，可先在设置中建立账号，授权以后补齐。" style={{ marginBottom: 12 }} />}
     <Typography.Title level={5}>收到的会话</Typography.Title>
-    <Table<Conversation> size="small" rowKey="id" dataSource={conversations} pagination={{ pageSize: 10 }} columns={[
+    <Table<Conversation> size="small" rowKey="id" dataSource={focusTaskId ? conversations.filter((c) => !c.lead_id || tasks.some((t) => t.lead_id === c.lead_id)) : conversations} pagination={{ pageSize: 10 }} columns={[
       { title: "发送账号", render: (_, c) => accounts.find((a) => a.id === c.account_id)?.label || c.account_id },
       { title: "对方", render: (_, c) => <>{c.lead_id ? name(c.lead_id) : "待关联门店"}<br /><Typography.Text type="secondary">{c.recipient_id}</Typography.Text></> },
       { title: "最近消息", dataIndex: "last_message", ellipsis: true },

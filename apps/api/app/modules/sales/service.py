@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.content import service as content_service
 from app.modules.content.models import ContentPiece
+from app.modules.leads.models import Lead
 from app.modules.sales.models import (
     Channel,
     ChannelEligibility,
@@ -40,6 +41,7 @@ def now() -> datetime:
 
 
 def upsert_eligibility(db: Session, lead_id: uuid.UUID, data: dict, by: str) -> ChannelEligibility:
+    db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
     elig = Eligibility(data["eligibility"])
     if elig == Eligibility.allowed and (not (data.get("evidence") or "").strip() or not data.get("rule_version")):
         raise SalesError("eligibility=allowed 必须提供证据与规则版本")
@@ -99,8 +101,9 @@ def check_can_contact(db: Session, elig: ChannelEligibility, content: ContentPie
 
 
 def create_task(
-    db: Session, lead_id: uuid.UUID, eligibility_id: uuid.UUID, content_id: uuid.UUID, by: str
+    db: Session, lead_id: uuid.UUID, eligibility_id: uuid.UUID, content_id: uuid.UUID, by: str, *, commit: bool = True
 ) -> ManualTask:
+    db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
     elig = db.get(ChannelEligibility, eligibility_id)
     content = db.get(ContentPiece, content_id)
     if elig is None or content is None or elig.lead_id != lead_id:
@@ -126,7 +129,10 @@ def create_task(
         created_by=by,
     )
     db.add(t)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(t)
     return t
 
@@ -147,6 +153,7 @@ def _recheck_or_pause(db: Session, t: ManualTask) -> None:
 
 
 def open_task(db: Session, t: ManualTask, by: str) -> ManualTask:
+    db.scalar(select(Lead).where(Lead.id == t.lead_id).with_for_update())
     db.refresh(t, with_for_update=True)
     check_gmail_in_flight(db, t)
     if t.status not in (TaskStatus.pending, TaskStatus.opened):
@@ -174,6 +181,7 @@ def check_gmail_in_flight(db: Session, t: ManualTask) -> None:
 
 
 def record_sent(db: Session, t: ManualTask, sent_at: datetime, by: str, notes: str | None) -> ManualTask:
+    db.scalar(select(Lead).where(Lead.id == t.lead_id).with_for_update())
     db.refresh(t, with_for_update=True)
     check_gmail_in_flight(db, t)
     if t.status != TaskStatus.opened:
@@ -192,6 +200,7 @@ def record_sent(db: Session, t: ManualTask, sent_at: datetime, by: str, notes: s
 
 
 def cancel_task(db: Session, t: ManualTask, reason: str) -> ManualTask:
+    db.scalar(select(Lead).where(Lead.id == t.lead_id).with_for_update())
     db.refresh(t, with_for_update=True)
     check_gmail_in_flight(db, t)
     if t.status in (TaskStatus.sent_manual, TaskStatus.sent_email, TaskStatus.sent_social):
@@ -205,6 +214,8 @@ def cancel_task(db: Session, t: ManualTask, reason: str) -> ManualTask:
 
 def resume_task(db: Session, t: ManualTask, by: str, reason: str) -> ManualTask:
     """暂停后由负责人明确决定恢复；恢复时重新复核。"""
+    db.scalar(select(Lead).where(Lead.id == t.lead_id).with_for_update())
+    db.refresh(t, with_for_update=True)
     if t.status != TaskStatus.paused:
         raise SalesError("只有暂停的任务可恢复")
     t.status = TaskStatus.pending
@@ -219,11 +230,11 @@ def resume_task(db: Session, t: ManualTask, by: str, reason: str) -> ManualTask:
 
 
 def record_event(db: Session, lead_id: uuid.UUID, data: dict, by: str) -> tuple[Event, bool]:
-    from app.modules.leads.models import Lead
-
     db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
     existing = db.scalar(select(Event).where(Event.event_key == data["event_key"]))
     if existing is not None:
+        if existing.lead_id != lead_id:
+            raise SalesError("事件键已用于其他客户，请重新生成事件键")
         return existing, False
     kind = EventKind(data["kind"])
     channel = Channel(data["channel"]) if data.get("channel") else None
