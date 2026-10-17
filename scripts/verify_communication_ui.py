@@ -55,7 +55,7 @@ async def handle(route):
         task = {"id": TASK, "lead_id": LEAD, "eligibility_id": "eligibility", "content_id": "content", "channel": "email", "status": "pending", "status_reason": None, "execution_mode": "manual", "assigned_to": "ui-test", "follow_up_at": None, "sent_at": None, "preparation_group_id": body["group_id"]}
         result = {"items": [{"draft_id": DRAFT, "task_id": TASK, "reused": False}]}
     elif path == "/api/communication/overview":
-        result = {"total": 1, "items": [{"id": LEAD, "name": "Alpha Restaurant", "postcode": "AB1", "progress": context()["progress"]}]}
+        result = {"total": 1, "items": [{"id": LEAD, "name": "Alpha Restaurant", "postcode": "AB1", "progress": context()["progress"]}]} if task else {"total": 0, "items": []}
     elif path == f"/api/communication/leads/{LEAD}":
         result = context()
     elif path == f"/api/communication/activity/{LEAD}":
@@ -81,9 +81,17 @@ async def main():
         page = await browser.new_page(viewport={"width": 1680, "height": 1100})
         page.on("pageerror", lambda e: errors.append(str(e)))
         await page.route("**/api/**", handle)
+        await page.goto("http://localhost:3000/tasks")
+        await expect(page.get_by_text("暂无可执行的触达任务。请先在批次与线索中准备并创建任务，或调整当前筛选。", exact=True)).to_be_visible()
+        await expect(page.get_by_text("Alpha Restaurant", exact=True)).to_have_count(0)
+        await expect(page.get_by_role("button", name="准备触达", exact=True)).to_have_count(0)
+        await page.goto(f"http://localhost:3000/tasks?lead={LEAD}")
+        await expect(page.get_by_text("这家门店尚未发起触达，准备草稿请在名单中继续处理。", exact=True)).to_be_visible()
+        await page.screenshot(path=str(output / "d60-communication-empty.png"), full_page=True)
+        assert not any(method == "POST" for method, _, _ in requests)
         await page.goto("http://localhost:3000/leads?batch=%E6%B5%8B%E8%AF%95&type=1")
         await expect(page.get_by_text("Alpha Restaurant", exact=True)).to_be_visible()
-        await page.get_by_role("button", name="准备触达", exact=True).click()
+        await page.get_by_role("button", name="准备触达", exact=True).first.click()
         await page.get_by_role("button", name="检查并保存草稿").click()
         await expect(page.get_by_text("待补 1 项", exact=True)).to_be_visible()
         await page.get_by_role("button", name="创建就绪任务（1）").click()

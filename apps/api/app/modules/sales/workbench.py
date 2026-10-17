@@ -171,13 +171,7 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
             .order_by(Preparation.created_at.desc())
         )
     )
-    events = list(
-        db.scalars(
-            select(Event)
-            .where(Event.lead_id.in_(identities), Event.kind == EventKind.reply)
-            .order_by(Event.recorded_at.desc())
-        )
-    )
+    events = list(db.scalars(select(Event).where(Event.lead_id.in_(identities)).order_by(Event.recorded_at.desc())))
     suppressed = set(
         db.scalars(
             select(Suppression.lead_id).where(
@@ -185,10 +179,11 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
             )
         )
     )
+    conversation_ids = set(db.scalars(select(Conversation.lead_id).where(Conversation.lead_id.in_(identities))))
     for identity in identities:
         ts = [t for t in tasks if t.lead_id == identity]
         ds = [d for d in drafts if d.lead_id == identity]
-        reply = next((e for e in events if e.lead_id == identity), None)
+        reply = next((e for e in events if e.lead_id == identity and e.kind == EventKind.reply), None)
         sent = next((t for t in ts if t.status in SENT), None)
         active = next((t for t in ts if t.status in service.OPEN_STATUSES), None)
         state = "not_started"
@@ -202,6 +197,8 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
             state = "waiting_reply"
         elif ds:
             state = "preparing"
+        elif ts or identity in conversation_ids or any(e.lead_id == identity for e in events):
+            state = "recorded"
         selected_task = active or sent
         result[identity] = {
             "status": state,
@@ -389,7 +386,19 @@ def overview(
     db: Session = Depends(get_db),
 ):
     page, page_size = max(page, 1), min(max(page_size, 1), 100)
-    query = select(Lead)
+    task_leads = select(ManualTask.lead_id)
+    event_leads = select(Event.lead_id)
+    conversation_leads = select(Conversation.lead_id).join(ChannelAccount, Conversation.account_id == ChannelAccount.id)
+    if channel:
+        task_leads = task_leads.where(ManualTask.channel == channel)
+        event_leads = event_leads.where(Event.channel == channel)
+        conversation_leads = conversation_leads.where(ChannelAccount.platform == channel.value)
+    if assigned_to:
+        task_leads = task_leads.where(func.coalesce(ManualTask.assigned_to, ManualTask.created_by) == assigned_to)
+        membership = or_(Lead.id.in_(task_leads))
+    else:
+        membership = or_(Lead.id.in_(task_leads), Lead.id.in_(event_leads), Lead.id.in_(conversation_leads))
+    query = select(Lead).where(membership)
     if batch_key:
         batch = db.scalar(select(Batch).where(Batch.batch_key == batch_key))
         if not batch:
@@ -401,17 +410,6 @@ def overview(
         query = query.where(
             Lead.id.in_(select(ManualTask.lead_id).where(ManualTask.preparation_group_id == preparation_group))
         )
-    if channel or assigned_to:
-        tq = select(ManualTask.lead_id)
-        dq = select(Preparation.lead_id).where(Preparation.status == "draft")
-        if channel:
-            tq, dq = tq.where(ManualTask.channel == channel), dq.where(Preparation.channel == channel.value)
-        if assigned_to:
-            tq, dq = (
-                tq.where(func.coalesce(ManualTask.assigned_to, ManualTask.created_by) == assigned_to),
-                dq.where(Preparation.assigned_to == assigned_to),
-            )
-        query = query.where(or_(Lead.id.in_(tq), Lead.id.in_(dq)))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = list(db.scalars(query.order_by(Lead.name, Lead.id).offset((page - 1) * page_size).limit(page_size)))
     states = progress(db, [lead.id for lead in rows])

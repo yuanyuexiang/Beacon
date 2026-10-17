@@ -7,7 +7,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import dayjs from "dayjs";
 import { api, json } from "@/lib/api";
 import { useOperator } from "@/lib/auth";
-import { Assignee, CHANNELS, CommunicationTask, Contact, Draft, LeadContext, MODES, PROGRESS, Progress, safeReturnTo } from "@/lib/communication";
+import { Assignee, CHANNELS, CommunicationTask, Contact, LeadContext, MODES, PROGRESS, Progress, safeReturnTo } from "@/lib/communication";
 import { channelLabel, label } from "@/lib/format";
 import { HeroBand } from "@/components/ui";
 import PrepareOutreach from "@/components/PrepareOutreach";
@@ -45,8 +45,7 @@ function TasksInner() {
   const [success, setSuccess] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [prepare, setPrepare] = useState(false);
-  const [savedDrafts, setSavedDrafts] = useState<Draft[]>([]);
-  const [purpose, setPurpose] = useState<"initial" | "followup">("initial");
+  const [unstarted, setUnstarted] = useState(false);
   const [manual, setManual] = useState<ManualPreview>();
   const [confirmed, setConfirmed] = useState(false);
   const [apiTask, setApiTask] = useState<CommunicationTask>();
@@ -60,7 +59,7 @@ function TasksInner() {
   const listRequest = useRef(0);
   const navigate = useCallback((patch: Record<string, string | undefined>) => { const params = new URLSearchParams(sp.toString()); Object.entries(patch).forEach(([key, value]) => value ? params.set(key, value) : params.delete(key)); router.replace(`/tasks?${params}`, { scroll: false }); }, [router, sp]);
   const refreshList = useCallback(async () => { const request = ++listRequest.current; const params = new URLSearchParams({ page: String(page) }); if (batch) params.set("batch_key", batch); if (channel) params.set("channel", channel); if (assigned) params.set("assigned_to", assigned); if (query) params.set("q", query); if (group) params.set("preparation_group", group); const result = await api<{ items: Customer[]; total: number }>(`/api/communication/overview?${params}`); if (request === listRequest.current) { setRows(result.items); setTotal(result.total); } }, [page, batch, channel, assigned, query, group]);
-  const refreshContext = useCallback(async () => { const request = ++contextRequest.current; if (!leadId) { setContext(null); setActivity(EMPTY_ACTIVITY); return; } const [data, history] = await Promise.all([api<LeadContext>(`/api/communication/leads/${leadId}`), api<Activity>(`/api/communication/activity/${leadId}`)]); if (request === contextRequest.current) { setContext(data); setActivity(history); } }, [leadId]);
+  const refreshContext = useCallback(async () => { const request = ++contextRequest.current; if (!leadId) { setContext(null); setUnstarted(false); setActivity(EMPTY_ACTIVITY); return; } const [data, history] = await Promise.all([api<LeadContext>(`/api/communication/leads/${leadId}`), api<Activity>(`/api/communication/activity/${leadId}`)]); if (request === contextRequest.current) { const started = data.tasks.length > 0 || history.timeline.length > 0 || history.conversations.length > 0; setContext(started ? data : null); setUnstarted(!started); setActivity(started ? history : EMPTY_ACTIVITY); } }, [leadId]);
   const refresh = useCallback(async () => { await Promise.all([refreshList(), refreshContext()]); }, [refreshList, refreshContext]);
   useEffect(() => { api<{ batch_key: string }[]>("/api/batches").then(setBatches).catch((e) => setError(e.message)); api<Assignee[]>("/api/communication/assignees").then(setOwners).catch((e) => setError(e.message)); }, []);
   useEffect(() => { refreshList().catch((e) => setError(e.message)); }, [refreshList]);
@@ -75,7 +74,7 @@ function TasksInner() {
   const openManual = async (task: CommunicationTask) => { const value = await api<ManualPreview>(`/api/communication/tasks/${task.id}/manual-open`, { method: "POST" }); setManual(value); sentForm.resetFields(); setConfirmed(false); navigate({ task: task.id }); };
   const rename = (id: string) => context?.lead.id === id ? context.lead.name : rows.find((r) => r.id === id)?.name || id;
   return <>
-    <HeroBand kicker="COMMUNICATION" title="触达任务与回复" subtitle="从名单继续准备、执行与跟进；客户、渠道、任务和返回位置自动保留。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回来源页面</Button></Link><Button readOnlySafe onClick={() => refresh().catch((e) => setError(e.message))}>刷新进展</Button><Button readOnlySafe onClick={() => api<Record<string, string>[]>("/api/suppressions").then(setSuppression).catch((e) => setError(e.message))}>抑制名单</Button></Space>} />
+    <HeroBand kicker="COMMUNICATION" title="触达任务与回复" subtitle="从名单创建触达任务后，在这里执行、查看回复与继续跟进。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回来源页面</Button></Link><Button readOnlySafe onClick={() => refresh().catch((e) => setError(e.message))}>刷新进展</Button><Button readOnlySafe onClick={() => api<Record<string, string>[]>("/api/suppressions").then(setSuppression).catch((e) => setError(e.message))}>抑制名单</Button></Space>} />
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     {success && <Alert type="success" showIcon message={success} style={{ marginBottom: 12 }} />}
     <Space wrap style={{ marginBottom: 16 }}>
@@ -89,13 +88,12 @@ function TasksInner() {
       <Col xs={24} xl={6}><Card size="small" title={`客户 · ${total}`}>
         <Table<Customer> rowKey="id" size="small" dataSource={rows} pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: (value) => navigate({ page: String(value) }) }} rowClassName={(r) => r.id === leadId ? "communication-selected" : ""} onRow={(r) => ({ onClick: () => navigate({ lead: r.id, task: undefined, draft: undefined }) })} columns={[{ title: "客户与进展", render: (_, r) => <a onClick={() => navigate({ lead: r.id, task: r.progress.task_id || undefined, draft: r.progress.draft_id || undefined })}><b>{r.name}</b><br /><Tag color={r.progress.status === "suppressed" ? "red" : r.progress.status === "replied" ? "green" : "default"}>{PROGRESS[r.progress.status] || r.progress.status}</Tag><Typography.Text type="secondary">{r.postcode}</Typography.Text></a> }]} />
       </Card></Col>
-      <Col xs={24} xl={12}><Card size="small" title={context?.lead.name || "选择客户"} extra={context && <Button type="primary" onClick={() => { setSavedDrafts([]); setPurpose("initial"); setPrepare(true); }}>准备触达</Button>}>
-        {!context ? <Empty description="选择左侧客户后继续；跳转过来的任务会自动定位。" /> : <>
+      <Col xs={24} xl={12}><Card size="small" title={context?.lead.name || "选择客户"}>
+        {!context ? <Empty description={unstarted ? "这家门店尚未发起触达，准备草稿请在名单中继续处理。" : "暂无可执行的触达任务。请先在批次与线索中准备并创建任务，或调整当前筛选。"}><Link href={back}>前往批次与线索</Link></Empty> : <>
           <Tag color={context.progress.status === "suppressed" ? "red" : "blue"}>{PROGRESS[context.progress.status]}</Tag>
           <Tabs activeKey={tab} onChange={(value) => navigate({ tab: value })} items={[
             { key: "tasks", label: "待办任务", children: <>
-              {!!context.drafts?.length && <Alert type="info" showIcon message={`有 ${context.drafts.length} 份准备草稿，缺项和选择已保存`} action={<Button onClick={() => { setSavedDrafts((context.drafts || []).filter((d) => !sp.get("draft") || d.id === sp.get("draft"))); setPurpose("initial"); setPrepare(true); }}>继续准备</Button>} style={{ marginBottom: 12 }} />}
-              {!tasks.length ? <Empty description="尚无对应任务，可先准备触达并保存草稿。" /> : tasks.map((t) => <Card key={t.id} size="small" style={{ marginBottom: 12, borderColor: selectedTask?.id === t.id ? "#cf010e" : undefined }} title={<Space wrap><span>{channelLabel(t.channel)}</span><Tag>{label(t.status)}</Tag><Typography.Text type="secondary">{t.execution_mode === "manual" ? "人工执行" : t.execution_mode === "gmail" ? "Gmail 接口" : "已授权社媒会话"}</Typography.Text></Space>}>
+              {!tasks.length ? <Empty description="当前筛选下没有任务，可查看客户会话和发送记录。" /> : tasks.map((t) => <Card key={t.id} size="small" style={{ marginBottom: 12, borderColor: selectedTask?.id === t.id ? "#cf010e" : undefined }} title={<Space wrap><span>{channelLabel(t.channel)}</span><Tag>{label(t.status)}</Tag><Typography.Text type="secondary">{t.execution_mode === "manual" ? "人工执行" : t.execution_mode === "gmail" ? "Gmail 接口" : "已授权社媒会话"}</Typography.Text></Space>}>
                 <Typography.Paragraph type="secondary">负责人：{t.assigned_to || "未分配"}{t.follow_up_at ? ` · 跟进提醒：${new Date(t.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
                 {t.status_reason && <Alert type="warning" message={t.status_reason} style={{ marginBottom: 12 }} />}
                 {inflight(t) && <Alert type="info" message="已有接口发送记录，请先核对排队、发送或未知结果，避免人工重复发送。" style={{ marginBottom: 12 }} />}
@@ -119,7 +117,7 @@ function TasksInner() {
                   <Space wrap align="start"><Form.Item name="kind" label="结果" rules={[{ required: true }]}><Select style={{ width: 150 }} options={[{ value: "reply", label: "客户已回复" }, { value: "reject", label: "拒绝联系" }, { value: "unsubscribe", label: "退订" }, { value: "bounce", label: "退信／无效" }, { value: "note", label: "沟通备注" }]} /></Form.Item><Form.Item name="channel" label="渠道"><Select allowClear style={{ width: 160 }} options={CHANNELS} /></Form.Item><Form.Item name="intent" label="客户意向"><Select allowClear style={{ width: 150 }} options={[{ value: "positive", label: "有兴趣" }, { value: "quote", label: "希望报价" }, { value: "later", label: "稍后联系" }, { value: "no", label: "无意向" }, { value: "unknown", label: "待明确" }]} /></Form.Item></Space>
                   <Form.Item name="occurred_at" label="实际回复时间（可选）"><DatePicker showTime /></Form.Item><Form.Item name="contact_ref" label="对应联系值（退信或联系值抑制时填写）"><Input /></Form.Item><Form.Item name="summary" label="摘要／约定的下一步"><Input.TextArea rows={2} maxLength={1500} /></Form.Item><Button type="primary" htmlType="submit" loading={busy}>记录沟通结果</Button>
                 </Form>
-                <Button onClick={() => { setSavedDrafts([]); setPurpose("followup"); setPrepare(true); }}>人工准备下一次跟进</Button><Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>已有未完成任务会复用；跟进时间只作提醒，不会自动发送。</Typography.Paragraph>
+                <Button onClick={() => { setPrepare(true); }}>人工准备下一次跟进</Button><Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>已有未完成任务会复用；跟进时间只作提醒，不会自动发送。</Typography.Paragraph>
               </Card>
             </> },
             { key: "records", label: "发送记录", children: <>
@@ -133,13 +131,13 @@ function TasksInner() {
           <Typography.Paragraph>{context.lead.address} {context.lead.postcode}</Typography.Paragraph>{context.lead.website && <p><a href={context.lead.website} target="_blank" rel="noreferrer">查看官网</a></p>}
           <Space wrap><Link href={`/leads/${context.lead.id}?returnTo=${encodeURIComponent(back)}`}>完整线索详情</Link><Link href={`/leads/${context.lead.id}?returnTo=${encodeURIComponent(back)}#menu-files`}>补充／核对菜单</Link></Space>
           <Typography.Title level={5}>已发现的联系方式</Typography.Title>
-          {context.contacts.length ? context.contacts.map((e) => <div key={e.id} style={{ padding: "8px 0", borderBottom: "1px solid #eee" }}><b>{channelLabel(e.channel, e.contact_ref)}</b><p style={{ overflowWrap: "anywhere", margin: "4px 0" }}>{e.contact_ref || "未填写"}</p><Tag color={e.suppressed ? "red" : e.eligibility === "allowed" ? "green" : "default"}>{e.suppressed ? "已抑制" : e.eligibility === "allowed" ? "准入允许" : "准入待核对"}</Tag><Button size="small" onClick={() => setContact(e)}>核对准入</Button></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无联系方式，进入准备触达补充" />}
+          {context.contacts.length ? context.contacts.map((e) => <div key={e.id} style={{ padding: "8px 0", borderBottom: "1px solid #eee" }}><b>{channelLabel(e.channel, e.contact_ref)}</b><p style={{ overflowWrap: "anywhere", margin: "4px 0" }}>{e.contact_ref || "未填写"}</p><Tag color={e.suppressed ? "red" : e.eligibility === "allowed" ? "green" : "default"}>{e.suppressed ? "已抑制" : e.eligibility === "allowed" ? "准入允许" : "准入待核对"}</Tag><Button size="small" onClick={() => setContact(e)}>核对准入</Button></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无联系方式，请在线索详情补充" />}
           <Typography.Title level={5}>菜单问题依据</Typography.Title>{context.analyses.length ? context.analyses.map((a) => <Typography.Paragraph key={a.id}>已审核 v{a.version}：{a.facts.join("；")}</Typography.Paragraph>) : <Typography.Paragraph type="secondary">还没有已审核、已确认的问题，准备抽屉会提示补齐，不能虚构营销理由。</Typography.Paragraph>}
           <Typography.Title level={5}>文案与审批</Typography.Title>{context.contents.map((c) => <p key={c.id}>文案 v{c.version} · <Tag color={c.approved ? "green" : "default"}>{c.approved ? "审批有效" : "需核对／审批"}</Tag></p>)}
         </>}
       </Card></Col>
     </Row>
-    <PrepareOutreach savedDrafts={savedDrafts} open={prepare} leadIds={leadId ? [leadId] : []} batchKey={batch} returnTo={back} initialChannel={channel || context?.drafts?.[0]?.channel || "email"} purpose={purpose} onClose={() => { setPrepare(false); refresh().catch((e) => setError(e.message)); }} onChanged={() => refresh().catch((e) => setError(e.message))} />
+    <PrepareOutreach open={prepare} leadIds={leadId ? [leadId] : []} batchKey={batch} returnTo={back} initialChannel={channel || context?.drafts?.[0]?.channel || "email"} purpose="followup" onClose={() => { setPrepare(false); refresh().catch((e) => setError(e.message)); }} onChanged={() => refresh().catch((e) => setError(e.message))} />
     <Modal title="人工执行 · 打开平台不等于已发送" open={!!manual} onCancel={() => setManual(undefined)} footer={null} width={720}>
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       {manual && <><Alert type="info" showIcon message="复制已审批文案，到平台人工发送；实际发送后再回填时间。" /><Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginTop: 16 }}>{manual.text}</Typography.Paragraph><Space><Button disabled={busy} onClick={() => act(async () => { const fresh = await api<ManualPreview>(`/api/communication/tasks/${manual.task_id}/manual-open`, { method: "POST" }); setManual(fresh); await navigator.clipboard.writeText(fresh.text); setSuccess("已复制已审批文案，尚未记录为发送"); })}>复制已审批文案</Button><a href={manual.url} target="_blank" rel="noreferrer">打开 {channelLabel(manual.channel)} 联系入口 ↗</a></Space>

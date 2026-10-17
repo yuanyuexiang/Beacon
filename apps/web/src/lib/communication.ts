@@ -1,5 +1,5 @@
 export type Progress = { status: string; task_id?: string | null; draft_id?: string | null };
-export const PROGRESS: Record<string, string> = { not_started: "未准备", preparing: "准备中", pending: "待执行", waiting_reply: "等待回复", replied: "已回复", paused: "已暂停", suppressed: "已抑制" };
+export const PROGRESS: Record<string, string> = { recorded: "已有沟通记录", not_started: "未准备", preparing: "准备中", pending: "待执行", waiting_reply: "等待回复", replied: "已回复", paused: "已暂停", suppressed: "已抑制" };
 export const CHANNELS = [{ value: "email", label: "Gmail／邮箱" }, { value: "tiktok", label: "TikTok" }, { value: "linkedin", label: "LinkedIn" }, { value: "facebook", label: "Facebook" }, { value: "instagram", label: "Instagram" }];
 export const MODES = [{ value: "manual", label: "人工执行" }, { value: "gmail", label: "Gmail 接口" }, { value: "social", label: "已授权 FB／INS 会话" }];
 export type Contact = { id: string; channel: string; contact_ref: string | null; contact_source: string | null; contact_usable: string; eligibility: string; rule_version?: string | null; evidence?: string | null; review_due_at?: string | null; suppressed: boolean };

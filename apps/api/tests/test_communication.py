@@ -32,6 +32,38 @@ def test_incomplete_draft_survives_and_reuses_without_task(client, db):
     assert client.get(f"/api/tasks?lead_id={identity}").json() == []
     assert client.get(f"/api/communication/leads/{identity}").json()["progress"]["status"] == "preparing"
     assert client.get("/api/leads").json()[0]["communication_progress"]["status"] == "preparing"
+    for query in ["", "?channel=email", "?assigned_to=tester", "?batch_key=b1"]:
+        assert client.get(f"/api/communication/overview{query}").json() == {"total": 0, "items": []}
+
+
+def test_overview_only_contains_tasks_or_communication_and_filters_before_pagination(client, db):
+    identity, _, _ = _ready(client, db)
+    _elig(client, identity)
+    draft = prepare(client, identity)["draft"]
+    assert client.get("/api/communication/overview").json()["total"] == 0
+    task = activate(client, draft["id"])
+    assert task["task_id"]  # 尚未发送的任务已经应进入沟通页。
+    upload(client, "b1", "fhrsid,name\n2,Earlier Cafe\n3,Another Raw Lead\n")
+    other = next(x["id"] for x in client.get("/api/leads").json() if x["name"] == "Earlier Cafe")
+    client.post(
+        f"/api/leads/{other}/events",
+        json={
+            "event_key": "manual:historic",
+            "kind": "note",
+            "channel": "facebook",
+            "payload": {"summary": "已有人工沟通记录"},
+        },
+    )
+    result = client.get("/api/communication/overview?page_size=1").json()
+    assert result["total"] == 2 and len(result["items"]) == 1
+    page2 = client.get("/api/communication/overview?page_size=1&page=2").json()
+    assert page2["total"] == 2 and page2["items"][0]["id"] != result["items"][0]["id"]
+    email = client.get("/api/communication/overview?channel=email").json()
+    assert email["total"] == 1 and email["items"][0]["id"] == identity
+    facebook = client.get("/api/communication/overview?channel=facebook").json()
+    assert facebook["total"] == 1 and facebook["items"][0]["id"] == other
+    assert facebook["items"][0]["progress"]["status"] == "recorded"
+    assert client.get("/api/communication/overview?q=Raw").json()["total"] == 0
 
 
 def test_activate_open_sent_reply_and_suppression(client, db):

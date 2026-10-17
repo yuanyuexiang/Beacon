@@ -41,6 +41,7 @@ function LeadsInner() {
   const [pageSize, setPageSize] = useState(Number(sp.get("pageSize")) || 50);
   const [selectedRows, setSelectedRows] = useState<React.Key[]>([]);
   const [prepareOpen, setPrepareOpen] = useState(false);
+  const [prepareLeadIds, setPrepareLeadIds] = useState<string[] | null>(null);
   const selectionKey = `beacon-list-selection:${me?.id}:${batchKey}`;
   useEffect(() => { try { setSelectedRows(JSON.parse(sessionStorage.getItem(selectionKey) || "[]")); } catch { setSelectedRows([]); } }, [selectionKey]);
   const selectRows = (keys: React.Key[]) => { setSelectedRows(keys); sessionStorage.setItem(selectionKey, JSON.stringify(keys)); };
@@ -215,7 +216,7 @@ function LeadsInner() {
         extra={<>
           <Select style={{ width: 260 }} value={batchKey} disabled={creating || !!busy} onChange={(key) => { setListPage(1); setBatchKey(key); }} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
           <Button type="primary" aria-label="建立名单" icon={<CloudDownloadOutlined />} disabled={!mounted || locked} onClick={() => { setCsvFile(null); setCreateMethod("auto"); generatedName.current = ""; setNewOpen(true); loadAuthorities(); }}>建立名单</Button>
-          <Button type="primary" disabled={!canWrite || !leads.length || creating || !!busy} onClick={() => setPrepareOpen(true)}>准备触达</Button>
+          <Button type="primary" disabled={!canWrite || !leads.length || creating || !!busy} onClick={() => { setPrepareLeadIds(null); setPrepareOpen(true); }}>准备触达</Button>
           <Link href={taskLink({ batch: batchKey, returnTo })}>查看沟通进展</Link>
           <Button danger disabled={!batchKey || locked} onClick={openDelete}>删除批次</Button>
           <Button disabled={!batchKey || locked || !leads.length} onClick={() => { setMode("enrich"); setBuildOpen(true); }}>完善名单</Button>
@@ -249,7 +250,7 @@ function LeadsInner() {
             { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
             { title: "FSA 登记类型", width: 160, render: (_, r) => businessLabel(r.business_type_id, r.business_type_name) },
             { title: "经营类型／Google 核验", width: 170, render: (_, r) => <span title={r.operating_type?.reason}>{({ restaurant: "餐厅", cafe: "咖啡馆", takeaway: "外卖店", pub: "Pub／酒吧", institution: "机构餐饮" } as Record<string, string>)[r.operating_type?.category ?? ""] ?? "待识别"}{r.google_enrichment && <div style={{ color: "#888", fontSize: 12 }}>{({ verified: "官网已核验", review: "Google 待复核", failed: "Google 补充失败" } as Record<string, string>)[r.google_enrichment.status]}</div>}</span> },
-            { title: "沟通进展", width: 120, render: (_, r) => <Link href={taskLink({ lead: r.id, task: r.communication_progress?.task_id, draft: r.communication_progress?.draft_id, batch: batchKey, returnTo })}><Tag color={r.communication_progress?.status === "suppressed" ? "red" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag></Link> },
+            { title: "沟通进展", width: 120, render: (_, r) => ["not_started", "preparing"].includes(r.communication_progress?.status || "not_started") ? <Button type="link" size="small" disabled={!canWrite} onClick={() => { setPrepareLeadIds([r.id]); setPrepareOpen(true); }}>{r.communication_progress?.status === "preparing" ? "继续准备" : "准备触达"}</Button> : <Link href={taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })}><Tag color={r.communication_progress?.status === "suppressed" ? "red" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag></Link> },
             { title: "来源键", dataIndex: "source_key", width: 120 },
             { title: "邮编", dataIndex: "postcode", width: 100 },
             { title: "官网", dataIndex: "website", ellipsis: true, render: (v, r) => (v ? <a href={v} target="_blank" rel="noreferrer"><GlobalOutlined style={{ marginRight: 6, color: "#d97706" }} />{v.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <Link href={`/leads/${r.id}`} title="进入详情页搜索并核对官网">搜索补官网</Link>) },
@@ -259,7 +260,7 @@ function LeadsInner() {
           ]} />
       </Card>
 
-      <PrepareOutreach open={prepareOpen} leadIds={(leads.some((l) => selectedRows.includes(l.id)) ? leads.filter((l) => selectedRows.includes(l.id)) : filtered).map((l) => l.id)} batchKey={batchKey} returnTo={returnTo} onClose={() => { setPrepareOpen(false); loadLeads(batchKey); }} onChanged={() => loadLeads(batchKey)} />
+      <PrepareOutreach open={prepareOpen} leadIds={prepareLeadIds || (leads.some((l) => selectedRows.includes(l.id)) ? leads.filter((l) => selectedRows.includes(l.id)) : filtered).map((l) => l.id)} batchKey={batchKey} returnTo={returnTo} onClose={() => { setPrepareOpen(false); loadLeads(batchKey); }} onChanged={() => loadLeads(batchKey)} />
       <Modal title="建立名单" forceRender={mounted} open={newOpen} onCancel={() => { if (!creating) setNewOpen(false); }} footer={null} destroyOnHidden maskClosable={false} closable={!creating}>
           <Form name="create-list" form={createForm} layout="vertical" initialValues={{ exclude_awaiting: false, business_type_ids: [1] }} onFinish={createBatch} onValuesChange={(changed, values) => {
             if ("region" in changed && (!values.batch_key || values.batch_key === generatedName.current)) {
