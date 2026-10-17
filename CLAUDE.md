@@ -85,3 +85,5 @@ D58（2026-10-15 用户授权）：设置页可配置客户筛选策略与 Googl
 D59（2026-10-16）：同一工作空间的管理员／业务／只读角色，个人账号与密码、管理员用户管理。旧账号迁移为管理员，登录名固定、密码保留；初始／重置密码首次强制修改。HMAC 会话按数据库版本撤销，权限不信任客户端；最后一位有效管理员受事务锁保护。队列发送前复查确认人权限。迁移 d159a0010001，专项 tests/test_users.py，界面 scripts/verify_users_ui.py 全部模拟 API。无公开注册、邀请邮件或多租户隔离；本地验收前不发布。
 
 D60 名单到沟通工作台：单家／批量准备草稿、严格转换任务、负责人／来源名单／执行方式／提醒、多渠道人工执行、会话回填及沟通进展。见 [操作说明](docs/客户沟通工作台.md)。界面回归 `uv run --project apps/api --extra maps-worker python scripts/verify_communication_ui.py`（模拟 API，不触达）。迁移 head `d160a0010001`；仅本地验收，未发布服务器。
+
+D61 联系方式读取：任务保存独立快照与页面失败原因，区分完成／部分／失败，独立候选门店数；旧数据不能可靠还原时标记未知。当前迁移 head `d161a0010001`。界面 `uv run --project apps/api --extra maps-worker python scripts/verify_contact_read_ui.py`（全模拟、不写真实名单）。仅本地更新，未发布。详见操作手册 D61。

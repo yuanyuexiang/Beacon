@@ -106,3 +106,5 @@ D58：设置页可配置筛选与 Google 按需补充策略；任务冻结版本
 D59 用户与权限：`/account` 个人资料／改密，`/users` 管理员管理用户；管理员／业务／只读，同一工作空间。初始密码强制修改、版本化会话撤销、最后管理员保护。迁移 `d159a0010001`。专项 `cd apps/api && uv run pytest tests/test_users.py tests/test_auth.py tests/test_gmail.py tests/test_outreach.py -q`；界面 `uv run --project apps/api --extra maps-worker python scripts/verify_users_ui.py`（全模拟，无真实账号或外部发送）。详见操作手册 D59；只本地更新，用户确认前不发布。
 
 D60 名单到沟通工作台：单家／批量准备草稿、严格转换任务、负责人／来源名单／执行方式／提醒、多渠道人工执行、会话回填及沟通进展。见 [操作说明](docs/客户沟通工作台.md)。界面回归 `uv run --project apps/api --extra maps-worker python scripts/verify_communication_ui.py`（模拟 API，不触达）。迁移 head `d160a0010001`；仅本地验收，未发布服务器。
+
+D61 联系方式读取：任务保存独立快照与页面失败原因，区分完成／部分／失败，独立候选门店数；旧数据不能可靠还原时标记未知。当前迁移 head `d161a0010001`。界面 `uv run --project apps/api --extra maps-worker python scripts/verify_contact_read_ui.py`（全模拟、不写真实名单）。仅本地更新，未发布。详见操作手册 D61。

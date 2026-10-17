@@ -208,6 +208,7 @@ def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None)
         "pages_ok": sum(1 for p in pages if p["ok"]),
         "pages_failed": sum(1 for p in pages if not p["ok"]),
         "website": lead.website,
+        "page_errors": [{"url": p["url"], "error": p.get("error") or "页面读取失败"} for p in pages if not p["ok"]],
     }
     lead.raw = {**(lead.raw or {}), "contacts_scan": scan}
     return scan

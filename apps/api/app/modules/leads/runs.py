@@ -65,6 +65,7 @@ class BatchJob(UUIDPk, Base):
     status: Mapped[JobStatus] = mapped_column(_enum(JobStatus, "job_status"), default=JobStatus.pending, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error: Mapped[str | None] = mapped_column(Text)
+    contact_result: Mapped[dict | None] = mapped_column(JSONB)
     result_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))  # 例如 analysis id
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -203,9 +204,12 @@ def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
         try:
             if j.step == "contacts":
                 scan = _collect_contacts(db, run, j, scans)
+                j.contact_result = scan
                 if scan["pages_failed"]:
                     j.status = JobStatus.failed
-                    j.error = f"官网有 {scan['pages_failed']} 个页面抓取失败；已保留成功页面的联系方式，可重试"
+                    reason = "部分读取" if scan.get("pages_ok") else "读取失败"
+                    details = "；".join(p["error"] for p in scan.get("page_errors", []))
+                    j.error = f"{reason}：{scan['pages_failed']} 个页面未读取" + (f"；{details}" if details else "")
                 else:
                     j.status, j.error = JobStatus.succeeded, None
                 j.finished_at = datetime.now(UTC)
@@ -229,6 +233,14 @@ def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
             db.rollback()
             j = db.get(BatchJob, j.id)  # type: ignore[assignment]
             assert j is not None
+            if j.step == "contacts":
+                j.contact_result = {
+                    "pages_ok": 0,
+                    "pages_failed": 1,
+                    "found": 0,
+                    "execution_error": True,
+                    "page_errors": [{"error": f"{e.__class__.__name__}: {e}"[:200]}],
+                }
             j.status, j.error = JobStatus.failed, f"{e.__class__.__name__}: {e}"[:2000]
         j.finished_at = datetime.now(UTC)
         db.commit()
@@ -268,7 +280,7 @@ def _collect_contacts(db: Session, run: BatchRun, j: BatchJob, scans: dict[str, 
 def _finalize(db: Session, run: BatchRun) -> BatchRun:
     jobs = db.scalars(select(BatchJob).where(BatchJob.run_id == run.id)).all()
     totals = {s.value: sum(1 for j in jobs if j.status == s) for s in JobStatus}
-    run.totals = totals
+    run.totals = {**totals, **contact_totals(db, jobs)}
     if totals["pending"] or totals["running"]:
         run.status = RunStatus.running
     else:
@@ -277,3 +289,54 @@ def _finalize(db: Session, run: BatchRun) -> BatchRun:
     db.commit()
     db.refresh(run)
     return run
+
+
+def contact_snapshot(db: Session, job: BatchJob, lead: Lead | None = None) -> dict | None:
+    """旧记录只采用发生在这次 job 时间范围内的扫描，避免把后续重试当作历史结果。"""
+    if job.contact_result is not None:
+        return job.contact_result
+    lead = lead if lead is not None else db.get(Lead, job.lead_id)
+    scan = ((lead.raw or {}).get("contacts_scan") if lead else None) or {}
+    try:
+        at = datetime.fromisoformat(scan["at"])
+        if job.started_at and job.finished_at and job.started_at <= at <= job.finished_at:
+            return scan
+    except (KeyError, TypeError, ValueError):
+        pass
+    return None
+
+
+def contact_snapshots(db: Session, jobs: Sequence[BatchJob]) -> dict[uuid.UUID, dict | None]:
+    old_ids = [j.lead_id for j in jobs if j.step == "contacts" and j.contact_result is None]
+    leads = {lead.id: lead for lead in db.scalars(select(Lead).where(Lead.id.in_(old_ids)))} if old_ids else {}
+    return {j.id: contact_snapshot(db, j, leads.get(j.lead_id)) for j in jobs if j.step == "contacts"}
+
+
+def contact_totals(
+    db: Session, jobs: Sequence[BatchJob], snapshots: dict[uuid.UUID, dict | None] | None = None
+) -> dict[str, int]:
+    contacts = [j for j in jobs if j.step == "contacts"]
+    if not contacts:
+        return {}
+    snapshots = snapshots if snapshots is not None else contact_snapshots(db, contacts)
+    counts = dict.fromkeys(
+        ["read_complete", "read_partial", "read_failed", "read_unknown", "no_website", "with_contacts"], 0
+    )
+    for job in contacts:
+        if job.status not in {JobStatus.succeeded, JobStatus.failed}:
+            continue
+        scan = snapshots[job.id]
+        if scan is None or scan.get("execution_error"):
+            counts["read_unknown"] += 1
+            continue
+        if scan.get("found", 0):
+            counts["with_contacts"] += 1
+        if scan.get("pages_failed", 0):
+            counts["read_partial" if scan.get("pages_ok", 0) else "read_failed"] += 1
+        elif scan.get("pages_ok", 0):
+            counts["read_complete"] += 1
+        elif scan.get("website"):
+            counts["read_unknown"] += 1
+        else:
+            counts["no_website"] += 1
+    return counts

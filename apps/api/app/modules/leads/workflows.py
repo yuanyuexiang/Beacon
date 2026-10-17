@@ -224,9 +224,10 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
             if (run.totals or {}).get("failed"):
                 task.results = task.results[: task.step] + [result]
                 db.commit()
+                counts = run.totals or {}
                 raise ValueError(
-                    f"{(run.totals or {})['failed']} 家官网页面未完全读取；"
-                    "成功结果已保留，可以继续使用名单，或只重试失败项"
+                    f"部分读取 {counts.get('read_partial', 0)} 家，读取失败 {counts.get('read_failed', 0)} 家；"
+                    "成功结果已保留，可以继续使用名单，或只重试未完成项"
                 )
         task.results = task.results[: task.step] + [result]
         task.step += 1

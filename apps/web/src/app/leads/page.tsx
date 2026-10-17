@@ -10,7 +10,7 @@ import { api, json } from "@/lib/api";
 import { CheckCircleOutlined, CloudDownloadOutlined, GlobalOutlined, ShopOutlined, UserOutlined } from "@ant-design/icons";
 import { HeroBand, SCREEN_ZH, ScreenTag, StatCard } from "@/components/ui";
 import { label } from "@/lib/format";
-import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, getAllBatchLeads } from "@/lib/list-workflow";
+import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, contactFailureLabel, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
 type Lead = { communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
@@ -41,6 +41,8 @@ function LeadsInner() {
   const [pageSize, setPageSize] = useState(Number(sp.get("pageSize")) || 50);
   const [selectedRows, setSelectedRows] = useState<React.Key[]>([]);
   const [prepareOpen, setPrepareOpen] = useState(false);
+  const [contactRun, setContactRun] = useState<{ totals: Record<string, number>; jobs: { id: string; lead_id: string; step: string; status: string; error: string | null; contact_result?: { page_errors?: { url?: string; error: string }[] } | null }[] } | null>(null);
+  const [contactError, setContactError] = useState<string>();
   const [prepareLeadIds, setPrepareLeadIds] = useState<string[] | null>(null);
   const selectionKey = `beacon-list-selection:${me?.id}:${batchKey}`;
   useEffect(() => { try { setSelectedRows(JSON.parse(sessionStorage.getItem(selectionKey) || "[]")); } catch { setSelectedRows([]); } }, [selectionKey]);
@@ -206,6 +208,13 @@ function LeadsInner() {
       .finally(() => setDelBusy(false));
   };
 
+  useEffect(() => {
+    let current = true;
+    const result = workflow?.results[workflow.steps.indexOf("contacts")];
+    setContactRun(null); setContactError(undefined);
+    if (buildOpen && result?.run_id) api<NonNullable<typeof contactRun>>(`/api/runs/${result.run_id}`).then((value) => { if (current) setContactRun(value); }).catch((e) => { if (current) setContactError(e.message); });
+    return () => { current = false; };
+  }, [buildOpen, workflow]);
   const filtered = useMemo(() => leads.filter((l) => (!businessType || l.business_type_id === businessType) && (!screen || l.screening_class === screen) && (!q || l.name.toLowerCase().includes(q.toLowerCase()) || (l.postcode ?? "").toLowerCase().includes(q.toLowerCase()))), [leads, businessType, screen, q]);
   const stats = useMemo(() => ({ total: leads.length, website: leads.filter((l) => l.website).length, candidate: leads.filter((l) => l.screening_class === "candidate").length, unchecked: leads.filter((l) => l.screening_class === "unchecked").length }), [leads]);
   const run = (name: string, p: Promise<unknown>, done: (r: never) => string) => { setBusy(name); p.then((r) => { message.success(done(r as never)); loadLeads(batchKey); loadBatches(); }).catch(err).finally(() => setBusy(null)); };
@@ -318,7 +327,13 @@ function LeadsInner() {
         {mode === "progress" ? workflow ? <>
           <p>目标名单：<b>{batchKey}</b> · {workflow.kind === "enrich" ? "完善现有门店" : workflow.kind === "append" ? "追加商户" : "建立名单"}</p>
           {workflow.params.authority_name && <p>地区：{workflow.params.authority_name} · 本次数量：{workflow.params.sample_n ?? "全部"}<br />类型：{workflow.params.business_type_ids?.map((id) => businessLabel(id)).join(" / ")}</p>}
-          <Steps direction="vertical" size="small" current={workflow.step} status={workflow.status === "failed" ? "error" : workflow.status === "completed" ? "finish" : "process"} items={workflow.steps.map((stage, i) => ({ title: WORKFLOW_TITLES[stage], description: workflowSummary(stage, workflow.results[i]) }))} />
+          <Steps direction="vertical" size="small" current={workflow.step} status={workflow.status === "failed" ? "error" : workflow.status === "completed" ? "finish" : "process"} items={workflow.steps.map((stage, i) => ({ title: WORKFLOW_TITLES[stage], description: workflowSummary(stage, stage === "contacts" && contactRun ? { totals: contactRun.totals } : workflow.results[i]) }))} />
+          {contactError && <Alert type="warning" message={`读取失败明细暂不可用：${contactError}`} />}
+          {contactRun && <Typography.Paragraph type="secondary">“找到联系方式”包含官网与已有 Overture 候选，不代表已获得邮箱或允许触达。部分读取和读取失败可重试，已记录结果会保留。</Typography.Paragraph>}
+          {contactRun?.jobs.some((j) => j.step === "contacts" && j.status === "failed") && <Collapse style={{ marginTop: 12 }} items={[{ key: "contact-errors", label: "查看未完成门店与具体原因", children: <Table rowKey="id" size="small" pagination={{ pageSize: 5 }} dataSource={contactRun.jobs.filter((j) => j.step === "contacts" && j.status === "failed")} columns={[
+            { title: "门店", render: (_, j) => <Link href={`/leads/${j.lead_id}`}>{leads.find((l) => l.id === j.lead_id)?.name || j.lead_id}</Link> },
+            { title: "失败原因", render: (_, j) => <><div>{contactFailureLabel(j.contact_result?.page_errors?.map((p) => p.error).join("；") || j.error || "")}</div><details><summary>原始记录</summary>{j.contact_result?.page_errors?.length ? j.contact_result.page_errors.map((p, i) => <p key={i} style={{ overflowWrap: "anywhere" }}>{p.url}<br />{p.error}</p>) : <p>{j.error}；历史任务未保存逐页错误时，需重试确认。</p>}</details></> },
+          ]} /> }]} />}
           {workflow.error && <Alert type="warning" showIcon message="部分数据未补齐，不影响名单使用" description={workflow.error.replace(/^ValueError:\s*/, "")} style={{ margin: "16px 0" }} />}
           {workflow.status === "completed" ? <Alert type="success" showIcon message="处理完成" description="请核对门店类型与联系方式，渠道准入仍需逐条确认。" style={{ marginTop: 16 }} /> : workflow.status === "cancelled" ? <Alert type="info" message="任务已结束，已有结果保留" /> : <>
             <p style={{ color: "#6b7280" }}>{workflow.status === "failed" ? "本次补充已停止。关闭面板即可继续操作名单；重试只处理未完成项。" : "关闭面板后本页会继续执行。刷新或离开页面后，可从保存的步骤继续；已完成步骤不重做。"}</p>

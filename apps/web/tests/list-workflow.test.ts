@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ListWorkflow, workflowSummary, workflowUnfinished, getAllBatchLeads, workflowBlocksActions } from "../src/lib/list-workflow";
+import { ListWorkflow, workflowSummary, workflowUnfinished, getAllBatchLeads, workflowBlocksActions, contactFailureLabel } from "../src/lib/list-workflow";
 
 import { api } from "../src/lib/api";
 vi.mock("../src/lib/api", () => ({ api: vi.fn() }));
@@ -42,4 +42,19 @@ it("失败可以重试但不会阻止名单操作", () => {
   expect(workflowBlocksActions({ status: "failed" } as ListWorkflow)).toBe(false);
   expect(workflowUnfinished({ status: "failed" } as ListWorkflow)).toBe(true);
   expect(workflowBlocksActions({ status: "running" } as ListWorkflow)).toBe(true);
+});
+
+
+describe("官网读取统计", () => {
+  it("部分读取和完全失败分开，不把无官网或旧记录当作成功", () => {
+    expect(workflowSummary("contacts", { totals: { read_complete: 36, read_partial: 18, read_failed: 61, with_contacts: 77, no_website: 2, read_unknown: 3, pending: 1, running: 1 } })).toBe("读取完成 36，部分读取 18，读取失败 61，无官网 2，读取情况待确认 3；找到联系方式 77 家；待处理 2");
+  });
+});
+
+
+it("区分网络、网站响应和页面内容问题", () => {
+  expect(contactFailureLabel("ConnectError: SSL UNEXPECTED_EOF")).toContain("SSL");
+  expect(contactFailureLabel("ReadTimeout: timed out")).toContain("超时");
+  expect(contactFailureLabel("HTTP 502（unknown）")).toContain("5xx");
+  expect(contactFailureLabel("HTTP 200（pdf）")).toContain("不是可读取的网页");
 });

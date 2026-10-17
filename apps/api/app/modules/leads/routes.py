@@ -319,6 +319,7 @@ class JobOut(BaseModel):
     attempts: int
     error: str | None
     result_id: uuid.UUID | None
+    contact_result: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -339,9 +340,13 @@ class RunOut(BaseModel):
 
 def _run_out(db: Session, run: runs.BatchRun) -> RunOut:
     out = RunOut.model_validate(run)
-    out.jobs = [
-        JobOut.model_validate(j) for j in db.scalars(select(runs.BatchJob).where(runs.BatchJob.run_id == run.id)).all()
-    ]
+    jobs = list(db.scalars(select(runs.BatchJob).where(runs.BatchJob.run_id == run.id)))
+    out.jobs = [JobOut.model_validate(j) for j in jobs]
+    snapshots = runs.contact_snapshots(db, jobs)
+    out.totals = {**(run.totals or {}), **runs.contact_totals(db, jobs, snapshots)}
+    for job, item in zip(jobs, out.jobs, strict=True):
+        if job.step == "contacts":
+            item.contact_result = snapshots[job.id]
     return out
 
 

@@ -405,3 +405,68 @@ def test_long_email_list_selects_homepage_general_contact(client, db):
         )
         == set()
     )
+
+
+def test_contact_read_categories_snapshots_and_retry_preserve_results(client, db, monkeypatch):
+    import uuid
+
+    from app.modules.leads import runs
+
+    identity = _lead_id(client, db, overture={"matched": True, "phones": ["020 7946 0123"]})
+    upload(client, "b1", "fhrsid,name\n3,Third Restaurant\n")
+    leads = list(db.scalars(select(Lead).order_by(Lead.name)))
+    for i, lead in enumerate(leads):
+        lead.website = f"https://site{i}.example"
+    db.commit()
+    failed_lead = next(lead for lead in leads if str(lead.id) == identity)
+    partial_lead = next(lead for lead in leads if lead.id != failed_lead.id)
+    retrying = False
+
+    def scans(urls):
+        output = {}
+        for lead in leads:
+            bad = not retrying and lead.id in {failed_lead.id, partial_lead.id}
+            pages = [{"url": lead.website, "ok": True, "error": None}]
+            if bad:
+                pages = ([{"url": lead.website, "ok": True, "error": None}] if lead.id == partial_lead.id else []) + [
+                    {"url": lead.website + "/contact", "ok": False, "error": "ConnectError: SSL EOF"}
+                ]
+            contacts_found = (
+                [{"kind": "email", "value": "hello@site.example", "page_url": lead.website}]
+                if lead.id == partial_lead.id
+                else []
+            )
+            output[lead.website] = {"url": lead.website, "pages": pages, "contacts": contacts_found}
+        return output
+
+    monkeypatch.setattr(contacts, "scan_websites", scans)
+    result = client.post("/api/batches/b1/runs", json={"steps": ["contacts"]}).json()
+    assert result["totals"]["read_complete"] == 1
+    assert result["totals"]["read_partial"] == 1
+    assert result["totals"]["read_failed"] == 1
+    assert result["totals"]["with_contacts"] == 2  # 失败官网仍保留 Overture 联系方式。
+    assert result["totals"]["succeeded"] == 1 and result["totals"]["failed"] == 2
+    job = next(j for j in result["jobs"] if j["lead_id"] == str(partial_lead.id))
+    assert job["contact_result"]["page_errors"][0]["error"] == "ConnectError: SSL EOF"
+    # 后续其他任务更新门店摘要，不能改写这次运行的快照。
+    db.refresh(partial_lead)
+    partial_lead.raw = {**(partial_lead.raw or {}), "contacts_scan": {"pages_ok": 10, "pages_failed": 0, "found": 10}}
+    db.commit()
+    assert client.get(f"/api/runs/{result['id']}").json()["totals"]["read_partial"] == 1
+    before = client.get(f"/api/leads/{identity}/eligibility").json()
+    retrying = True
+    retried = client.post(f"/api/runs/{result['id']}/resume", json={}).json()
+    assert retried["totals"]["read_complete"] == 3 and retried["totals"]["read_failed"] == 0
+    assert sorted(j["attempts"] for j in retried["jobs"]) == [1, 2, 2]
+    assert client.get(f"/api/leads/{identity}/eligibility").json() == before
+    # 旧数据缺快照且门店摘要不属于该次运行时，明确标记未知。
+    old = db.get(runs.BatchJob, uuid.UUID(job["id"]))
+    old.contact_result = None
+    db.refresh(partial_lead)
+    partial_lead.raw = {
+        **(partial_lead.raw or {}),
+        "contacts_scan": {"at": "2099-01-01T00:00:00+00:00", "pages_ok": 99},
+    }
+    db.commit()
+    historical = client.get(f"/api/runs/{result['id']}").json()
+    assert historical["totals"]["read_unknown"] == 1 and historical["totals"]["read_complete"] == 2
