@@ -116,14 +116,32 @@ def evaluate(lead: Lead, policy: Policy) -> tuple[ScreeningClass, str, list[str]
         ),
         (
             category == "cafe" or (not known and bool(CAFE_WORDS.search(name))),
-            policy.cafe_action,
-            "官网原文识别为咖啡馆" if known else "名称含咖啡馆／面包店／Deli 词",
+            "review"
+            if category == "cafe"
+            and "food_service" in operation.get("services", [])
+            and policy.cafe_action == "exclude"
+            else policy.cafe_action,
+            (
+                "官网原文识别为咖啡馆（供应餐食，混合经营）"
+                if "food_service" in operation.get("services", [])
+                else "官网原文识别为咖啡馆"
+            )
+            if known
+            else "名称含咖啡馆／面包店／Deli 词",
             ScreeningClass.excluded_cafe,
         ),
         (
             category == "pub" or (not known and bool(PUB_WORDS.search(name))),
-            policy.pub_action,
-            "官网原文识别为 Pub／酒吧" if known else "名称含 Pub／Inn 等词",
+            "review"
+            if category == "pub" and "food_service" in operation.get("services", []) and policy.pub_action == "exclude"
+            else policy.pub_action,
+            (
+                "官网原文识别为 Pub／酒吧（供应餐食，混合经营）"
+                if "food_service" in operation.get("services", [])
+                else "官网原文识别为 Pub／酒吧"
+            )
+            if known
+            else "名称含 Pub／Inn 等词",
             ScreeningClass.excluded_pub,
         ),
     ):

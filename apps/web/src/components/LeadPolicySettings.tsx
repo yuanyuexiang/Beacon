@@ -24,11 +24,11 @@ export default function LeadPolicySettings() {
       <Form.Item name="chain_names" label="连锁名称（输入后回车添加；按完整词组匹配）"><Select mode="tags" tokenSeparators={[",", "，"]} /></Form.Item>
       <Form.Item name="institution_words" label="机构关键词（仅作为线索，可能是门店名称）"><Select mode="tags" tokenSeparators={[",", "，"]} /></Form.Item>
       <Space align="start" wrap>
-        <Form.Item name="google_mode" label="Overture 后的 Google Places 补充"><Select style={{ width: 260 }} options={[{ value: "off", label: "关闭" }, { value: "needed", label: "按需：未查询或已过期（含已有官网）" }, { value: "all", label: "本次名单全部核验（受预算限制）" }]} /></Form.Item>
+        <Form.Item name="google_mode" label="Overture 后的 Google Places 补充"><Select style={{ width: 260 }} options={[{ value: "off", label: "关闭" }, { value: "needed", label: "按需：缺少可靠官网时查询" }, { value: "all", label: "本次名单全部核验（受预算限制）" }]} /></Form.Item>
         <Form.Item name="google_request_limit" label="每个任务最多 API 尝试次数" rules={[{ required: true }]}><InputNumber min={1} max={200} /></Form.Item>
         <Form.Item name="stale_days" label="核验有效天数" rules={[{ required: true }]}><InputNumber min={1} max={365} /></Form.Item>
       </Space>
-      <Alert type="info" message="Google 查询和重试均计入调用上限；未配置密钥时跳过。官网由真实 AI 与官网原文校验，人工官网不覆盖；证据不足在详情页复核。近期待复核项不重复占用按需预算，可在详情页重试或选择全部核验。价格和照片不进入模型。" style={{ marginBottom: 16 }} />
+      <Alert type="info" message="先用 AI 核验已有官网并识别经营类型，已有可靠官网时按需模式不再查询 Google。关闭 Google 只关闭候选查询，不关闭已有官网识别。网络失败待重试、信息不足保留未知，有原文支持的身份冲突才交人工。供应餐食的咖啡馆／Pub 不仅因类型而自动排除。人工结果保留，Google 尝试计入预算，价格和照片不进入模型。" style={{ marginBottom: 16 }} />
       <Button type="primary" htmlType="submit" loading={busy}>保存策略</Button>
     </Form>
   </Card>;

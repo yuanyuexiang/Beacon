@@ -199,7 +199,10 @@ def pages(url: str) -> list[dict]:
         ):
             targets.append(target)
     for index, target in enumerate(targets[:3]):
-        r = homepage if index == 0 else fetch(target)
+        try:
+            r = homepage if index == 0 else fetch(target)
+        except Exception:
+            continue  # 子页面不可读不抹掉首页原文；是否足以判断仍由 AI 和引用校验决定。
         if r.status == 200 and r.kind == "html":
             page_parser = website_menus.Page()
             page_parser.feed(r.body.decode("utf-8", errors="replace"))

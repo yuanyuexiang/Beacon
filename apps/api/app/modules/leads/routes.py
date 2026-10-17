@@ -514,3 +514,27 @@ def auto_screen(batch_key: str, db: Session = Depends(get_db), op: Operator = De
     audit.record(db, op, "auto_screen", "batch", batch.id, after=result)
     db.commit()
     return result
+
+
+@router.post("/leads/{lead_id}/website-review", response_model=LeadOut)
+def review_lead_website(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
+    from app.integrations.google_places import PlacesError
+    from app.modules.leads import places_enrichment, policy
+
+    lead = db.get(Lead, lead_id)
+    if lead is None:
+        raise HTTPException(404, "门店不存在")
+    try:
+        status = places_enrichment.review_one(
+            db, lead, op, policy.current(db), f"single-review:{uuid.uuid4()}", force=True
+        )
+    except PlacesError as exc:
+        db.rollback()
+        places_enrichment._save_status(lead, "retry", str(exc), [])
+    else:
+        if status == "changed":
+            db.rollback()
+            raise HTTPException(409, "核验期间门店资料发生变化，已保留最新人工修改，请刷新后重试")
+    db.commit()
+    db.refresh(lead)
+    return lead

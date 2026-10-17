@@ -7,12 +7,12 @@ export type ListWorkflow = {
 };
 export const workflowBlocksActions = (task: ListWorkflow | null) => !!task && ["pending", "running"].includes(task.status);
 export const workflowUnfinished = (task: ListWorkflow | null) => !!task && !["completed", "cancelled"].includes(task.status);
-export const WORKFLOW_TITLES: Record<string, string> = { pool: "从门店池选入商户", fsa: "获取商户", overture: "补充官网与电话", google: "Google Places 按需补充", screen: "客户筛选策略", contacts: "查找联系方式" };
+export const WORKFLOW_TITLES: Record<string, string> = { pool: "从门店池选入商户", fsa: "获取商户", overture: "补充官网与电话", google: "官网 AI 核验与 Google 补充", screen: "客户筛选策略", contacts: "查找联系方式" };
 export function workflowSummary(stage: string, result?: Record<string, unknown>): string | undefined {
   if (!result) return undefined;
   if (stage === "fsa" || stage === "pool") return `名录 ${result.fetched} 家，已有 ${result.already_in_list ?? 0} 家，剩余可选 ${result.pool} 家，本次选入 ${result.selected} 家（新增 ${result.created}，关联已有 ${result.linked}）`;
   if (stage === "overture") return `匹配 ${result.matched}/${result.leads}，补官网 ${result.website_set}，有电话 ${result.phone_found}`;
-  if (stage === "google") return `官网核验通过 ${result.verified ?? 0}，待复核 ${result.review ?? 0}，失败 ${result.failed ?? 0}${result.note ? `；${result.note}` : ""}`;
+  if (stage === "google") return `官网已核验 ${result.verified ?? 0}，信息不足 ${result.insufficient ?? 0}，待重试 ${result.retry ?? result.failed ?? 0}，AI 不可用 ${result.ai_unavailable ?? 0}，冲突待核对 ${result.conflict ?? result.review ?? 0}${result.note ? `；${result.note}` : ""}`;
   if (stage === "screen") return "按保存的策略预筛，人工确认保留；待复核继续查找联系方式";
   const t = result.totals as Record<string, number> | undefined;
   if (t && stage === "contacts" && "read_complete" in t) return `读取完成 ${t.read_complete}，部分读取 ${t.read_partial ?? 0}，读取失败 ${t.read_failed ?? 0}${t.no_website ? `，无官网 ${t.no_website}` : ""}${t.read_unknown ? `，读取情况待确认 ${t.read_unknown}` : ""}；找到联系方式 ${t.with_contacts ?? 0} 家；待处理 ${(t.pending ?? 0) + (t.running ?? 0)}`;

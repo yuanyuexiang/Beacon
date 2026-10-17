@@ -87,3 +87,5 @@ D59（2026-10-16）：同一工作空间的管理员／业务／只读角色，�
 D60 名单到沟通工作台：单家／批量准备草稿、严格转换任务、负责人／来源名单／执行方式／提醒、多渠道人工执行、会话回填及沟通进展。见 [操作说明](docs/客户沟通工作台.md)。界面回归 `uv run --project apps/api --extra maps-worker python scripts/verify_communication_ui.py`（模拟 API，不触达）。迁移 head `d160a0010001`；仅本地验收，未发布服务器。
 
 D61 联系方式读取：任务保存独立快照与页面失败原因，区分完成／部分／失败，独立候选门店数；旧数据不能可靠还原时标记未知。当前迁移 head `d161a0010001`。界面 `uv run --project apps/api --extra maps-worker python scripts/verify_contact_read_ui.py`（全模拟、不写真实名单）。仅本地更新，未发布。详见操作手册 D61。
+
+D62 官网 AI：已有官网独立核验与经营识别，必要时 Google 回退；保留原文、人工结果和 FSA，失败状态分流，混合餐食服务不单凭 cafe／pub 排除。名单／详情可单家 AI 重试。界面 `uv run --project apps/api --extra maps-worker python scripts/verify_website_review_ui.py`（全模拟）。无需迁移，仅本地更新；见操作手册 D62。

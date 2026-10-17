@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.models import Operator
 from app.integrations import google_places as google
 from app.integrations import research_judge
-from app.modules.leads import google_places, places_enrichment, policy, service, workflows
+from app.modules.leads import google_places, places_enrichment, policy, service, website_review, workflows
 from app.modules.leads.models import Batch, Lead, ScreeningClass
 from tests.test_imports import create_batch, login, upload
 
@@ -109,7 +109,7 @@ def test_google_chunk_saves_only_ids_and_budget_does_not_block(client, db, monke
 
     monkeypatch.setattr(google_places, "_client", lambda *a, **kw: Client())
     result = places_enrichment.advance(db, batch, task)
-    assert result["done"] and result["review"] == 1
+    assert result["done"] and result["ai_unavailable"] == 1
     assert lead.raw["places_enrichment"]["candidate_ids"] == ["abc"]
     assert "Private" not in str(lead.raw)
     task.results = [{}]
@@ -140,7 +140,7 @@ def test_verified_website_preserves_manual_and_type_has_exact_citations(
     lead.raw = {"website_manual": manual}
     db.commit()
     docs = [{"id": "web0", "url": "https://new.example.org", "text": "College Cafe is an independent coffee shop."}]
-    monkeypatch.setattr(places_enrichment.auto_research, "pages", lambda _: docs)
+    monkeypatch.setattr(website_review.auto_research, "pages", lambda _: docs)
 
     class Judge:
         usage = []
@@ -174,9 +174,9 @@ def test_verified_website_preserves_manual_and_type_has_exact_citations(
     assert lead.raw["operating_type"]["category"] == "cafe"
     assert lead.raw["google_places_link"]["place_id"] == "verified"
     assert client.get(f"/api/leads/{lead.id}").json()["operating_type"]["category"] == "cafe"
-    # 未核实的默认名不能自动采用。
+    # Google 名称差异不能推翻已验证的独立官网身份。
     place.displayName.text = "Other company"
-    assert not places_enrichment.verify_website(db, lead, place, db.scalar(select(Operator)))
+    assert places_enrichment.verify_website(db, lead, place, db.scalar(select(Operator)))
 
 
 def test_needed_includes_existing_overture_and_review(client, db):
@@ -186,7 +186,7 @@ def test_needed_includes_existing_overture_and_review(client, db):
     lead.raw = {"places_enrichment": {"status": "verified", "checked_at": datetime.now(UTC).isoformat()}}
     assert not places_enrichment.needed(lead, selected)
     lead.raw = {"places_enrichment": {"status": "review", "checked_at": datetime.now(UTC).isoformat()}}
-    assert not places_enrichment.needed(lead, selected)
+    assert places_enrichment.needed(lead, selected)
 
 
 def test_google_chunk_resume_does_not_repeat_completed_leads(client, db, monkeypatch):
@@ -208,7 +208,7 @@ def test_google_chunk_resume_does_not_repeat_completed_leads(client, db, monkeyp
     one = places_enrichment.advance(db, batch, task)
     assert not one["done"] and len(calls) == 2
     two = places_enrichment.advance(db, batch, task)
-    assert two["done"] and two["review"] == 3
+    assert two["done"] and two["insufficient"] == 3
     assert len(calls) == len(set(calls)) == 3
     assert not places_enrichment.advance(db, batch, task)["failed"]
     assert len(calls) == 3

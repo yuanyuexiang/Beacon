@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import WebsiteReview, { ResearchLead } from "@/components/WebsiteReview";
 import PrepareOutreach from "@/components/PrepareOutreach";
 import { PROGRESS, Progress, taskLink } from "@/lib/communication";
 import { useOperator } from "@/lib/auth";
@@ -13,7 +14,7 @@ import { label } from "@/lib/format";
 import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, contactFailureLabel, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
-type Lead = { communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
+type Lead = ResearchLead & { communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
 type Authority = { id: number; name: string; region: string | null; count: number | null; pool_count: number; last_success_at: string | null; type_versions: Record<string, unknown> };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
@@ -258,7 +259,7 @@ function LeadsInner() {
           columns={[
             { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
             { title: "FSA 登记类型", width: 160, render: (_, r) => businessLabel(r.business_type_id, r.business_type_name) },
-            { title: "经营类型／Google 核验", width: 170, render: (_, r) => <span title={r.operating_type?.reason}>{({ restaurant: "餐厅", cafe: "咖啡馆", takeaway: "外卖店", pub: "Pub／酒吧", institution: "机构餐饮" } as Record<string, string>)[r.operating_type?.category ?? ""] ?? "待识别"}{r.google_enrichment && <div style={{ color: "#888", fontSize: 12 }}>{({ verified: "官网已核验", review: "Google 待复核", failed: "Google 补充失败" } as Record<string, string>)[r.google_enrichment.status]}</div>}</span> },
+            { title: "经营类型／官网核验", width: 230, render: (_, r) => <WebsiteReview lead={r} onChanged={() => loadLeads(batchKey)} /> },
             { title: "沟通进展", width: 120, render: (_, r) => ["not_started", "preparing"].includes(r.communication_progress?.status || "not_started") ? <Button type="link" size="small" disabled={!canWrite} onClick={() => { setPrepareLeadIds([r.id]); setPrepareOpen(true); }}>{r.communication_progress?.status === "preparing" ? "继续准备" : "准备触达"}</Button> : <Link href={taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })}><Tag color={r.communication_progress?.status === "suppressed" ? "red" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag></Link> },
             { title: "来源键", dataIndex: "source_key", width: 120 },
             { title: "邮编", dataIndex: "postcode", width: 100 },
