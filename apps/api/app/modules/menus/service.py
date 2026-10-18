@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.files import resolve_within, store_bytes
 from app.integrations import fetcher
-from app.integrations.llm import get_provider
+from app.integrations.llm import ProviderUnavailable, get_provider
 from app.modules.menus import analysis as rules
 from app.modules.menus.models import AnalysisStatus, AssetKind, FetchStatus, MenuAnalysis, MenuAsset
 
@@ -108,6 +108,15 @@ def run_analysis(
     """创建新分析版本。返回 (analysis, created)。同引擎、同版本、同输入 hash 且状态非 failed 时复用，不重复创建。"""
     if asset.fetch_status != FetchStatus.fetched or not asset.storage_path:
         raise ValueError("文件尚未成功获取，不能分析")
+    if engine == "auto":
+        try:
+            data = resolve_within(asset.storage_path).read_bytes()
+            needs_model = asset.kind == AssetKind.image or (asset.kind == AssetKind.pdf and _pdf_has_no_text(data))
+        except Exception as exc:
+            raise ValueError("菜单文件无法读取，请重新获取或上传有效文件") from exc
+        if needs_model and get_provider().name == "fake":
+            raise ProviderUnavailable("图片或扫描菜单需要配置真实 AI；可先保存资料与准备草稿")
+        engine = "provider" if needs_model else "rules"
     engine_version = rules.RULES_VERSION if engine == "rules" else None
     if engine != "rules":
         provider = get_provider()

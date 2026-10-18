@@ -1,10 +1,11 @@
 "use client";
+import { issueLabel, menuJourney } from "@/lib/menu-journey";
 import WebsiteReview from "@/components/WebsiteReview";
 import PrepareOutreach from "@/components/PrepareOutreach";
 import Link from "next/link";
 import { safeReturnTo, taskLink } from "@/lib/communication";
 import Button from "@/components/AccessButton";
-import { ConfigProvider, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from "antd";
+import { ConfigProvider, Alert, Collapse, Card, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Switch, Table, Tabs, Tag, Typography, Upload, message } from "antd";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useOperator } from "@/lib/auth";
@@ -41,6 +42,10 @@ export default function LeadDetail() {
   const { me } = useOperator();
   const { id } = useParams<{ id: string }>();
   const [prepareOpen, setPrepareOpen] = useState(false);
+  const [analysing, setAnalysing] = useState<string | null>(null);
+  const [ingesting, setIngesting] = useState(false);
+  const [pendingReview, setPendingReview] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string>();
   const [back, setBack] = useState(`/leads/${id}`);
   useEffect(() => { setBack(safeReturnTo(new URLSearchParams(window.location.search).get("returnTo") || `/leads/${id}`)); }, [id]);
   const [lead, setLead] = useState<Lead | null>(null);
@@ -83,6 +88,11 @@ export default function LeadDetail() {
   useEffect(() => {
     reload().catch(err);
   }, [reload]);
+  useEffect(() => {
+    if (!pendingReview) return;
+    const target = document.getElementById(`menu-review-${pendingReview}`);
+    if (target) { target.scrollIntoView({ behavior: "smooth", block: "start" }); setPendingReview(null); }
+  }, [pendingReview, analyses]);
   if (!lead) return null;
 
   // 联系方式候选只读查找；勾选并记录后才入库，且准入保持未知
@@ -106,17 +116,33 @@ export default function LeadDetail() {
   const latest = (aid: string) => analyses[aid]?.[analyses[aid].length - 1];
   const correct = (a: Analysis, corrections: { field_path: string; new_value: unknown; reason?: string }[]) =>
     api(`/api/analyses/${a.id}`, json({ corrections }, "PATCH")).then(reload).catch(err);
-  const reviewedAnalyses = Object.values(analyses).flatMap((list) => list.filter((a) => a.review_state === "reviewed" && a.id === list[list.length - 1]?.id));
-  const progress = content.some((c) => c.approval_valid) ? 5 : content.length ? 4 : reviewedAnalyses.length ? 3 : Object.values(analyses).some((l) => l.length) ? 2 : assets.some((a) => a.fetch_status === "fetched") ? 1 : 0;
+  const reviewedAnalyses = Object.values(analyses).flatMap((list) => list.filter((a) => ["succeeded", "needs_review"].includes(a.status) && a.review_state === "reviewed" && a.id === list[list.length - 1]?.id));
+  const journey = menuJourney(assets, analyses);
+  const scrollTo = (target: string) => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const analyse = async (assetId: string) => {
+    setAnalysing(assetId); setActionError(undefined);
+    try { const result = await api<Analysis>(`/api/assets/${assetId}/analyses?engine=auto`, { method: "POST" }); await reload(); if (result.status === "failed") setActionError(result.error || "分析未完成，可重试；已有资料保留"); else setPendingReview(assetId); }
+    catch (e) { setActionError((e as Error).message); }
+    finally { setAnalysing(null); }
+  };
+  const ingest = async (request: Promise<Asset>) => {
+    setIngesting(true); setActionError(undefined);
+    try { const asset = await request; await reload(); if (asset.fetch_status === "fetched") await analyse(asset.id); else setActionError(asset.fetch_error || "菜单获取未完成，可以重试；已有资料保留"); }
+    catch (e) { setActionError((e as Error).message); }
+    finally { setIngesting(false); }
+  };
+  const nextStep = () => journey.current === 3 ? setPrepareOpen(true) : journey.current === 2 ? scrollTo(`menu-review-${journey.assetId}`) : journey.current === 1 && journey.assetId ? analyse(journey.assetId) : scrollTo("menu-files");
 
   return (
     <ConfigProvider componentDisabled={me?.role === "viewer"}><div>
       <HeroBand kicker="LEAD" title={lead.name} subtitle={<>{lead.source_key} · {lead.postcode ?? ""} · {lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: "#fab736" }}>{lead.website}</a> : "无官网"}</>}
-        extra={<><Button type="primary" onClick={() => setPrepareOpen(true)}>准备触达</Button><Link href={taskLink({ lead: id, returnTo: back })}>查看沟通进展</Link><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /><Tag style={{ marginInlineEnd: 0 }}>主体 {label(lead.entity_status)}</Tag></>}>
+        extra={<><Button type="primary" onClick={() => setPrepareOpen(true)}>准备触达</Button><Link style={{ color: "#fab736" }} href={taskLink({ lead: id, returnTo: back })}>查看沟通进展</Link><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /><Tag style={{ marginInlineEnd: 0 }}>主体 {label(lead.entity_status)}</Tag></>}>
       </HeroBand>
       <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: "14px 20px" } }}>
-        <Steps size="small" current={progress} items={[{ title: "菜单文件" }, { title: "分析" }, { title: "人工审核" }, { title: "样稿 / 文案" }, { title: "审批" }, { title: "准入与任务" }]} />
+        <Steps aria-label="菜单资料流程" size="small" current={journey.current} onChange={(step) => step === 3 ? setPrepareOpen(true) : step === 2 && journey.assetId ? scrollTo(`menu-review-${journey.assetId}`) : scrollTo("menu-files")} items={[{ title: "获取菜单" }, { title: "AI 分析" }, { title: "核对事实" }, { title: "准备触达" }]} />
       </Card>
+      <Alert type="info" showIcon message={journey.message} description={`已记录 ${eligs.length} 个联系方式；准入和最终文案在“准备触达”中核对。创建任务不等于发送。`} action={<Button type="primary" loading={!!analysing || ingesting} onClick={nextStep}>{journey.action}</Button>} style={{ marginBottom: 16 }} />
+      {actionError && <Alert type="error" showIcon message={actionError} style={{ marginBottom: 16 }} />}
       <Card size="small" title="基本信息与人工判断" style={{ marginBottom: 16 }}>
         <Form
           form={form}
@@ -138,6 +164,17 @@ export default function LeadDetail() {
             <Button type="primary" htmlType="submit">保存</Button>
           </div>
         </Form>
+      </Card>
+      <Card id="customer-contacts" size="small" title="联系方式（可与菜单同时完善）" style={{ marginBottom: 16 }} extra={<Button onClick={searchContacts}>查找联系方式</Button>}>
+        {!eligs.some((e) => e.channel === "email") && <Typography.Paragraph type="secondary">尚未记录邮箱，不代表官网没有邮箱。点击“查找联系方式”查看邮箱候选并勾选记录；同一类型超过 5 项时，批量查找会留待人工核对。</Typography.Paragraph>}
+        <Table<Elig> rowKey="id" size="small" pagination={false} dataSource={eligs} locale={{ emptyText: "尚未记录联系方式。点“查找联系方式”从官网和 Overture 数据里找" }} columns={[
+          { title: "渠道", width: 110, render: (_, e) => channelLabel(e.channel, e.contact_ref) },
+          { title: "联系值", render: (_, e) => e.contact_ref ? (contactHref(e.channel, e.contact_ref) ? <a href={contactHref(e.channel, e.contact_ref)} target="_blank" rel="noreferrer">{e.contact_ref}</a> : e.contact_ref) : "-" },
+          { title: "来源", dataIndex: "contact_source", ellipsis: true },
+          { title: "可用", width: 80, render: (_, e) => label(e.contact_usable) },
+          { title: "准入", width: 80, render: (_, e) => <Tag color={e.eligibility === "allowed" ? "green" : e.eligibility === "blocked" ? "red" : "default"}>{label(e.eligibility)}</Tag> },
+        ]} />
+        {eligs.length > 0 && <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>记录联系方式不等于允许联系。在“准备触达”中核对渠道准入和依据；未知状态不会放行。</Typography.Paragraph>}
       </Card>
       <AutoResearch key={`auto-${id}`} id={id} onFinished={async () => { const updated = await api<Lead>(`/api/leads/${id}`); form.setFieldsValue({ website: updated.website }); setContactLookup(null); setContactPicked([]); await reload(); }} />
       <Card title="官网与经营类型" style={{ marginBottom: 16 }}>
@@ -182,17 +219,7 @@ export default function LeadDetail() {
         })()}
       </Modal>
 
-      <Card size="small" title="联系方式" style={{ marginBottom: 16 }} extra={<Button onClick={searchContacts}>查找联系方式</Button>}>
-        {!eligs.some((e) => e.channel === "email") && <Typography.Paragraph type="secondary">尚未记录邮箱，不代表官网没有邮箱。点击“查找联系方式”查看邮箱候选并勾选记录；同一类型超过 5 项时，批量查找会留待人工核对。</Typography.Paragraph>}
-        <Table<Elig> rowKey="id" size="small" pagination={false} dataSource={eligs} locale={{ emptyText: "尚未记录联系方式。点“查找联系方式”从官网和 Overture 数据里找" }} columns={[
-          { title: "渠道", width: 110, render: (_, e) => channelLabel(e.channel, e.contact_ref) },
-          { title: "联系值", render: (_, e) => e.contact_ref ? (contactHref(e.channel, e.contact_ref) ? <a href={contactHref(e.channel, e.contact_ref)} target="_blank" rel="noreferrer">{e.contact_ref}</a> : e.contact_ref) : "-" },
-          { title: "来源", dataIndex: "contact_source", ellipsis: true },
-          { title: "可用", width: 80, render: (_, e) => label(e.contact_usable) },
-          { title: "准入", width: 80, render: (_, e) => <Tag color={e.eligibility === "allowed" ? "green" : e.eligibility === "blocked" ? "red" : "default"}>{label(e.eligibility)}</Tag> },
-        ]} />
-        {eligs.length > 0 && <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>记录不等于允许使用。准入在「任务 → 渠道准入」逐条核对，未知不放行。</Typography.Paragraph>}
-      </Card>
+
       <Modal title="联系方式候选" open={contactOpen} onCancel={() => setContactOpen(false)} width={980} okText={`记录所选 ${contactPicked.length} 项`} okButtonProps={{ disabled: !contactPicked.length || contactLoading }} onOk={recordContacts} cancelText="关闭">
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>{contactLookup?.notice ?? "候选仅供人工核对。"}</Typography.Paragraph>
         {contactLookup && !contactLoading && (() => {
@@ -220,12 +247,12 @@ export default function LeadDetail() {
         <Space wrap>
           <MapsMenu key={`maps-${id}`} id={id} onAdded={reload} />
           <WebsiteMenus id={id} website={lead.website} onAdded={reload} />
-          <Form layout="inline" onFinish={(v) => api(`/api/leads/${id}/assets`, json(v)).then(reload).catch(err)}>
+          <Form layout="inline" onFinish={(v) => ingest(api<Asset>(`/api/leads/${id}/assets`, json(v)))}>
             <Form.Item name="url" rules={[{ required: true }]}><Input placeholder="人工核对过的菜单 URL" style={{ width: 320 }} /></Form.Item>
-            <Button htmlType="submit">抓取</Button>
+            <Button htmlType="submit" loading={!!analysing || ingesting}>获取并分析</Button>
           </Form>
-          <Upload showUploadList={false} customRequest={({ file }) => { const fd = new FormData(); fd.append("file", file as File); api(`/api/leads/${id}/assets/upload`, { method: "POST", body: fd }).then(reload).catch(err); }}>
-            <Button>上传文件</Button>
+          <Upload disabled={ingesting || !!analysing || me?.role === "viewer"} showUploadList={false} customRequest={({ file }) => { const fd = new FormData(); fd.append("file", file as File); ingest(api<Asset>(`/api/leads/${id}/assets/upload`, { method: "POST", body: fd })); }}>
+            <Button loading={!!analysing || ingesting}>上传并分析</Button>
           </Upload>
         </Space>
       }>
@@ -236,9 +263,8 @@ export default function LeadDetail() {
           { title: "文件", width: 70, render: (_, a) => a.storage_path ? <a href={`/api/files/${a.storage_path}`} target="_blank" rel="noreferrer">打开</a> : "-" },
           { title: "操作", width: 330, render: (_, a) => <Space>
             {a.source_url && a.fetch_status !== "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/retry`, { method: "POST" }).then(reload).catch(err)}>重试</Button>}
-            {a.fetch_status === "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/analyses`, { method: "POST" }).then(reload).catch(err)}>分析（规则）</Button>}
-            {a.fetch_status === "fetched" && <Button size="small" onClick={() => api(`/api/assets/${a.id}/analyses?engine=provider`, { method: "POST" }).then(reload).catch(err)}>模型转录</Button>}
-            {latest(a.id) && <Tag>v{latest(a.id).version} {label(latest(a.id).status)}{latest(a.id).review_state === "reviewed" ? " · 已审核" : ""}</Tag>}
+            {a.fetch_status === "fetched" && <Button size="small" type="primary" loading={analysing === a.id} disabled={ingesting || (!!analysing && analysing !== a.id)} onClick={() => analyse(a.id)}>开始分析</Button>}
+            {latest(a.id) && <Tag>v{latest(a.id).version} {label(latest(a.id).status)}{latest(a.id).review_state === "reviewed" ? " · 已核对" : ""}</Tag>}
           </Space> },
         ]} />
       </Card>
@@ -249,21 +275,22 @@ export default function LeadDetail() {
         const issues = an.issues ?? [];
         const editable = an.review_state !== "reviewed";
         return (
-          <Card key={a.id} size="small" style={{ marginBottom: 16 }} title={`证据与修正 · ${a.kind} · 分析 v${an.version}（${an.engine}，${label(an.status)}）`} extra={
-            editable && <Button type="primary" onClick={() => api(`/api/analyses/${an.id}/review`, { method: "POST" }).then(reload).catch(err)}>完成审核</Button>
+          <Card id={`menu-review-${a.id}`} key={a.id} size="small" style={{ marginBottom: 16 }} title={`核对菜单事实 · ${a.kind} · 分析 v${an.version}（${label(an.status)}）`} extra={
+            editable && ["succeeded", "needs_review"].includes(an.status) && <Button type="primary" onClick={() => api(`/api/analyses/${an.id}/review`, { method: "POST" }).then(reload).catch(err)}>完成事实核对</Button>
           }>
             {an.error && <Typography.Paragraph type="warning">{an.error}</Typography.Paragraph>}
             {(an.measurements?.pdf_links?.length || an.measurements?.image_candidates?.length) ? (
               <Card type="inner" size="small" title="页面里发现的候选菜单文件（一键接入后再分析；图片可能是菜品照片，请先打开确认）" style={{ marginBottom: 8 }}>
                 {(an.measurements?.pdf_links ?? []).map((u) => (
-                  <div key={u}><a href={u} target="_blank" rel="noreferrer">{u}</a> <Button size="small" onClick={() => api(`/api/leads/${id}/assets`, json({ url: u })).then(reload).catch(err)}>接入 PDF</Button></div>
+                  <div key={u}><a href={u} target="_blank" rel="noreferrer">{u}</a> <Button size="small" onClick={() => ingest(api<Asset>(`/api/leads/${id}/assets`, json({ url: u })))}>接入并分析 PDF</Button></div>
                 ))}
                 {(an.measurements?.image_candidates ?? []).map((c) => (
-                  <div key={c.src}><a href={c.src} target="_blank" rel="noreferrer">{c.src.slice(-60)}</a> {c.alt && <Typography.Text type="secondary">{c.alt}</Typography.Text>} <Button size="small" onClick={() => api(`/api/leads/${id}/assets`, json({ url: c.src })).then(reload).catch(err)}>接入图片</Button></div>
+                  <div key={c.src}><a href={c.src} target="_blank" rel="noreferrer">{c.src.slice(-60)}</a> {c.alt && <Typography.Text type="secondary">{c.alt}</Typography.Text>} <Button size="small" onClick={() => ingest(api<Asset>(`/api/leads/${id}/assets`, json({ url: c.src })))}>接入并分析图片</Button></div>
                 ))}
               </Card>
             ) : null}
-            <Tabs items={[
+            <Typography.Paragraph type="secondary">仅将核对属实的问题用于文案；完成事实核对不等于批准发送。</Typography.Paragraph>
+            <Tabs defaultActiveKey="issues" items={[
               { key: "file", label: "原文件", children: a.storage_path ? (a.kind === "image" ? <img alt="menu" src={`/api/files/${a.storage_path}`} style={{ maxWidth: "100%" }} /> : <iframe title="file" src={`/api/files/${a.storage_path}`} style={{ width: "100%", height: 600, border: 0 }} />) : null },
               { key: "items", label: `菜品与价格（${items.length}）`, children: (
                 <Table<Item> rowKey={(_, i) => String(i)} size="small" pagination={false} dataSource={items} columns={[
@@ -276,51 +303,46 @@ export default function LeadDetail() {
               ) },
               { key: "issues", label: `问题候选（${issues.length}）`, children: (
                 <Table<Issue> rowKey={(_, i) => String(i)} size="small" pagination={false} dataSource={issues} columns={[
-                  { title: "代码", dataIndex: "issue_code", render: (v, r) => <Tag color={r.severity === "blocking" ? "red" : r.severity === "candidate" ? "gold" : "blue"}>{v}</Tag> },
+                  { title: "待核对问题", dataIndex: "issue_code", render: (v, r) => <Tag title={v} color={r.severity === "blocking" ? "red" : r.severity === "candidate" ? "gold" : "blue"}>{issueLabel(v)}</Tag> },
                   { title: "事实（测量值）", dataIndex: "fact", render: (v, r) => <>{v}{(r as Issue & { fact_zh?: string | null }).fact_zh && <div><Typography.Text type="secondary">{(r as Issue & { fact_zh?: string | null }).fact_zh}</Typography.Text></div>}</> },
                   { title: "证据", render: (_, r) => JSON.stringify(r.evidence) },
                   { title: "人工确认", render: (_, r, i) => <Switch checked={r.confirmed === true} disabled={!editable} checkedChildren="属实" unCheckedChildren="未确认" onChange={(c) => correct(an, [{ field_path: `issues[${i}].confirmed`, new_value: c ? true : null }])} /> },
                   { title: "备注", dataIndex: "note", render: (v, _, i) => editable ? <Typography.Text editable={{ onChange: (nv) => correct(an, [{ field_path: `issues[${i}].note`, new_value: nv }]) }}>{v ?? ""}</Typography.Text> : v },
                 ]} />
               ) },
-              { key: "add", label: "人工新增", children: editable ? (
+              { key: "add", label: "补充遗漏问题", children: editable ? (
                 <Form layout="inline" onFinish={(v) => correct(an, [{ field_path: "issues[new]", new_value: { issue_code: v.issue_code, fact: v.fact, evidence: { region: v.region, file: a.storage_path }, severity: "candidate" }, reason: "人工目视" }])}>
-                  <Form.Item name="issue_code" rules={[{ required: true }]}><Select placeholder="问题代码" style={{ width: 200 }} options={["text_overlap", "missing_spaces", "low_resolution", "price_format_mixed_decimals", "price_format_mixed_symbol", "small_text", "typo", "other"].map((c) => ({ value: c }))} /></Form.Item>
+                  <Form.Item name="issue_code" rules={[{ required: true }]}><Select placeholder="问题代码" style={{ width: 200 }} options={["text_overlap", "missing_spaces", "low_resolution", "price_format_mixed_decimals", "price_format_mixed_symbol", "small_text", "typo", "other"].map((c) => ({ value: c, label: issueLabel(c) }))} /></Form.Item>
                   <Form.Item name="fact" rules={[{ required: true }]}><Input placeholder="可核对的事实（英文，用于对外文案）" style={{ width: 360 }} /></Form.Item>
                   <Form.Item name="region" rules={[{ required: true }]}><Input placeholder="位置（如：中栏 Signature 第 3 条）" style={{ width: 240 }} /></Form.Item>
                   <Button htmlType="submit">新增问题（记为人工确认）</Button>
                 </Form>
               ) : <Typography.Text type="secondary">已审核的版本不能再新增。</Typography.Text> },
-              { key: "m", label: "测量", children: <pre style={{ fontSize: 12 }}>{JSON.stringify(an.measurements, null, 1)}</pre> },
-              { key: "v", label: `版本（${analyses[a.id].length}）`, children: analyses[a.id].map((x) => <div key={x.id}>v{x.version} ← v{x.parent_version ?? "-"} · {x.engine}{x.engine_version ? ` ${x.engine_version}` : ""} · {label(x.status)} · {x.review_state ?? "未审核"}</div>) },
             ]} />
+            <Collapse ghost size="small" items={[{ key: "analysis-details", label: `分析详情与历史版本（${analyses[a.id].length}）`, children: <><pre style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{JSON.stringify(an.measurements, null, 1)}</pre>{analyses[a.id].map((x) => <div key={x.id}>v{x.version} · {x.engine} · {label(x.status)} · {x.review_state === "reviewed" ? "事实已核对" : "未核对"}</div>)}</> }]} />
           </Card>
         );
       })}
 
-      <Card id="outreach-content" size="small" title="样稿与文案" extra={reviewedAnalyses.length > 0 && (
+      <Collapse style={{ marginBottom: 16 }} items={[{ key: "optional-materials", label: "可选样稿与历史文案（首次触达不必制作样稿）", children: <Card id="optional-materials" size="small" title="可选样稿与历史内容" extra={reviewedAnalyses.length > 0 && (
         <Space>
           <Form layout="inline" onFinish={(v) => api(`/api/leads/${id}/content`, json({ kind: "sample_partial", analysis_id: reviewedAnalyses[0].id, section: v.section, item_indexes: v.n ? Array.from({ length: v.n }, (_, i) => i) : undefined })).then(reload).catch(err)}>
             <Form.Item name="section" initialValue="Sample section"><Input style={{ width: 160 }} /></Form.Item>
             <Form.Item name="n" label="前 N 项"><InputNumber min={1} max={30} /></Form.Item>
             <Button htmlType="submit">生成样稿</Button>
           </Form>
-          <Form layout="inline" onFinish={(v) => api(`/api/leads/${id}/content`, json({ kind: "message_short", analysis_id: reviewedAnalyses[0].id, ...v })).then(reload).catch(err)}>
-            <Form.Item name="sender_identity" rules={[{ required: true }]}><Input placeholder="发送身份" style={{ width: 200 }} /></Form.Item>
-            <Form.Item name="opt_out_text" rules={[{ required: true }]}><Input placeholder="退出方式" style={{ width: 220 }} /></Form.Item>
-            <Button htmlType="submit">生成文案</Button>
-          </Form>
+
         </Space>
       )}>
-        {reviewedAnalyses.length === 0 && <Typography.Text type="secondary">完成分析审核后才能生成对外内容。</Typography.Text>}
+        {reviewedAnalyses.length === 0 && <Typography.Text type="secondary">核对菜单事实后可按需生成样稿；首次准备触达无需样稿。</Typography.Text>}
         {content.map((c) => (
-          <Card key={c.id} type="inner" size="small" style={{ marginTop: 8 }} title={<>{c.kind} v{c.version} <Tag>{label(c.status)}</Tag> <Typography.Text type={c.approval_valid ? "success" : "warning"}>{approvalText(c.approval_valid, c.approval_invalid_reason)}</Typography.Text></>} extra={
+          <Card key={c.id} type="inner" size="small" style={{ marginTop: 8 }} title={<>{c.kind === "message_short" ? "触达文案" : "局部样稿"} v{c.version} <Tag>{label(c.status)}</Tag> <Typography.Text type={c.approval_valid ? "success" : "warning"}>{approvalText(c.approval_valid, c.approval_invalid_reason)}</Typography.Text></>} extra={
             <Space>
-              <Button size="small" type="primary" disabled={c.approval_valid} onClick={() => api(`/api/content/${c.id}/approve`, json({ decision: "approved" })).then(reload).catch(err)}>审批通过</Button>
-              <Button size="small" danger onClick={() => api(`/api/content/${c.id}/approve`, json({ decision: "rejected" })).then(reload).catch(err)}>驳回</Button>
+              {c.kind === "message_short" ? <Button size="small" onClick={() => setPrepareOpen(true)}>在准备触达中编辑与审批</Button> : <><Button size="small" type="primary" disabled={c.approval_valid} onClick={() => api(`/api/content/${c.id}/approve`, json({ decision: "approved" })).then(reload).catch(err)}>审批通过</Button>
+              <Button size="small" danger onClick={() => api(`/api/content/${c.id}/approve`, json({ decision: "rejected" })).then(reload).catch(err)}>驳回</Button></>}
             </Space>
           }>
-            {c.body_text && <Typography.Paragraph editable={{ onChange: (t) => t !== c.body_text && api(`/api/content/${c.id}/revise`, json({ body_text: t })).then(reload).catch(err) }} style={{ whiteSpace: "pre-wrap" }}>{c.body_text}</Typography.Paragraph>}
+            {c.body_text && <Typography.Paragraph editable={c.kind === "message_short" ? false : { onChange: (t) => t !== c.body_text && api(`/api/content/${c.id}/revise`, json({ body_text: t })).then(reload).catch(err) }} style={{ whiteSpace: "pre-wrap" }}>{c.body_text}</Typography.Paragraph>}
             {c.png_url && <img alt="sample" src={c.png_url} style={{ maxWidth: 375, border: "1px solid #eee" }} />}
             {c.html_url && !c.png_url && <a href={c.html_url} target="_blank" rel="noreferrer">打开 HTML 样稿</a>}
             <Descriptions size="small" column={1} style={{ marginTop: 8 }}>
@@ -328,7 +350,8 @@ export default function LeadDetail() {
             </Descriptions>
           </Card>
         ))}
-      </Card>
+      </Card> }]} />
+      <Card id="outreach-content" size="small" title="准备触达" style={{ margin: "16px 0" }} extra={<Button type="primary" onClick={() => setPrepareOpen(true)}>选择渠道与准备文案</Button>}><Typography.Paragraph>先选择渠道和联系人，核对准入，再基于已确认事实生成并审批文案。样稿可选；资料缺项可以保存草稿，创建任务后进入沟通工作台确认发送。</Typography.Paragraph></Card>
       <PrepareOutreach open={prepareOpen} leadIds={[id]} returnTo={back} onClose={() => setPrepareOpen(false)} onChanged={() => reload()} />
     </div></ConfigProvider>
   );

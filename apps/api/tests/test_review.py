@@ -4,6 +4,19 @@ from tests.test_analysis import _upload
 from tests.test_assets import setup_lead
 
 
+def test_running_analysis_cannot_be_marked_as_fact_checked(client, db):
+    import uuid
+
+    from app.modules.menus.models import AnalysisStatus, MenuAnalysis
+
+    _, _, result = _analysed(client, db)
+    analysis = db.get(MenuAnalysis, uuid.UUID(result["id"]))
+    analysis.status = AnalysisStatus.running
+    db.commit()
+    response = client.post(f"/api/analyses/{analysis.id}/review")
+    assert response.status_code == 409 and "尚未完成" in response.json()["detail"]
+
+
 def _analysed(client, db, name="two_col.pdf", ctype="application/pdf"):
     lead_id = setup_lead(client, db)
     aid = _upload(client, lead_id, name, ctype)

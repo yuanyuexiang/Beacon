@@ -143,6 +143,8 @@ def apply_corrections(db: Session, base: MenuAnalysis, corrections: list[dict], 
 def complete_review(db: Session, a: MenuAnalysis, by: str) -> MenuAnalysis:
     if a.status == AnalysisStatus.failed:
         raise CorrectionError("失败的分析不能标记为已审核")
+    if a.status not in {AnalysisStatus.succeeded, AnalysisStatus.needs_review}:
+        raise CorrectionError("分析尚未完成，不能完成事实核对")
     for i, iss in enumerate(a.issues or []):
         if iss.get("confirmed") is True and not iss.get("evidence"):
             raise CorrectionError(f"issues[{i}] 已确认但没有证据")

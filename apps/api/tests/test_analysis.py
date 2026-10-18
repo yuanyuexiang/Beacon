@@ -10,6 +10,39 @@ from tests.test_assets import setup_lead
 FIX = Path(__file__).parent / "fixtures"
 
 
+def test_auto_analysis_uses_extraction_for_text_pdf_and_reuses_result(client, db):
+    lead_id = setup_lead(client, db)
+    asset = _upload(client, lead_id, "two_col.pdf", "application/pdf")
+    first = client.post(f"/api/assets/{asset}/analyses?engine=auto")
+    assert first.status_code == 200 and first.json()["engine"] == "rules"
+    again = client.post(f"/api/assets/{asset}/analyses?engine=auto")
+    assert first.json()["id"] == again.json()["id"]
+
+
+def test_auto_image_analysis_requires_real_model_and_keeps_file(client, db):
+    lead_id = setup_lead(client, db)
+    asset = _upload(client, lead_id, "mini.png", "image/png")
+    result = client.post(f"/api/assets/{asset}/analyses?engine=auto")
+    assert result.status_code == 503 and "真实 AI" in result.json()["detail"]
+    assert client.get(f"/api/assets/{asset}/analyses").json() == []
+    assert client.get(f"/api/leads/{lead_id}/assets").json()[0]["fetch_status"] == "fetched"
+
+
+def test_auto_image_uses_provider_and_still_requires_fact_review(client, db, monkeypatch):
+    from app.modules.menus import service
+
+    class Provider(FakeProvider):
+        name = "test-real-provider"
+
+    monkeypatch.setattr(service, "get_provider", lambda: Provider())
+    lead_id = setup_lead(client, db)
+    asset = _upload(client, lead_id, "mini.png", "image/png")
+    result = client.post(f"/api/assets/{asset}/analyses?engine=auto")
+    assert result.status_code == 200
+    assert result.json()["engine"] == "test-real-provider" and result.json()["status"] == "needs_review"
+    assert result.json()["review_state"] != "reviewed"
+
+
 def test_two_column_pdf_not_merged():
     r = rules.analyze_pdf((FIX / "two_col.pdf").read_bytes())
     names = sorted(i["name"] for i in r.items)

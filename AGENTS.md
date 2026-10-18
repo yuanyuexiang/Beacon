@@ -110,3 +110,5 @@ D60 名单到沟通工作台：单家／批量准备草稿、严格转换任务�
 D61 联系方式读取：任务保存独立快照与页面失败原因，区分完成／部分／失败，独立候选门店数；旧数据不能可靠还原时标记未知。当前迁移 head `d161a0010001`。界面 `uv run --project apps/api --extra maps-worker python scripts/verify_contact_read_ui.py`（全模拟、不写真实名单）。仅本地更新，未发布。详见操作手册 D61。
 
 D62 官网 AI：已有官网独立核验与经营识别，必要时 Google 回退；保留原文、人工结果和 FSA，失败状态分流，混合餐食服务不单凭 cafe／pub 排除。名单／详情可单家 AI 重试。界面 `uv run --project apps/api --extra maps-worker python scripts/verify_website_review_ui.py`（全模拟）。无需迁移，仅本地更新；见操作手册 D62。
+
+D63 客户流程：四个工作区域，菜单详情“获取菜单→AI 分析→核对事实→准备触达”；样稿可选、共用准备抽屉。`engine=auto` 自动选择规则提取或真实模型，运行中不可完成事实核对。界面 `uv run --project apps/api --extra maps-worker python scripts/verify_menu_journey_ui.py`（全模拟、不发送）。无迁移，只本地更新，见手册 D63。

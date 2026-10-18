@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import OutreachJourney from "@/components/OutreachJourney";
 import WebsiteReview, { ResearchLead } from "@/components/WebsiteReview";
 import PrepareOutreach from "@/components/PrepareOutreach";
 import { PROGRESS, Progress, taskLink } from "@/lib/communication";
@@ -233,6 +234,7 @@ function LeadsInner() {
           <Button disabled={!batchKey || locked} onClick={() => { setMode("append"); setBuildOpen(true); }}>追加商户</Button>
         </>} />
 
+      <OutreachJourney current={0} />
       {workflowLoadError && <Alert type="warning" showIcon message="任务进度暂时读取失败" description="重新读取后再处理这份名单。" action={<Button onClick={() => batchKey && loadWorkflow(batchKey).catch(err)}>重试读取</Button>} style={{ marginBottom: 16 }} />}
       {workflowUnfinished(workflow) && <Alert showIcon type={workflow?.status === "failed" ? "warning" : "info"} style={{ marginBottom: 16 }} message={workflow?.status === "failed" ? "部分补充数据未完成，名单可以继续使用" : "这份名单有任务等待继续或正在处理"} description={workflow?.status === "failed" ? "已取得的数据保留；可重试失败项，也可追加商户、完善名单或处理现有线索。" : "任务参数与进度已保存，继续时从未完成步骤接续。"} action={<Button disabled={!!busy || creating} onClick={() => { setMode("progress"); setBuildOpen(true); }}>查看 / 继续任务</Button>} />}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
