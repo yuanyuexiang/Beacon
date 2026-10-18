@@ -323,3 +323,126 @@ def test_configured_request_error_is_not_reported_as_missing_key(monkeypatch):
     result = ranking.rank(SimpleNamespace(name="Vesper", address=None, postcode=None, website=SITE), found())
     assert "AI 已配置" in result["reason"] and "HTTP 400" in result["reason"]
     assert "未配置" not in result["reason"]
+
+
+@pytest.mark.parametrize(
+    "kind,value,quote",
+    [
+        ("email", "secretary@club.test", "Club general enquiries: secretary@club.test"),
+        ("phone", "+441224702191", "Club telephone: 01224 702191"),
+    ],
+)
+def test_same_page_quote_with_contact_value_can_confirm(monkeypatch, kind, value, quote):
+    f = found()
+    c = f["candidates"][0]
+    c.update(kind=kind, value=value, channel=kind)
+    f["website"]["identity_documents"] = [{"id": "page0", "url": SITE, "text": quote}]
+
+    class PageJudge:
+        model = "test"
+        usage = []
+
+        def select_contacts(self, *args):
+            d = decision(c)
+            d.citations = [rj.Citation(document_id="page0", quote=quote, kind="identity")]
+            return rj.ContactJudgment(decisions=[d])
+
+    monkeypatch.setattr(rj, "ResearchJudge", PageJudge)
+    ranking.rank(SimpleNamespace(name="Vesper", address=None, postcode=None, website=SITE), f)
+    assert c["assessment"]["recommendation"] == "recommended"
+    assert c["assessment"]["method"] == "ai"
+
+
+def test_same_page_unrelated_quote_does_not_confirm(monkeypatch):
+    f = found()
+
+    class PageJudge:
+        model = "test"
+        usage = []
+
+        def select_contacts(self, *args):
+            d = decision(f["candidates"][0])
+            d.citations = [rj.Citation(document_id="page0", quote="Vesper Restaurant.", kind="identity")]
+            return rj.ContactJudgment(decisions=[d])
+
+    monkeypatch.setattr(rj, "ResearchJudge", PageJudge)
+    ranking.rank(SimpleNamespace(name="Vesper", address=None, postcode=None, website=SITE), f)
+    assert f["candidates"][0]["assessment"]["recommendation"] == "review"
+
+
+def test_manual_confirmation_is_visible_and_survives_ai_retry(client, db, monkeypatch, judge):
+    lead_id = _lead_id(client, db)
+    result = client.post(
+        f"/api/leads/{lead_id}/contacts", json={"items": [{"channel": "phone", "contact_ref": "+44800833551"}]}
+    )
+    assert result.status_code == 200
+    row = client.get(f"/api/leads/{lead_id}/eligibility").json()[0]
+    client.post(
+        f"/api/leads/{lead_id}/eligibility",
+        json={"channel": "phone", "contact_ref": row["contact_ref"], "eligibility": "blocked"},
+    )
+    body = {
+        "recommendation": "not_recommended",
+        "affiliation": "other",
+        "owner": "第三方办公室",
+        "purpose": "support",
+        "reason": "人工核对页面为技术支持办公室",
+        "source_url": SITE,
+        "contact_usable": "unknown",
+    }
+    saved = client.post(f"/api/leads/{lead_id}/contacts/{row['id']}/confirm", json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["method"] == "manual"
+    scan = {
+        "pages": [],
+        "contacts": [
+            {
+                "kind": "phone",
+                "value": row["contact_ref"],
+                "page_url": SITE,
+                "evidence": [{"page_url": SITE, "text": TEXT}],
+            }
+        ],
+    }
+    monkeypatch.setattr(contacts, "scan_website", lambda *args: scan)
+    response = client.post(f"/api/leads/{lead_id}/contact-review")
+    assert response.status_code == 200
+    assessment = response.json()["candidates"][0]["assessment"]
+    assert assessment["method"] == "manual" and assessment["recommendation"] == "not_recommended"
+    current = client.get(f"/api/leads/{lead_id}/eligibility").json()[0]
+    assert current["eligibility"] == "blocked" and current["recommendation"]["owner"] == "第三方办公室"
+    assert (
+        client.post(
+            f"/api/leads/{lead_id}/contacts/{row['id']}/confirm", json={**body, "recommendation": "recommended"}
+        ).status_code
+        == 422
+    )
+
+
+def test_contact_confirmation_rejects_cross_lead_and_viewer(client, db):
+    from app.core.models import Operator
+    from tests.test_users import create, session
+
+    lead_id = _lead_id(client, db)
+    client.post(
+        f"/api/leads/{lead_id}/contacts", json={"items": [{"channel": "email", "contact_ref": "hello@club.test"}]}
+    )
+    row = client.get(f"/api/leads/{lead_id}/eligibility").json()[0]
+    body = {
+        "recommendation": "recommended",
+        "affiliation": "target",
+        "owner": "Club",
+        "purpose": "general",
+        "reason": "官网门店联系页公开此邮箱",
+    }
+    other = next(r["id"] for r in client.get("/api/leads").json() if r["id"] != lead_id)
+    assert client.post(f"/api/leads/{other}/contacts/{row['id']}/confirm", json=body).status_code == 404
+    assert (
+        client.post(f"/api/leads/{lead_id}/contacts/{row['id']}/confirm", json={**body, "reason": "      "}).status_code
+        == 422
+    )
+    user = create(client, "confirmation-reader", "viewer")
+    op = db.scalar(select(Operator).where(Operator.username == user["username"]))
+    op.must_change_password = False
+    db.commit()
+    assert session(op).post(f"/api/leads/{lead_id}/contacts/{row['id']}/confirm", json=body).status_code == 403

@@ -19,6 +19,7 @@ import WebsiteMenus from "@/components/WebsiteMenus";
 import MapsMenu from "@/components/MapsMenu";
 import GooglePlaces from "@/components/GooglePlaces";
 
+import ContactReviewActions from "@/components/ContactReviewActions";
 import ContactAssessmentView from "@/components/ContactAssessment";
 import { ContactAssessment } from "@/lib/contact-ranking";
 
@@ -100,14 +101,14 @@ export default function LeadDetail() {
   if (!lead) return null;
 
   // 联系方式候选只读查找；勾选并记录后才入库，且准入保持未知
-  const searchContacts = () => {
-    setContactOpen(true);
+  const searchContacts = (showResults = true) => {
+    if (showResults) setContactOpen(true);
     setContactLoading(true);
     setShowAllContacts(false);
     setContactPicked([]);
     setContactLookup(null);
     api<ContactLookup>(`/api/leads/${id}/contact-review`, { method: "POST" })
-      .then((r) => { setContactLookup(r); setContactPicked(r.candidates.filter((c) => c.assessment?.recommendation === "recommended" && !c.recorded && !c.suppressed).map(contactKey)); return reload(); })
+      .then((r) => { setContactLookup(r); setContactPicked(r.candidates.filter((c) => c.assessment?.recommendation === "recommended" && !c.recorded && !c.suppressed).map(contactKey)); if (!showResults) { const count = r.candidates.filter((c) => c.assessment?.recommendation === "recommended").length; message.info(r.ai?.status === "completed" ? `AI 核验完成，优先推荐 ${count} 项；待确认项可在当前行人工确认` : r.ai?.reason || "本次核验未完成，可重试"); } return reload(); })
       .catch(err)
       .finally(() => setContactLoading(false));
   };
@@ -172,7 +173,7 @@ export default function LeadDetail() {
           </div>
         </Form>
       </Card>
-      <Card id="customer-contacts" size="small" title="联系方式（可与菜单同时完善）" style={{ marginBottom: 16 }} extra={<Button onClick={searchContacts}>查找联系方式</Button>}>
+      <Card id="customer-contacts" size="small" title="联系方式（可与菜单同时完善）" style={{ marginBottom: 16 }} extra={<Space><Button loading={contactLoading} onClick={() => searchContacts(false)}>AI 自动核验全部</Button><Button disabled={contactLoading} onClick={() => searchContacts()}>查找联系方式</Button></Space>}>
         {!eligs.some((e) => e.channel === "email") && <Typography.Paragraph type="secondary">点击“查找联系方式”，AI 会根据官网原文筛选门店联系人；没有可靠推荐时保留全部候选供核对。</Typography.Paragraph>}
         <Table<Elig> rowKey="id" size="small" pagination={false} dataSource={eligs} locale={{ emptyText: "尚未记录联系方式。点“查找联系方式”从官网和 Overture 数据里找" }} columns={[
           { title: "渠道", width: 110, render: (_, e) => channelLabel(e.channel, e.contact_ref) },
@@ -181,8 +182,9 @@ export default function LeadDetail() {
           { title: "触达建议", width: 280, render: (_, e) => <ContactAssessmentView value={e.recommendation} /> },
           { title: "可用", width: 80, render: (_, e) => label(e.contact_usable) },
           { title: "准入", width: 80, render: (_, e) => <Tag color={e.eligibility === "allowed" ? "green" : e.eligibility === "blocked" ? "red" : "default"}>{label(e.eligibility)}</Tag> },
+          { title: "确认与处理", width: 230, render: (_, e) => <ContactReviewActions leadId={id} row={e} website={lead.website} busy={contactLoading} onAI={() => searchContacts(false)} onChanged={reload} /> },
         ]} />
-        {eligs.length > 0 && <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>记录联系方式不等于允许联系。在“准备触达”中核对渠道准入和依据；未知状态不会放行。</Typography.Paragraph>}
+        {eligs.length > 0 && <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0" }}>归属与用途可由 AI 自动确认，也可点击本行“人工确认”；点击“准入设置”核对该渠道的允许依据。未知准入不会放行。</Typography.Paragraph>}
       </Card>
       <AutoResearch key={`auto-${id}`} id={id} onFinished={async () => { const updated = await api<Lead>(`/api/leads/${id}`); form.setFieldsValue({ website: updated.website }); setContactLookup(null); setContactPicked([]); await reload(); }} />
       <Card title="官网与经营类型" style={{ marginBottom: 16 }}>

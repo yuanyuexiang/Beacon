@@ -162,6 +162,10 @@ def review_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None
     if website_review.snapshot(locked) != original:
         raise ValueError("查找期间门店或官网发生变化，已保留最新资料，请重新查找")
     found["ai"] = meta
+    for c in found["candidates"]:
+        manual = contact_ranking.manual_assessment(locked, c["channel"], c["value"])
+        if manual:
+            c["assessment"] = manual
     found["candidates"].sort(key=lambda c: contact_ranking.RANK[c["assessment"]["recommendation"]])
     locked.raw = {
         **(locked.raw or {}),

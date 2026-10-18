@@ -245,7 +245,7 @@ def extract_contacts(doc: dict[str, Any]) -> list[dict[str, Any]]:
         if n:
             add("phone", n, m.group(0), m.start())
     if doc.get("has_message_form") and "contact" in urlparse(doc["url"]).path.lower():
-        add("contact_form", doc["url"], doc["url"])
+        add("contact_form", doc["url"], doc["url"], 0)
     return list(found.values())
 
 

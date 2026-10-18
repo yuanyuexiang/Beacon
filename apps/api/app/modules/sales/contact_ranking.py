@@ -7,10 +7,10 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
-from app.integrations import research_judge
+from app.integrations import research_judge, website_contacts
 from app.integrations.llm import ProviderUnavailable
 
-VERSION = "contact-ranking-1"
+VERSION = "contact-ranking-2"
 RANK = {"recommended": 0, "backup": 1, "review": 2, "not_recommended": 3}
 
 
@@ -90,9 +90,26 @@ def rank(lead: Any, found: dict) -> dict:
                 and q.quote in texts[q.document_id]
                 for q in decision.citations
             )
-            own = any(q.document_id in own_ids[c["id"]] for q in decision.citations)
+
+            # 官网整页和抽取窗口可能包含同一事实；不要求模型必须引用内部窗口编号。
+            def bound_quote(q, c=c) -> bool:
+                if q.document_id in own_ids[c["id"]]:
+                    return True
+                document: dict[str, Any] = next((d for d in docs if d["id"] == q.document_id), {})
+                source_urls = {s["ref"] for s in c["sources"] if s["type"] == "website"}
+                if document.get("url") not in source_urls:
+                    return False
+                if c["kind"] in {"phone", "whatsapp"}:
+                    return any(
+                        website_contacts.normalize_uk_phone(m.group(0)) == c["value"]
+                        for m in website_contacts.PHONE_TEXT.finditer(q.quote)
+                    )
+                return c["value"].casefold() in q.quote.casefold()
+
+            own = any(bound_quote(q) for q in decision.citations)
             if not grounded or not own:
-                c["assessment"] = pending("AI 缺少该联系方式的真实上下文引用，未采用判断")
+                c["assessment"] = pending("仅有来源记录，尚缺与该联系方式对应的原文；可重跑 AI 核验或点击人工确认")
+                c["assessment"]["failure_code"] = "missing_contact_evidence"
                 continue
             result = decision.model_dump(exclude={"candidate_id"})
             if not result["owner"].strip() or result["affiliation"] == "unknown" or result["purpose"] == "unknown":
@@ -116,7 +133,7 @@ def rank(lead: Any, found: dict) -> dict:
                 {**q.model_dump(), "url": next(d["url"] for d in docs if d["id"] == q.document_id)}
                 for q in decision.citations
             ]
-            c["assessment"] = result
+            c["assessment"] = {**result, "method": "ai", "confirmed_at": meta["checked_at"], "model": judge.model}
         return {**meta, "model": judge.model, "usage": judge.usage}
     except ProviderUnavailable as exc:
         settings = get_settings()
@@ -141,9 +158,17 @@ def rank(lead: Any, found: dict) -> dict:
     return {**meta, "status": status, "reason": reason}
 
 
+def manual_assessment(lead: Any, channel: str, ref: str | None) -> dict | None:
+    row = ((lead.raw or {}).get("contact_confirmations") or {}).get(candidate_id(channel, ref or ""))
+    return row["assessment"] if row and row.get("website") == lead.website else None
+
+
 def stored(lead: Any, channel: str, ref: str | None) -> dict | None:
+    manual = manual_assessment(lead, channel, ref)
+    if manual:
+        return manual
     record = (lead.raw or {}).get("contact_review") or {}
-    if record.get("website") != lead.website or record.get("version") != VERSION:
+    if record.get("website") != lead.website or record.get("version") not in {VERSION, "contact-ranking-1"}:
         return None
     return next(
         (c["assessment"] for c in record.get("candidates", []) if c["channel"] == channel and c["value"] == ref), None

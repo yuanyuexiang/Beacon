@@ -95,3 +95,5 @@ D63 客户流程：四个工作区域，菜单详情“获取菜单→AI 分析�
 D64 Google 优先：首次／过期／异常时查询当前官网，不因 Overture 有值或 AI 曾核验即跳过；自动官网可更新，人工／导入官网保留候选，Overture 不覆盖高优先级结果。时效用于执行补充时判断，不新增定时批量。专项 tests/test_website_freshness.py；界面 scripts/verify_website_freshness_ui.py 与 scripts/verify_lead_policy_ui.py（模拟 API）。无迁移，只本地更新，详见手册 D64。
 
 D65 联系方式 AI：显式 POST contact-review 与批量共用候选 ID／原文引用校验，最多每类两项优先推荐；不再按数量／邮箱前缀／Overture 同号直接自动记录。无真实 AI 不新增自动记录，GET 只读，旧渠道与准入保留。专项 tests/test_contact_ranking.py、tests/test_contacts.py；界面 scripts/verify_contact_ranking_ui.py（模拟）。无迁移，只本地更新，详见手册 D65。
+
+D66 联系方式确认闭环：每行 AI 自动核验／人工确认／准入设置，整页引用可按同源及联系值绑定，不以内部片段 ID 单独拒绝真实证据。人工事实独立保存、AI 不覆盖；准入人工流程版本自动填写，不代替允许依据。专项 tests/test_contact_ranking.py，界面 scripts/verify_contact_confirmation_ui.py（全模拟）。无迁移，只本地更新，见手册 D66。

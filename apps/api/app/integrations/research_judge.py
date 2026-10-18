@@ -122,7 +122,8 @@ class ResearchJudge:
             "Unknown ownership or missing context must be review. Telephone prefixes, email local parts, domain "
             "match, a free email provider or Overture matching alone do not prove ownership or suitability. "
             "Recommend at most TWO per kind. Every recommendation/backup needs exact source quotations showing "
-            "target identity and purpose, including the candidate's own evidence document. "
+            "target identity and purpose. Cite the candidate's evidence_ids, OR a supplied page document "
+            "that explicitly contains this exact contact value and its purpose. "
             "Use at most 2 short exact quotations per candidate, kind=identity. "
             "Never claim permission to contact, availability, consent or likelihood of purchase. Explain in Chinese.",
             max_tokens=8000,

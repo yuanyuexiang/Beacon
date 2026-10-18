@@ -1,10 +1,10 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -201,6 +201,74 @@ def review_contacts(
     audit.record(db, op, "review_contact_candidates", "lead", lead_id, after=result["ai"])
     db.commit()
     return result
+
+
+class ContactConfirmationIn(BaseModel):
+    recommendation: Literal["recommended", "backup", "not_recommended", "review"]
+    affiliation: Literal["target", "group", "other", "unknown"]
+    owner: str = Field(max_length=150)
+    purpose: Literal[
+        "business", "general", "booking", "media", "recruitment", "complaints", "support", "other", "unknown"
+    ]
+    reason: str = Field(min_length=5, max_length=1500)
+    source_url: HttpUrl | None = None
+    contact_usable: ContactUsable = ContactUsable.unknown
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 5:
+            raise ValueError("请填写实际核对依据，不能只填空白")
+        return value
+
+    @model_validator(mode="after")
+    def supported(self):
+        if self.recommendation == "recommended" and (
+            not self.owner.strip() or self.affiliation != "target" or self.purpose not in {"business", "general"}
+        ):
+            raise ValueError("优先推荐需确认目标门店归属及商务／通用用途")
+        return self
+
+
+@router.post("/leads/{lead_id}/contacts/{contact_id}/confirm")
+def confirm_contact(
+    lead_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    body: ContactConfirmationIn,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+) -> dict:
+    from app.modules.sales import contact_ranking
+
+    lead = db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update().execution_options(populate_existing=True))
+    row = db.scalar(
+        select(ChannelEligibility)
+        .where(ChannelEligibility.id == contact_id, ChannelEligibility.lead_id == lead_id)
+        .with_for_update()
+    )
+    if lead is None or row is None:
+        raise HTTPException(404, "门店或联系方式不存在")
+    before = contact_ranking.stored(lead, row.channel.value, row.contact_ref)
+    assessment = {
+        **body.model_dump(mode="json", exclude={"source_url", "contact_usable"}),
+        "method": "manual",
+        "confirmed_by": op.username,
+        "confirmed_at": service.now().isoformat(),
+        "citations": [
+            {"url": str(body.source_url) if body.source_url else None, "quote": body.reason, "document_id": "manual"}
+        ],
+    }
+    records = dict((lead.raw or {}).get("contact_confirmations") or {})
+    records[contact_ranking.candidate_id(row.channel.value, row.contact_ref or "")] = {
+        "website": lead.website,
+        "assessment": assessment,
+    }
+    lead.raw = {**(lead.raw or {}), "contact_confirmations": records}
+    row.contact_usable = body.contact_usable
+    audit.record(db, op, "confirm_contact_facts", "channel_eligibility", row.id, before=before, after=assessment)
+    db.commit()
+    return assessment
 
 
 @router.post("/leads/{lead_id}/contacts")
