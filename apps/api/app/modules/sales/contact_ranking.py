@@ -4,6 +4,9 @@ import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
+
+from app.core.config import get_settings
 from app.integrations import research_judge
 from app.integrations.llm import ProviderUnavailable
 
@@ -115,8 +118,22 @@ def rank(lead: Any, found: dict) -> dict:
             ]
             c["assessment"] = result
         return {**meta, "model": judge.model, "usage": judge.usage}
-    except ProviderUnavailable:
-        reason, status = "AI 未配置或暂不可用，候选已保留，可稍后重试或人工选择", "ai_unavailable"
+    except ProviderUnavailable as exc:
+        settings = get_settings()
+        if settings.llm_provider != "deepseek" or not get_settings().deepseek_api_key:
+            reason = "尚未配置真实 AI，候选已保留，可配置后重试或人工选择"
+        else:
+            import re
+
+            code = re.search(r"HTTP (\d{3})", str(exc))
+            reason = (
+                f"AI 已配置，但服务请求失败（HTTP {code.group(1)}），候选已保留，可重试"
+                if code
+                else "AI 已配置，但本次服务调用未完成，候选已保留，可重试"
+            )
+        status = "ai_unavailable"
+    except httpx.HTTPError:
+        reason, status = "AI 已配置，但网络连接失败或请求超时，候选已保留，可重试", "ai_unavailable"
     except Exception:
         reason, status = "AI 判断未通过证据校验，候选已保留，可重试", "retry"
     for c in candidates:

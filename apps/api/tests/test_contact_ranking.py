@@ -280,6 +280,9 @@ def test_contact_schema_real_adapter_repairs_fabricated_citation_once(monkeypatc
 
     def reply(request):
         body = json.loads(request.content)
+        assert any("json" in m["content"].lower() for m in body["messages"]), (
+            "DeepSeek JSON mode requires json in prompt"
+        )
         calls.append(body)
         d = valid.model_copy(deep=True)
         if len(calls) == 1:
@@ -303,3 +306,20 @@ def test_contact_schema_real_adapter_repairs_fabricated_citation_once(monkeypatc
     )
     assert len(calls) == 2 and result.decisions[0].citations[0].quote == TEXT
     assert len(judge.usage) == 2
+
+
+def test_configured_request_error_is_not_reported_as_missing_key(monkeypatch):
+    from app.core.config import get_settings
+    from app.integrations.llm import ProviderUnavailable
+
+    monkeypatch.setattr(get_settings(), "llm_provider", "deepseek")
+    monkeypatch.setattr(get_settings(), "deepseek_api_key", "test-not-real")
+
+    class Failing:
+        def select_contacts(self, *args):
+            raise ProviderUnavailable("AI 证据判断失败：HTTP 400")
+
+    monkeypatch.setattr(rj, "ResearchJudge", Failing)
+    result = ranking.rank(SimpleNamespace(name="Vesper", address=None, postcode=None, website=SITE), found())
+    assert "AI 已配置" in result["reason"] and "HTTP 400" in result["reason"]
+    assert "未配置" not in result["reason"]
