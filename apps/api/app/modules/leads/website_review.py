@@ -17,6 +17,31 @@ from app.modules.leads.models import Lead
 VERSION = "website-review-3"
 
 
+def snapshot(lead: Lead) -> dict:
+    return {
+        **auto_research.snapshot(lead),
+        "website_source": lead.website_source,
+        "website_manual": (lead.raw or {}).get("website_manual"),
+        "website_confirmation": (lead.raw or {}).get("website_confirmation"),
+    }
+
+
+def manual(lead: Lead) -> bool:
+    raw = lead.raw or {}
+    confirmation = raw.get("website_confirmation") or {}
+    return bool(
+        raw.get("website_manual")
+        or (confirmation.get("reviewed_by") and confirmation.get("method") != "ai_evidence")
+        or "人工" in (lead.website_source or "")
+    )
+
+
+def automatic(lead: Lead) -> bool:
+    return not manual(lead) and (lead.website_source or "").startswith(
+        ("overture:", "Overture", "官网原文 AI 核验", "AI 证据核对 + 程序校验")
+    )
+
+
 def needed(lead: Lead, days: int) -> bool:
     raw = lead.raw or {}
     record = raw.get("website_research") or {}
@@ -48,7 +73,7 @@ def _record(status: str, reason: str, url: str, **extra) -> dict:
 
 
 def review(db: Session, lead: Lead, url: str, operator: Operator, place_id: str | None = None) -> str:
-    original = auto_research.snapshot(lead)
+    original = snapshot(lead)
     before_type = (lead.raw or {}).get("operating_type")
     docs: list[dict] = []
     verdict = None
@@ -142,12 +167,13 @@ def review(db: Session, lead: Lead, url: str, operator: Operator, place_id: str 
     sources = [{"id": d["id"], "url": d["url"]} for d in docs]
     result["sources"] = sources
     locked = google_places._lead(db, lead.id, lock=True)
-    if auto_research.snapshot(locked) != original or (locked.raw or {}).get("operating_type") != before_type:
+    if snapshot(locked) != original or (locked.raw or {}).get("operating_type") != before_type:
         return "changed"
     raw = dict(locked.raw or {})
     previous_url = (before_type or {}).get("website") or next(
         (source.get("url") for source in (before_type or {}).get("sources", [])), None
     )
+    raw["website_checks"] = [*(raw.get("website_checks") or []), result][-20:]
     raw["website_research"] = result
     if (
         operation
@@ -159,23 +185,34 @@ def review(db: Session, lead: Lead, url: str, operator: Operator, place_id: str 
     if result["status"] == "verified":
         history = list(raw.get("website_history") or [])
         if locked.website and not any(h["url"] == locked.website for h in history):
-            history.append({"url": locked.website, "source": locked.website_source})
+            history.append(
+                {
+                    "url": locked.website,
+                    "source": locked.website_source,
+                    "recorded_at": result["checked_at"],
+                    "previous_check": (locked.raw or {}).get("website_research"),
+                }
+            )
         raw["website_history"] = history
         alternatives = [x for x in raw.get("verified_websites", []) if x["url"] != url]
         raw["verified_websites"] = [
             *alternatives,
             {
                 "url": url,
-                "source": "official_website",
+                "source": "google_places+official_website" if place_id else "official_website",
+                "place_id": place_id,
                 "verified_at": result["checked_at"],
                 "judgment": result.get("judgment"),
             },
         ]
-        if not locked.website or (
-            not raw.get("website_manual") and (locked.website_source or "").startswith(("overture:", "Overture"))
-        ):
+        adopt = not locked.website or locked.website == url or automatic(locked)
+        result["adopted"] = adopt
+        result["adoption_pending"] = not adopt and locked.website != url
+        if adopt and locked.website != url:
             locked.website = url
-            locked.website_source = "官网原文 AI 核验"
+            locked.website_source = "官网原文 AI 核验（Google 优先）" if place_id else "官网原文 AI 核验"
+            raw.pop("contacts_scan", None)
+            raw["website_refresh_required"] = {"menus": True, "contacts": True, "changed_at": result["checked_at"]}
         if place_id and not raw.get("google_places_link"):
             raw["google_places_link"] = {
                 "place_id": place_id,

@@ -121,7 +121,7 @@ def test_google_chunk_saves_only_ids_and_budget_does_not_block(client, db, monke
 
     monkeypatch.setattr(google_places, "_client", lambda *a, **kw: Capped())
     result = places_enrichment.advance(db, batch, task)
-    assert result["done"] and result["note"] == "quota"
+    assert result["done"] and "quota" in result["note"]
 
 
 @pytest.mark.parametrize(
@@ -184,6 +184,8 @@ def test_needed_includes_existing_overture_and_review(client, db):
     selected = policy.Policy()
     assert places_enrichment.needed(lead, selected)
     lead.raw = {"places_enrichment": {"status": "verified", "checked_at": datetime.now(UTC).isoformat()}}
+    assert places_enrichment.needed(lead, selected)  # 旧策略不能证明已查询当前官网。
+    places_enrichment._save_status(lead, "verified", "Google 已查询", [], google_status="completed")
     assert not places_enrichment.needed(lead, selected)
     lead.raw = {"places_enrichment": {"status": "review", "checked_at": datetime.now(UTC).isoformat()}}
     assert places_enrichment.needed(lead, selected)

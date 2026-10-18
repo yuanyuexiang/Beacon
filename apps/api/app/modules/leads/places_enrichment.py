@@ -1,4 +1,4 @@
-"""已有官网先行 AI 核验；必要时在预算内查询 Google 候选。"""
+"""Google 优先发现当前官网；独立官网证据核验，历史网址只作回退。"""
 
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -16,19 +16,31 @@ if TYPE_CHECKING:
     from app.modules.leads.workflows import Workflow
 
 
+STRATEGY_VERSION = "google-first-1"
+
+
 def needed(lead: Lead, settings: policy.Policy) -> bool:
     if settings.google_mode == "all":
         return True
     record = (lead.raw or {}).get("places_enrichment") or {}
-    if record.get("version") != website_review.VERSION and record.get("status") != "verified":
+    if (
+        record.get("strategy_version") != STRATEGY_VERSION
+        or record.get("google_status") not in {"completed", "retry"}
+        or record.get("website") != lead.website
+        or record.get("manual") != website_review.manual(lead)
+    ):
         return True
+    review = (lead.raw or {}).get("website_research") or {}
     try:
         age = datetime.now(UTC) - datetime.fromisoformat(record["checked_at"])
-        return age > (
-            timedelta(minutes=10)
-            if record.get("status") in {"retry", "ai_unavailable"}
-            else timedelta(days=settings.stale_days)
+        retry = (
+            record.get("google_status") == "retry"
+            or record.get("website_retry")
+            or record.get("status") in {"retry", "ai_unavailable"}
         )
+        if review.get("status") in {"retry", "conflict"} and not retry:
+            return True
+        return age > (timedelta(minutes=10) if retry else timedelta(days=settings.stale_days))
     except (KeyError, ValueError, TypeError):
         return True
 
@@ -43,55 +55,102 @@ def review_one(
     db: Session, lead: Lead, operator: Operator, selected: policy.Policy, workflow_id: str, force: bool = False
 ) -> str:
     configured = get_settings().llm_provider == "deepseek" and bool(get_settings().deepseek_api_key)
-    status = "insufficient"
-    reason = "没有可靠的官网候选"
-    candidate_ids: list[str] = []
-    if lead.website and configured:
-        status = website_review.review(db, lead, lead.website, operator)
-        if status == "changed":
-            return status
-        reason = ((lead.raw or {}).get("website_research") or {}).get("reason", "")
-        if status == "verified" and selected.google_mode != "all":
-            return status
-        db.commit()  # 官网结果先保存；Google 配额耗尽不能回滚已取得的证据。
-        # 网络或 AI 服务异常应重试对应环节，不用 Google 掩盖网络故障。
-        if status in {"retry", "ai_unavailable"}:
-            return status
-    if selected.google_mode == "off" or not get_settings().google_places_api_key:
-        if not configured:
-            status, reason = "ai_unavailable", "AI 未配置，不能自动核验官网或识别类型"
-        elif not lead.website:
-            reason = "没有官网，Google 补充未启用或未配置"
-        return _save_status(lead, status, reason, candidate_ids)
-    if not force and not needed(lead, selected):
+    google_enabled = selected.google_mode != "off" and bool(get_settings().google_places_api_key)
+    lookup = google_enabled and (force or needed(lead, selected))
+    if (
+        not force
+        and not lookup
+        and (google_enabled or (configured and lead.website))
+        and not website_review.needed(lead, selected.stale_days)
+    ):
         return ((lead.raw or {}).get("places_enrichment") or {}).get("status", "insufficient")
-    client = google_places._client(
-        db, operator, lead.id, workflow_id=workflow_id, request_limit=selected.google_request_limit
-    )
-    linked = google_places._link(lead)
-    candidates = (
-        [client.enrichment_details(linked["place_id"])]
-        if linked
-        else client.search(" ".join(x for x in [lead.name, lead.address, lead.postcode, "UK"] if x))
-    )
-    candidate_ids = [x.id for x in candidates]
-    if candidates and not configured:
-        return _save_status(lead, "ai_unavailable", "AI 未配置，候选尚未自动核验", candidate_ids)
-    for candidate in candidates[:2]:
-        place = candidate if linked else client.enrichment_details(candidate.id)
-        if not place.websiteUri or place.websiteUri == lead.website:
-            continue
-        status = website_review.review(db, lead, place.websiteUri, operator, place.id)
-        if status == "changed":
-            return status
+    candidate_ids: list[str] = []
+    google_status = "not_queried"
+    error_status = None
+    website_retry = False
+    reason = "没有可靠的官网候选"
+    status = "insufficient"
+    original = website_review.snapshot(lead)
+    if lookup:
+        client = google_places._client(
+            db, operator, lead.id, workflow_id=workflow_id, request_limit=selected.google_request_limit
+        )
+        linked = google_places._link(lead)
+        try:
+            candidates = (
+                [client.enrichment_details(linked["place_id"])]
+                if linked
+                else client.search(" ".join(x for x in [lead.name, lead.address, lead.postcode, "UK"] if x))
+            )
+            if website_review.snapshot(google_places._lead(db, lead.id)) != original:
+                return "changed"
+            candidate_ids = [x.id for x in candidates]
+            google_status = "completed"
+            if candidates and not configured:
+                status, reason = "ai_unavailable", "AI 未配置，Google 候选尚未自动核验"
+            for candidate in candidates[:2] if configured else []:
+                place = candidate if linked else client.enrichment_details(candidate.id)
+                current = google_places._lead(db, lead.id)
+                if website_review.snapshot(current) != original:
+                    return "changed"
+                if not place.websiteUri:
+                    continue
+                # 即便和 Overture 相同也必须核验，不能把“值存在”当成可靠性。
+                status = website_review.review(db, lead, place.websiteUri, operator, place.id)
+                if status == "changed":
+                    return status
+                reason = ((lead.raw or {}).get("website_research") or {}).get("reason", "")
+                if status == "verified":
+                    return _save_status(lead, status, reason, candidate_ids, google_status=google_status)
+                website_retry = website_retry or status in {"retry", "ai_unavailable"}
+                db.commit()
+        except google.PlacesError as exc:
+            if website_review.snapshot(google_places._lead(db, lead.id)) != original:
+                return "changed"
+            google_status, error_status, reason = "retry", exc.status, str(exc)
+            status = "retry"
+    # Google 不可用／没有可信候选时仍可使用独立核验的既有网址；不伪造查询成功。
+    google_reason = reason
+    if lead.website and configured:
+        if force or website_review.needed(lead, selected.stale_days):
+            status = website_review.review(db, lead, lead.website, operator)
+            if status == "changed":
+                return status
+        else:
+            status = ((lead.raw or {}).get("website_research") or {}).get("status", "insufficient")
         reason = ((lead.raw or {}).get("website_research") or {}).get("reason", "")
-        db.commit()
-        if status == "verified":
-            break
-    return _save_status(lead, status, reason, candidate_ids)
+    elif not configured and status != "retry" and not (google_status == "completed" and not candidate_ids):
+        status, reason = "ai_unavailable", "AI 未配置，不能自动核验官网或识别类型"
+    if google_status == "retry":
+        reason = f"Google 查询未完成：{google_reason}；既有官网：{reason}"
+    elif website_retry:
+        reason = f"新官网候选待重试：{google_reason}；既有官网：{reason}"
+    previous = (lead.raw or {}).get("places_enrichment") or {}
+    if not lookup and previous.get("strategy_version") == STRATEGY_VERSION:
+        # 仅重跑 AI 不刷新 Google 查询时间，也不丢失待重试状态。
+        lead.raw = {**(lead.raw or {}), "places_enrichment": {**previous, "status": status, "reason": reason}}
+        return status
+    return _save_status(
+        lead,
+        status,
+        reason,
+        candidate_ids,
+        google_status=google_status,
+        error_status=error_status,
+        website_retry=website_retry,
+    )
 
 
-def _save_status(lead: Lead, status: str, reason: str, candidates: list[str]) -> str:
+def _save_status(
+    lead: Lead,
+    status: str,
+    reason: str,
+    candidates: list[str],
+    *,
+    google_status: str = "not_queried",
+    error_status: int | None = None,
+    website_retry: bool = False,
+) -> str:
     lead.raw = {
         **(lead.raw or {}),
         "places_enrichment": {
@@ -99,6 +158,13 @@ def _save_status(lead: Lead, status: str, reason: str, candidates: list[str]) ->
             "reason": reason,
             "candidate_ids": candidates,
             "version": website_review.VERSION,
+            "strategy_version": STRATEGY_VERSION,
+            "website": lead.website,
+            "manual": website_review.manual(lead),
+            "google_checked": google_status == "completed",
+            "google_status": google_status,
+            "error_status": error_status,
+            "website_retry": website_retry,
             "checked_at": datetime.now(UTC).isoformat(),
         },
     }
@@ -134,14 +200,7 @@ def advance(db: Session, batch: Batch, task: "Workflow") -> dict:
         if str(lead.id) not in state["processed"]
         and (
             (configured and website_review.needed(lead, selected.stale_days))
-            or (
-                google_enabled
-                and needed(lead, selected)
-                and (
-                    selected.google_mode == "all"
-                    or ((lead.raw or {}).get("website_research") or {}).get("status") != "verified"
-                )
-            )
+            or (google_enabled and needed(lead, selected))
         )
     ]
     chunk = 1 if configured else 2
@@ -150,6 +209,9 @@ def advance(db: Session, batch: Batch, task: "Workflow") -> dict:
             status = review_one(db, lead, operator, selected, str(task.id))
             if status == "changed":
                 status = "retry"
+            query = (lead.raw or {}).get("places_enrichment") or {}
+            if query.get("error_status") in (429, 503):
+                state["google_exhausted"], state["note"] = True, query["reason"]
         except google.PlacesError as exc:
             db.rollback()
             if exc.status in (429, 503):

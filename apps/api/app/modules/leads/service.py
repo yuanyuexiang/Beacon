@@ -306,7 +306,10 @@ def enrich_overture(
         matched += 1
         raw["overture"] = {**m, "matched": True, "checked_at": now, "licence": "CDLA-Permissive-2.0"}
         lead.raw = raw
-        if m["websites"] and (overwrite or not lead.website):
+        from app.modules.leads import website_review
+
+        replace_overture = overwrite and (lead.website_source or "").startswith(("overture:", "Overture"))
+        if m["websites"] and not website_review.manual(lead) and (replace_overture or not lead.website):
             lead.website = m["websites"][0]
             lead.website_source = (
                 f"overture:{m['place_id']} sim={m['similarity']} "

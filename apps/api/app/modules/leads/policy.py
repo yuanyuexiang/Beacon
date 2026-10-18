@@ -26,7 +26,7 @@ def default_chains() -> list[str]:
 
 
 class Policy(BaseModel):
-    version: str = "default-v3"
+    version: str = "default-v4"
     chain_action: Action = "review"
     institution_action: Action = "review"
     cafe_action: Action = "keep"

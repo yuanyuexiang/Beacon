@@ -53,6 +53,8 @@ async def main():
         card = page.locator(".ant-card").filter(has=page.get_by_text("客户筛选与数据补充策略", exact=True))
         await expect(card.get_by_role("button", name="保存策略")).to_be_enabled()
         await expect(card).to_contain_text("咖啡馆／面包店／Deli")
+        await expect(card).to_contain_text("Google 优先：首次、过期或异常时查询")
+        await expect(card).to_contain_text("即使 Overture 已有官网")
         await card.get_by_label("每个任务最多 API 尝试次数").fill("12")
         await card.get_by_label("核验有效天数").fill("30")
         await (
