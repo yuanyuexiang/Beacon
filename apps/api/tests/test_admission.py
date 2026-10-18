@@ -310,3 +310,37 @@ def test_manual_api_cannot_claim_system_rule_version(client, db, eligible):
         },
     )
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize("corporate", [True, False])
+def test_gm_role_mailbox_and_pending_reason_is_not_duplicated(client, db, eligible, corporate):
+    from tests.test_communication import prepare
+    from tests.test_content import IDENT, OPTOUT
+
+    lead, row = eligible
+    row.contact_ref = "gm@vesper.example"
+    c = lead.raw["contact_review"]["candidates"][0]
+    lead.raw = {
+        **lead.raw,
+        "contact_review": {**lead.raw["contact_review"], "candidates": [{**c, "value": row.contact_ref}]},
+    }
+    if not corporate:
+        lead.raw = {**lead.raw, "subscriber_review": {"status": "insufficient"}}
+    admission.apply(db, lead)
+    db.commit()
+    assert admission.role_mailbox(row.contact_ref)
+    if corporate:
+        assert row.eligibility == Eligibility.allowed
+    else:
+        result = admission.public(db, lead, row)
+        assert result is not None
+        missing = result["missing"]
+        assert len(missing) == 1 and "公司订户" in missing[0]
+        assert "个人" not in row.evidence
+    piece = client.post(
+        f"/api/leads/{lead.id}/content",
+        json={"kind": "message_short", "mode": "menu_inquiry", "sender_identity": IDENT, "opt_out_text": OPTOUT},
+    ).json()
+    client.post(f"/api/content/{piece['id']}/approve", json={"decision": "approved"})
+    blockers = prepare(client, str(lead.id))["draft"]["blockers"]
+    assert len(blockers) == (0 if corporate else 1), blockers

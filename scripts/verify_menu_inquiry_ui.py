@@ -22,7 +22,7 @@ replied = False
 def context(identity=LEAD):
     return {
         "lead": {"id": identity, "name": "Alpha Restaurant" if identity == LEAD else "Beta Cafe", "postcode": "AB1", "website": "https://example.com", "address": "1 Test Road"},
-        "contacts": [{"id": "eligibility", "channel": "email", "contact_ref": "info@example.com", "contact_source": "官网", "contact_usable": "valid", "eligibility": "allowed", "suppressed": False}],
+        "contacts": [{"id": "eligibility", "channel": "email", "contact_ref": "info@example.com", "contact_source": "官网", "contact_usable": "valid", "eligibility": "allowed", "rule_version": "ai-admission:uk-v2", "suppressed": False}],
         "contents": [piece] if piece else [],
         "analyses": [], "tasks": [task] if task and identity == LEAD else [],
         "progress": {"status": "replied" if replied else "pending" if task else "not_started", "task_id": TASK if task else None},
@@ -95,6 +95,8 @@ async def main():
         await page.get_by_role("button", name="检查并保存草稿").click()
         await page.locator(".ant-table-row-expand-icon").first.click()
         await expect(page.get_by_text("暂无可引用的已确认菜单问题，可直接询问菜单或负责人。", exact=True)).to_be_visible()
+        await page.get_by_text("补充联系方式／人工核对渠道准入", exact=True).first.click()
+        await expect(page.get_by_label("准入规则版本", exact=True).first).to_have_value("manual-review:v1")
         await page.get_by_label("发件身份", exact=True).fill("Beacon Menu Studio")
         await page.get_by_role("button", name="生成询问菜单／负责人文案", exact=True).first.click()
         await expect(page.get_by_label("文案内容", exact=True)).to_contain_text("Who is responsible")

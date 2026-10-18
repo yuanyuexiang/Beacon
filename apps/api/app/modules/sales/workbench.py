@@ -322,7 +322,12 @@ def assess(db: Session, draft: Preparation) -> list[str]:
         valid, why = content_service.approval_valid(db, piece)
         if not valid:
             blockers.append("文案审批无效：" + (why or "待审批"))
-    if elig and piece and (elig.rule_version or "").startswith("ai-admission:"):
+    if (
+        elig
+        and piece
+        and elig.eligibility == Eligibility.allowed
+        and (elig.rule_version or "").startswith("ai-admission:")
+    ):
         try:
             service.check_can_contact(db, elig, piece)
         except service.SalesError as exc:

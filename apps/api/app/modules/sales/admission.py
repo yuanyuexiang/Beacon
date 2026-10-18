@@ -17,7 +17,7 @@ from app.modules.leads.models import Lead
 from app.modules.sales import contact_ranking
 from app.modules.sales.models import ChannelEligibility, ContactUsable, Eligibility
 
-VERSION = "ai-admission:uk-v1"
+VERSION = "ai-admission:uk-v2"
 SOURCE = "https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/business-to-business-marketing/"
 SUBSCRIBER_VERSION = "subscriber-v1"
 AI_ACTOR = "AI+规则引擎"
@@ -55,6 +55,8 @@ def role_mailbox(value: str) -> bool:
         "office",
         "restaurant",
         "manager",
+        "gm",
+        "generalmanager",
         "management",
         "business",
         "procurement",
@@ -270,7 +272,7 @@ def apply(db: Session, lead: Lead, prepared: dict | None = None, expected_policy
             if not selected.corporate_email_auto:
                 missing.append("公司邮箱自动准入未启用")
             if not role_mailbox(row.contact_ref):
-                missing.append("可能涉及个人邮箱，需要对应授权或处理依据")
+                missing.append("尚未识别为通用职务邮箱，需要核实邮箱性质及对应依据")
             if assessment.get("purpose") not in {"business", "general"}:
                 missing.append("邮箱不是已核实的通用业务或商务联系用途")
             try:
