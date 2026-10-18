@@ -19,6 +19,9 @@ import WebsiteMenus from "@/components/WebsiteMenus";
 import MapsMenu from "@/components/MapsMenu";
 import GooglePlaces from "@/components/GooglePlaces";
 
+import ContactAssessmentView from "@/components/ContactAssessment";
+import { ContactAssessment } from "@/lib/contact-ranking";
+
 type Lead = { operating_type?: { category: string; reason: string; citations: { quote: string }[] }; google_enrichment?: { status: string; error?: string }; verified_websites?: { url: string }[]; website_history?: { url: string; source?: string }[]; id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
@@ -28,9 +31,9 @@ type Analysis = { id: string; version: number; parent_version: number | null; st
 type EntityCandidate = { company_number: string; name: string; company_status: string | null; company_type: string | null; date_of_creation: string | null; registered_address: string | null; sic_codes: string[] | null; food_service_sic: boolean | null; name_similarity: number; postcode_match: boolean | null; address_match: boolean | null; sources: string[]; primary: boolean; url: string; suggested_evidence: string };
 type EntityLookup = { query: string; candidates: EntityCandidate[]; notice: string; website: { url: string; pages: { url: string; ok: boolean; error: string | null }[]; refs: { kind: string; value: string; page_url: string }[] } | null; postcode: { query: string; hits: number } | null };
 const ENTITY_SOURCE: Record<string, { text: string; color?: string }> = { website_number: { text: "官网编号", color: "green" }, website_name: { text: "官网公司名", color: "green" }, registered_postcode: { text: "注册邮编", color: "blue" }, name_search: { text: "名称检索" } };
-type Elig = { id: string; channel: string; contact_ref: string | null; contact_source: string | null; contact_usable: string; eligibility: string };
-type ContactCandidate = { kind: string; channel: string; value: string; sources: { type: string; ref: string }[]; personal: boolean; mobile: boolean; recorded: boolean; eligibility: string | null; suppressed: boolean };
-type ContactLookup = { candidates: ContactCandidate[]; notice: string; website: { url: string; pages: { url: string; ok: boolean; error: string | null }[] } | null };
+type Elig = { recommendation?: ContactAssessment | null; id: string; channel: string; contact_ref: string | null; contact_source: string | null; contact_usable: string; eligibility: string };
+type ContactCandidate = { assessment?: ContactAssessment; evidence?: { page_url: string; text: string }[]; kind: string; channel: string; value: string; sources: { type: string; ref: string }[]; personal: boolean; mobile: boolean; recorded: boolean; eligibility: string | null; suppressed: boolean };
+type ContactLookup = { ai?: { status: string; reason: string }; candidates: ContactCandidate[]; notice: string; website: { url: string; pages: { url: string; ok: boolean; error: string | null }[] } | null };
 const CONTACT_KIND: Record<string, string> = { email: "邮箱", phone: "电话", whatsapp: "WhatsApp", instagram: "Instagram", facebook: "Facebook", tiktok: "TikTok", x: "X", linkedin: "LinkedIn", youtube: "YouTube", contact_form: "联系表单" };
 const contactKey = (c: ContactCandidate) => `${c.kind}|${c.value}`;
 const contactHref = (channel: string, v: string) => (v.startsWith("http") ? v : channel === "email" ? `mailto:${v}` : channel === "phone" ? `tel:${v}` : channel === "whatsapp" ? `https://wa.me/${v.replace("+", "")}` : undefined);
@@ -60,6 +63,7 @@ export default function LeadDetail() {
   const [eligs, setEligs] = useState<Elig[]>([]);
   const [contactOpen, setContactOpen] = useState(false);
   const [contactLoading, setContactLoading] = useState(false);
+  const [showAllContacts, setShowAllContacts] = useState(false);
   const [contactLookup, setContactLookup] = useState<ContactLookup | null>(null);
   const [contactPicked, setContactPicked] = useState<string[]>([]);
   const err = (e: Error) => message.error(e.message);
@@ -99,8 +103,11 @@ export default function LeadDetail() {
   const searchContacts = () => {
     setContactOpen(true);
     setContactLoading(true);
-    api<ContactLookup>(`/api/leads/${id}/contact-candidates`)
-      .then((r) => { setContactLookup(r); setContactPicked(r.candidates.filter((c) => !c.recorded && !c.suppressed).map(contactKey)); })
+    setShowAllContacts(false);
+    setContactPicked([]);
+    setContactLookup(null);
+    api<ContactLookup>(`/api/leads/${id}/contact-review`, { method: "POST" })
+      .then((r) => { setContactLookup(r); setContactPicked(r.candidates.filter((c) => c.assessment?.recommendation === "recommended" && !c.recorded && !c.suppressed).map(contactKey)); return reload(); })
       .catch(err)
       .finally(() => setContactLoading(false));
   };
@@ -166,11 +173,12 @@ export default function LeadDetail() {
         </Form>
       </Card>
       <Card id="customer-contacts" size="small" title="联系方式（可与菜单同时完善）" style={{ marginBottom: 16 }} extra={<Button onClick={searchContacts}>查找联系方式</Button>}>
-        {!eligs.some((e) => e.channel === "email") && <Typography.Paragraph type="secondary">尚未记录邮箱，不代表官网没有邮箱。点击“查找联系方式”查看邮箱候选并勾选记录；同一类型超过 5 项时，批量查找会留待人工核对。</Typography.Paragraph>}
+        {!eligs.some((e) => e.channel === "email") && <Typography.Paragraph type="secondary">点击“查找联系方式”，AI 会根据官网原文筛选门店联系人；没有可靠推荐时保留全部候选供核对。</Typography.Paragraph>}
         <Table<Elig> rowKey="id" size="small" pagination={false} dataSource={eligs} locale={{ emptyText: "尚未记录联系方式。点“查找联系方式”从官网和 Overture 数据里找" }} columns={[
           { title: "渠道", width: 110, render: (_, e) => channelLabel(e.channel, e.contact_ref) },
           { title: "联系值", render: (_, e) => e.contact_ref ? (contactHref(e.channel, e.contact_ref) ? <a href={contactHref(e.channel, e.contact_ref)} target="_blank" rel="noreferrer">{e.contact_ref}</a> : e.contact_ref) : "-" },
           { title: "来源", dataIndex: "contact_source", ellipsis: true },
+          { title: "触达建议", width: 280, render: (_, e) => <ContactAssessmentView value={e.recommendation} /> },
           { title: "可用", width: 80, render: (_, e) => label(e.contact_usable) },
           { title: "准入", width: 80, render: (_, e) => <Tag color={e.eligibility === "allowed" ? "green" : e.eligibility === "blocked" ? "red" : "default"}>{label(e.eligibility)}</Tag> },
         ]} />
@@ -220,20 +228,24 @@ export default function LeadDetail() {
       </Modal>
 
 
-      <Modal title="联系方式候选" open={contactOpen} onCancel={() => setContactOpen(false)} width={980} okText={`记录所选 ${contactPicked.length} 项`} okButtonProps={{ disabled: !contactPicked.length || contactLoading }} onOk={recordContacts} cancelText="关闭">
+      <Modal title="联系方式 · AI 推荐" open={contactOpen} onCancel={() => setContactOpen(false)} width={1180} okText={`记录所选 ${contactPicked.length} 项`} okButtonProps={{ disabled: !contactPicked.length || contactLoading }} onOk={recordContacts} cancelText="关闭">
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>{contactLookup?.notice ?? "候选仅供人工核对。"}</Typography.Paragraph>
         {contactLookup && !contactLoading && (() => {
           const web = contactLookup.website;
           const okPages = web?.pages.filter((p) => p.ok).length ?? 0;
           return <Typography.Paragraph style={{ marginBottom: 8 }} type={web && !okPages ? "warning" : undefined}>官网：{web ? (okPages ? `读取 ${okPages} 个页面` : `抓取失败（${web.pages[0]?.error ?? "无页面"}）`) : "未登记"}；共找到 {contactLookup.candidates.length} 项，其中邮箱 {contactLookup.candidates.filter((c) => c.kind === "email").length} 项。勾选后点击“记录所选”才会加入下方渠道表。</Typography.Paragraph>;
         })()}
-        <Table<ContactCandidate> rowKey={contactKey} size="small" pagination={false} loading={contactLoading} dataSource={contactLookup?.candidates ?? []} scroll={{ y: 420 }}
-          locale={{ emptyText: "没有找到联系方式" }}
-          rowSelection={{ selectedRowKeys: contactPicked, onChange: (keys) => setContactPicked(keys as string[]), getCheckboxProps: (c) => ({ disabled: c.recorded }) }}
+        {contactLookup?.ai && <Alert type={contactLookup.ai.status === "completed" ? "info" : "warning"} showIcon message={contactLookup.ai.reason} description={`优先推荐 ${contactLookup.candidates.filter((c) => c.assessment?.recommendation === "recommended").length} 项；推荐只表示业务相关，不代表准入允许。`} style={{ marginBottom: 12 }} />}
+        {contactLookup && <Button readOnlySafe size="small" style={{ marginBottom: 12 }} onClick={() => setShowAllContacts(!showAllContacts)}>{showAllContacts ? "仅看推荐" : `查看全部候选（${contactLookup.candidates.length}）`}</Button>}
+        <Table<ContactCandidate> rowKey={contactKey} size="small" pagination={false} loading={contactLoading} dataSource={(contactLookup?.candidates ?? []).filter((c) => showAllContacts || c.assessment?.recommendation === "recommended")} scroll={{ y: 420 }}
+          expandable={{ expandedRowRender: (c) => <div>{(c.assessment?.citations?.length ? c.assessment.citations : c.evidence?.map((e) => ({ quote: e.text, url: e.page_url })) || []).map((q, i) => <blockquote key={i}><p>{q.quote || "链接未提供可读上下文"}</p><a href={q.url} target="_blank" rel="noreferrer">{q.url}</a></blockquote>)}</div> }}
+          locale={{ emptyText: showAllContacts ? "没有找到联系方式" : "暂未找到有可靠依据的推荐，可查看全部候选或重新查找" }}
+          rowSelection={{ selectedRowKeys: contactPicked, onChange: (keys) => setContactPicked(keys as string[]), getCheckboxProps: (c) => ({ disabled: c.recorded || c.suppressed }) }}
           columns={[
             { title: "类型", width: 100, render: (_, c) => CONTACT_KIND[c.kind] ?? c.kind },
             { title: "联系值", render: (_, c) => contactHref(c.channel, c.value) ? <a href={contactHref(c.channel, c.value)} target="_blank" rel="noreferrer">{c.value}</a> : c.value },
-            { title: "来源", width: 260, render: (_, c) => <Space size={[0, 4]} wrap>{c.sources.map((s) => s.type === "website" ? <Tag key={s.type} color="green"><a href={s.ref} target="_blank" rel="noreferrer">官网页面</a></Tag> : <Tag key={s.type} color="blue" title={s.ref}>Overture</Tag>)}</Space> },
+            { title: "AI 归属与用途", width: 300, render: (_, c) => <ContactAssessmentView value={c.assessment} /> },
+            { title: "来源", width: 150, render: (_, c) => <Space size={[0, 4]} wrap>{c.sources.map((s) => s.type === "website" ? <Tag key={`${s.type}-${s.ref}`} color="green"><a href={s.ref} target="_blank" rel="noreferrer">官网页面</a></Tag> : <Tag key={s.type} color="blue" title={s.ref}>Overture</Tag>)}</Space> },
             { title: "提示", width: 220, render: (_, c) => <Space size={[0, 4]} wrap>
               {c.personal && <Tag color="orange">可能是个人邮箱</Tag>}
               {c.mobile && <Tag>手机号</Tag>}

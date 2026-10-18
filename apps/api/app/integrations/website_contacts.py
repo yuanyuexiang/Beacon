@@ -210,34 +210,63 @@ def classify_link(href: str, base_url: str = "") -> tuple[str, str] | None:
 
 
 def extract_contacts(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    """一页里的联系方式：先看链接（mailto/tel/社媒），再从正文补邮箱与电话。"""
+    """提取值与原文窗口；链接值来自 href，周围文字保留用途和所属门店。"""
     found: dict[tuple[str, str], dict[str, Any]] = {}
+    text = doc["text"]
 
-    def add(kind: str, value: str) -> None:
-        found.setdefault((kind, value), {"kind": kind, "value": value, "page_url": doc["url"]})
+    def add(kind: str, value: str, raw: str, start: int = -1, label: str = "") -> None:
+        c = found.setdefault(
+            (kind, value),
+            {
+                "kind": kind,
+                "value": value,
+                "page_url": doc["url"],
+                "evidence": [],
+            },
+        )
+        if start < 0:
+            start = text.find(label) if label else -1
+        snippet = text[max(0, start - 160) : start + len(raw) + 160] if start >= 0 else ""
+        evidence = {"page_url": doc["url"], "text": snippet, "raw_value": raw, "label": label}
+        if evidence not in c["evidence"]:
+            c["evidence"].append(evidence)
 
-    for href, _label in doc["links"]:
+    for index, (href, label) in enumerate(doc["links"]):
         hit = classify_link(href, doc.get("base_url") or doc["url"])
         if hit:
-            add(*hit)
-    for m in EMAIL.finditer(doc["text"]):
+            offsets = doc.get("link_offsets") or []
+            add(*hit, href, offsets[index] if index < len(offsets) else -1, label=label)
+    for m in EMAIL.finditer(text):
         e = _email(m.group(0))
         if e:
-            add("email", e)
-    for m in PHONE_TEXT.finditer(doc["text"]):
+            add("email", e, m.group(0), m.start())
+    for m in PHONE_TEXT.finditer(text):
         n = normalize_uk_phone(m.group(0))
         if n:
-            add("phone", n)
+            add("phone", n, m.group(0), m.start())
     if doc.get("has_message_form") and "contact" in urlparse(doc["url"]).path.lower():
-        add("contact_form", doc["url"])
+        add("contact_form", doc["url"], doc["url"])
     return list(found.values())
 
 
 def scan(website: str, fetch: Callable[[str], Any]) -> dict[str, Any]:
-    """抓首页与同站的联系/关于等页面并提取联系方式；同一联系方式只留首次出现的页面。"""
+    """保留同一联系方式在不同页面的上下文，最多 40 个候选、每项 5 份证据。"""
     pages, docs = website_entity.crawl(website, fetch, PAGE_PRIORITY)
     found: dict[tuple[str, str], dict[str, Any]] = {}
     for doc in docs:
         for c in extract_contacts(doc):
-            found.setdefault((c["kind"], c["value"]), c)
-    return {"url": website, "pages": pages, "contacts": list(found.values())[:MAX_CONTACTS]}
+            key = (c["kind"], c["value"])
+            if key not in found:
+                found[key] = c
+            else:
+                evidence = found[key]["evidence"]
+                evidence.extend(e for e in c["evidence"] if e not in evidence)
+            found[key]["evidence"] = found[key]["evidence"][:5]
+    return {
+        "url": website,
+        "pages": pages,
+        "contacts": list(found.values())[:MAX_CONTACTS],
+        "identity_documents": [
+            {"id": f"page{i}", "url": d["url"], "text": d["text"][:5000]} for i, d in enumerate(docs)
+        ],
+    }

@@ -54,6 +54,8 @@ class _Page(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.text: list[str] = []
         self.links: list[tuple[str, str]] = []
+        self.link_offsets: list[int] = []
+        self._link_start = 0
         self.has_message_form = False  # 页面有留言框（联系表单）
         self._skip = 0
         self._href: str | None = None
@@ -64,6 +66,8 @@ class _Page(HTMLParser):
             self._skip += 1
         elif tag == "a":
             self._href, self._label = dict(attrs).get("href"), []
+            prefix = re.sub(r"\s+", " ", " ".join(self.text)).strip()
+            self._link_start = len(prefix) + (1 if prefix else 0)
         elif tag == "textarea":
             self.has_message_form = True
 
@@ -72,6 +76,7 @@ class _Page(HTMLParser):
             self._skip = max(0, self._skip - 1)
         elif tag == "a" and self._href:
             self.links.append((self._href, " ".join(self._label)))
+            self.link_offsets.append(self._link_start)
             self._href = None
 
     def handle_data(self, data: str) -> None:
@@ -151,6 +156,7 @@ def crawl(
                 "base_url": r.final_url,
                 "text": re.sub(r"\s+", " ", " ".join(page.text)).strip(),
                 "links": page.links,
+                "link_offsets": page.link_offsets,
                 "has_message_form": page.has_message_form,
             }
         )

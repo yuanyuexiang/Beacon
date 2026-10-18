@@ -50,6 +50,7 @@ class EligibilityOut(EligibilityIn):
     lead_id: uuid.UUID
     reviewed_by: str | None
     reviewed_at: datetime | None
+    recommendation: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -158,8 +159,17 @@ def upsert_eligibility(
 
 @router.get("/leads/{lead_id}/eligibility", response_model=list[EligibilityOut])
 def list_eligibility(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
-    _lead(db, lead_id)
-    return list(db.scalars(select(ChannelEligibility).where(ChannelEligibility.lead_id == lead_id)).all())
+    from app.modules.sales import contact_ranking
+
+    lead = _lead(db, lead_id)
+    rows = list(db.scalars(select(ChannelEligibility).where(ChannelEligibility.lead_id == lead_id)).all())
+    return [
+        {
+            **EligibilityOut.model_validate(row).model_dump(),
+            "recommendation": contact_ranking.stored(lead, row.channel.value, row.contact_ref),
+        }
+        for row in rows
+    ]
 
 
 class ContactItem(BaseModel):
@@ -178,6 +188,19 @@ def contact_candidates(
 ) -> dict:
     """从官网页面与已存的 Overture 数据找联系方式（邮箱、电话、WhatsApp、社媒、联系表单），供人工核对。只读。"""
     return contacts.find_contacts(db, _lead(db, lead_id))
+
+
+@router.post("/leads/{lead_id}/contact-review")
+def review_contacts(
+    lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
+    try:
+        result = contacts.review_contacts(db, _lead(db, lead_id))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    audit.record(db, op, "review_contact_candidates", "lead", lead_id, after=result["ai"])
+    db.commit()
+    return result
 
 
 @router.post("/leads/{lead_id}/contacts")

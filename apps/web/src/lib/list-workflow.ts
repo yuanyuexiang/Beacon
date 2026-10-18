@@ -15,7 +15,7 @@ export function workflowSummary(stage: string, result?: Record<string, unknown>)
   if (stage === "google") return `官网已核验 ${result.verified ?? 0}，信息不足 ${result.insufficient ?? 0}，待重试 ${result.retry ?? result.failed ?? 0}，AI 不可用 ${result.ai_unavailable ?? 0}，冲突待核对 ${result.conflict ?? result.review ?? 0}${result.note ? `；${result.note}` : ""}`;
   if (stage === "screen") return "按保存的策略预筛，人工确认保留；待复核继续查找联系方式";
   const t = result.totals as Record<string, number> | undefined;
-  if (t && stage === "contacts" && "read_complete" in t) return `读取完成 ${t.read_complete}，部分读取 ${t.read_partial ?? 0}，读取失败 ${t.read_failed ?? 0}${t.no_website ? `，无官网 ${t.no_website}` : ""}${t.read_unknown ? `，读取情况待确认 ${t.read_unknown}` : ""}；找到联系方式 ${t.with_contacts ?? 0} 家；待处理 ${(t.pending ?? 0) + (t.running ?? 0)}`;
+  if (t && stage === "contacts" && "read_complete" in t) return `读取完成 ${t.read_complete}，部分读取 ${t.read_partial ?? 0}，读取失败 ${t.read_failed ?? 0}${t.no_website ? `，无官网 ${t.no_website}` : ""}${t.read_unknown ? `，读取情况待确认 ${t.read_unknown}` : ""}；找到联系方式 ${t.with_contacts ?? 0} 家${"ai_pending" in t ? `，AI 推荐 ${t.with_recommended ?? 0} 家，待判断 ${t.ai_pending ?? 0} 家` : ""}；待处理 ${(t.pending ?? 0) + (t.running ?? 0)}`;
   return t ? `成功 ${t.succeeded ?? 0}，失败 ${t.failed ?? 0}，待处理 ${(t.pending ?? 0) + (t.running ?? 0)}` : undefined;
 }
 

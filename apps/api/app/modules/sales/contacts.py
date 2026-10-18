@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.integrations import website_contacts as wc
 from app.modules.leads.entity import site_fetch
 from app.modules.leads.models import Lead
-from app.modules.sales import service
+from app.modules.sales import contact_ranking, service
 from app.modules.sales.models import Channel, ChannelEligibility, ContactUsable, Eligibility
 
 KIND_CHANNEL = {
@@ -31,8 +31,8 @@ KIND_CHANNEL = {
 }
 KIND_ORDER = list(KIND_CHANNEL)
 NOTICE = (
-    "候选仅供人工核对：页面里可能有建站公司、订位平台等第三方的联系方式，Overture 匹配到的也可能是相邻门店。"
-    "记录不等于允许使用：邮件看主体类型，电话核对 TPS/CTPS，WhatsApp 需 opt-in 证据，社媒与联系表单当前暂缓。"
+    "AI 推荐依据官网原文判断归属与用途，不代表联系方式有效或已获准触达。"
+    "候选、旧记录与渠道准入分别保留；证据不足时不自动推荐，可展开全部候选人工选择。"
 )
 
 
@@ -70,9 +70,16 @@ def find_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None =
     def add(kind: str, value: str, source_type: str, ref: str) -> None:
         cur = found.setdefault(
             (kind, value),
-            {"kind": kind, "channel": KIND_CHANNEL[kind].value, "value": value, "sources": []},
+            {
+                "id": contact_ranking.candidate_id(kind, value),
+                "kind": kind,
+                "channel": KIND_CHANNEL[kind].value,
+                "value": value,
+                "sources": [],
+                "evidence": [],
+            },
         )
-        if not any(s["type"] == source_type for s in cur["sources"]):
+        if not any(s["type"] == source_type and s["ref"] == ref for s in cur["sources"]):
             cur["sources"].append({"type": source_type, "ref": ref})
 
     website = None
@@ -80,6 +87,11 @@ def find_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None =
         website = dict(website_scan) if website_scan is not None else scan_website(lead.website)
         for c in website.pop("contacts"):
             add(c["kind"], c["value"], "website", c["page_url"])
+            cur = found[(c["kind"], c["value"])]
+            for evidence in c.get("evidence") or []:
+                if evidence not in cur["evidence"]:
+                    cur["evidence"].append(evidence)
+                    add(c["kind"], c["value"], "website", evidence["page_url"])
 
     ov = (lead.raw or {}).get("overture") or {}
     if ov.get("matched"):
@@ -97,6 +109,7 @@ def find_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None =
     }
     out = sorted(found.values(), key=lambda c: KIND_ORDER.index(c["kind"]))
     for c in out:
+        c["assessment"] = contact_ranking.stored(lead, c["channel"], c["value"]) or contact_ranking.pending()
         c["personal"] = c["kind"] == "email" and wc.is_personal_email(c["value"])
         c["mobile"] = c["kind"] in ("phone", "whatsapp") and c["value"].startswith("+447")
         row = recorded.get((c["channel"], c["value"]))
@@ -137,63 +150,34 @@ def record_contacts(db: Session, lead_id: uuid.UUID, items: list[dict[str, Any]]
     return {"created": created, "skipped": skipped}
 
 
-MAX_AUTO_PER_KIND = 5  # 官网上同一类型超过这个数，多半是分店列表或第三方信息，批量时不自动记录
+def review_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None) -> dict[str, Any]:
+    """显式 AI 操作，保存推荐证据，网络期间发生门店修改则不落档。"""
+    from app.modules.leads import website_review
+    from app.modules.leads.google_places import _lead
 
-
-def homepage_emails(candidates: list[dict[str, Any]], website: str | None) -> set[str]:
-    """长列表中优先选官网首页直接公开的通用联系邮箱，不采用媒体/其他机构邮箱。"""
-    if not website:
-        return set()
-    home = urlparse(website)
-    host = (home.hostname or "").removeprefix("www.")
-    generic = {
-        "info",
-        "hello",
-        "contact",
-        "enquiries",
-        "enquiry",
-        "inquiries",
-        "bookings",
-        "booking",
-        "reservations",
-        "reservation",
-        "office",
-        "restaurant",
+    original = website_review.snapshot(lead)
+    found = find_contacts(db, lead, website_scan)
+    meta = contact_ranking.rank(lead, found)
+    locked = _lead(db, lead.id, lock=True)
+    if website_review.snapshot(locked) != original:
+        raise ValueError("查找期间门店或官网发生变化，已保留最新资料，请重新查找")
+    found["ai"] = meta
+    found["candidates"].sort(key=lambda c: contact_ranking.RANK[c["assessment"]["recommendation"]])
+    locked.raw = {
+        **(locked.raw or {}),
+        "contact_review": {**meta, "website": locked.website, "candidates": found["candidates"]},
     }
-    selected = set()
-    for c in candidates:
-        if c["kind"] != "email":
-            continue
-        local, _, domain = c["value"].partition("@")
-        if local not in generic or domain != host:
-            continue
-        for source in c["sources"]:
-            page = urlparse(source["ref"])
-            if (
-                source["type"] == "website"
-                and (page.hostname or "").removeprefix("www.") == host
-                and page.path.rstrip("/") == home.path.rstrip("/")
-                and page.query == home.query
-            ):
-                selected.add(c["value"])
-    return selected if len(selected) <= MAX_AUTO_PER_KIND else set()
+    return found
 
 
 def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None) -> dict[str, Any]:
-    """批量模式：查找并自动记录联系方式（仍是 unknown/unknown，不放行）。跳过已记录与在抑制名单里的；
-    官网上同一类型候选过多时只记 Overture 也有的，其余留给人工在详情页勾选。结果摘要写入 lead.raw.contacts_scan。"""
-    found = find_contacts(db, lead, website_scan)
-    by_kind: dict[str, int] = {}
-    for c in found["candidates"]:
-        by_kind[c["kind"]] = by_kind.get(c["kind"], 0) + 1
-    preferred_emails = homepage_emails(found["candidates"], lead.website)
+    """批量仅记录经过原文校验的 AI 推荐项；备选和不确定项保留，不改变既有准入。"""
+    found = review_contacts(db, lead, website_scan)
     items, held = [], 0
     for c in found["candidates"]:
-        if c["recorded"] or c["suppressed"]:
+        if c["recorded"] or c["suppressed"] or service.is_suppressed(db, lead.id, c["value"]):
             continue
-        types = [s["type"] for s in c["sources"]]
-        preferred = c["kind"] == "email" and c["value"] in preferred_emails
-        if by_kind[c["kind"]] > MAX_AUTO_PER_KIND and "overture" not in types and not preferred:
+        if c["assessment"]["recommendation"] != "recommended":
             held += 1
             continue
         source = "；".join(f"官网 {s['ref']}" if s["type"] == "website" else s["ref"] for s in c["sources"])
@@ -208,6 +192,10 @@ def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None)
         "pages_ok": sum(1 for p in pages if p["ok"]),
         "pages_failed": sum(1 for p in pages if not p["ok"]),
         "website": lead.website,
+        "ai_status": found["ai"]["status"],
+        "ai_reason": found["ai"]["reason"],
+        "ranking_version": contact_ranking.VERSION,
+        "recommended": sum(c["assessment"]["recommendation"] == "recommended" for c in found["candidates"]),
         "page_errors": [{"url": p["url"], "error": p.get("error") or "页面读取失败"} for p in pages if not p["ok"]],
     }
     lead.raw = {**(lead.raw or {}), "contacts_scan": scan}

@@ -83,7 +83,11 @@ def _needs_contact_scan(lead: Lead | None) -> bool:
     if not lead.website and not (raw.get("overture") or {}).get("matched"):
         return False
     scan = raw.get("contacts_scan")
-    if not scan:
+    from app.core.config import get_settings
+    from app.modules.sales.contact_ranking import VERSION
+
+    configured = get_settings().llm_provider == "deepseek" and bool(get_settings().deepseek_api_key)
+    if not scan or scan.get("ranking_version") != VERSION or (configured and scan.get("ai_status") != "completed"):
         return True
     # 官网换了、没有读到页面或部分页面失败：允许再次查找，已记录联系方式不会重复新增。
     return scan.get("website") != lead.website or bool(
@@ -320,7 +324,17 @@ def contact_totals(
         return {}
     snapshots = snapshots if snapshots is not None else contact_snapshots(db, contacts)
     counts = dict.fromkeys(
-        ["read_complete", "read_partial", "read_failed", "read_unknown", "no_website", "with_contacts"], 0
+        [
+            "read_complete",
+            "read_partial",
+            "read_failed",
+            "read_unknown",
+            "no_website",
+            "with_contacts",
+            "with_recommended",
+            "ai_pending",
+        ],
+        0,
     )
     for job in contacts:
         if job.status not in {JobStatus.succeeded, JobStatus.failed}:
@@ -331,6 +345,10 @@ def contact_totals(
             continue
         if scan.get("found", 0):
             counts["with_contacts"] += 1
+            if scan.get("recommended", 0):
+                counts["with_recommended"] += 1
+            if scan.get("ai_status") != "completed":
+                counts["ai_pending"] += 1
         if scan.get("pages_failed", 0):
             counts["read_partial" if scan.get("pages_ok", 0) else "read_failed"] += 1
         elif scan.get("pages_ok", 0):

@@ -7,6 +7,7 @@ import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { Assignee, CHANNELS, Draft, MODES, Prepared, taskLink } from "@/lib/communication";
+import { CONTACT_RANK_LABELS, contactRank } from "@/lib/contact-ranking";
 import { channelLabel } from "@/lib/format";
 
 function DraftEditor({ draft, assignees, returnTo, sender, optOut, onChange }: { draft: Draft; assignees: Assignee[]; returnTo: string; sender: string; optOut: string; onChange: (value: Draft) => void }) {
@@ -32,7 +33,7 @@ function DraftEditor({ draft, assignees, returnTo, sender, optOut, onChange }: {
       <Link href={`/leads/${draft.lead_id}?returnTo=${encodeURIComponent(returnTo)}`}>菜单与客户资料</Link>
     </Space>
     <Form layout="vertical">
-      <Form.Item label="联系方式"><Select allowClear placeholder="选择本渠道的联系方式" value={draft.eligibility_id || undefined} options={draft.context.contacts.filter((e) => e.channel === draft.channel).map((e) => ({ value: e.id, label: `${e.contact_ref || "未填写"} · ${e.eligibility === "allowed" ? "准入已允许" : "准入待核对"}${e.suppressed ? " · 已抑制" : ""}` }))} onChange={(eligibility_id) => act(() => patch({ eligibility_id: eligibility_id || null }))} disabled={busy} /></Form.Item>
+      <Form.Item label="联系方式"><Select allowClear placeholder="选择本渠道的联系方式" value={draft.eligibility_id || undefined} options={draft.context.contacts.filter((e) => e.channel === draft.channel).sort((a, b) => contactRank(a.recommendation) - contactRank(b.recommendation)).map((e) => ({ value: e.id, label: `${e.recommendation ? CONTACT_RANK_LABELS[e.recommendation.recommendation] + " · " : ""}${e.contact_ref || "未填写"} · ${e.eligibility === "allowed" ? "准入已允许" : "准入待核对"}${e.suppressed ? " · 已抑制" : ""}` }))} onChange={(eligibility_id) => act(() => patch({ eligibility_id: eligibility_id || null }))} disabled={busy} /></Form.Item>
       <Form.Item label="短文案与审批"><Select allowClear placeholder="选择文案版本" value={draft.content_id || undefined} options={draft.context.contents.map((c) => ({ value: c.id, label: `文案 v${c.version} · ${c.approved ? "审批有效" : c.reason || "待审批"}` }))} onChange={(content_id) => act(() => patch({ content_id: content_id || null }))} disabled={busy} /></Form.Item>
     </Form>
     <Collapse items={[

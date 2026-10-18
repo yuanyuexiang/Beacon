@@ -231,7 +231,7 @@ def test_contacts_endpoints_validate_and_require_login(client, db):
 # ---------- 批量查找（批次运行的 contacts 步骤） ----------
 
 
-def test_batch_contacts_step_records_automatically_and_skips_excluded(client, db, monkeypatch):
+def test_batch_without_ai_preserves_existing_and_skips_excluded(client, db, monkeypatch):
     from app.modules.leads import runs
 
     monkeypatch.setattr(fetcher, "_is_public_host", lambda h, resolve=True: True)
@@ -254,20 +254,22 @@ def test_batch_contacts_step_records_automatically_and_skips_excluded(client, db
         (lead_id, "contacts", "succeeded", None)
     ]
     assert run["status"] == "completed"
+    assert run["totals"]["with_contacts"] == 1 and run["totals"]["with_recommended"] == 0
+    assert run["totals"]["ai_pending"] == 1
     rows = client.get(f"/api/leads/{lead_id}/eligibility").json()
     by = {(e["channel"], e["contact_ref"]): e for e in rows}
     assert by[("email", "bookings@vesper.example")]["eligibility"] == "blocked"  # 原审核结果保留
-    assert by[("instagram", "https://www.instagram.com/vesperlondon")]["eligibility"] == "unknown"
-    assert by[("phone", "+442079460123")]["contact_usable"] == "unknown" and len(rows) == 10
+    assert len(rows) == 1  # 无真实 AI 时不自动记录未经筛选的新联系方式。
     assert client.get(f"/api/leads/{other}/eligibility").json() == []
     # 列表带出联系方式数量
     counts = {x["name"]: x["contact_count"] for x in client.get("/api/leads", params={"batch_key": "b1"}).json()}
-    assert counts == {"Vesper": 10, "Fish Central": 0}
+    assert counts == {"Vesper": 1, "Fish Central": 0}
     # 摘要写在门店上；再跑一次不重复查同一个官网
     lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
     db.refresh(lead)
     scan = lead.raw["contacts_scan"]
-    assert (scan["found"], scan["recorded"], scan["pages_ok"], scan["website"]) == (10, 9, 2, SITE)
+    assert (scan["found"], scan["recorded"], scan["pages_ok"], scan["website"]) == (10, 0, 2, SITE)
+    assert scan["ai_status"] == "ai_unavailable"
     again = client.post("/api/batches/b1/runs", json={"steps": ["contacts"]}).json()
     assert again["jobs"] == [] and runs.STEPS == ("fetch", "analyze", "contacts")
 
@@ -287,12 +289,12 @@ def test_batch_contacts_holds_back_long_lists_and_continue_runs_in_chunks(client
     run = client.post(f"/api/runs/{run['id']}/continue", json={"max_jobs": 1}).json()
     assert run["status"] == "completed" and run["totals"]["succeeded"] == 2
     assert client.post("/api/runs/00000000-0000-0000-0000-000000000000/continue", json={}).status_code == 404
-    # 电话超过 5 个：只自动记 Overture 也有的那一个，其余留给人工；邮箱照常记录
+    # 没有 AI 判断时全部保留待确认，Overture 重复出现也不能作为归属证据。
     got = {(e["channel"], e["contact_ref"]) for e in client.get(f"/api/leads/{lead_id}/eligibility").json()}
-    assert got == {("email", "info@vesper.example"), ("phone", "+442079460103")}
+    assert got == set()
     lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
     db.refresh(lead)
-    assert lead.raw["contacts_scan"]["held_for_review"] == 7
+    assert lead.raw["contacts_scan"]["held_for_review"] == 9
 
 
 def test_scan_websites_runs_hosts_in_parallel_but_one_at_a_time_per_host(monkeypatch):
@@ -351,7 +353,10 @@ def test_failed_contact_pages_are_retryable_and_keep_successful_contacts(
     assert run["status"] == "completed_with_failures"
     assert run["jobs"][0]["status"] == "failed" and run["jobs"][0]["error"]
     before = client.get(f"/api/leads/{lead_id}/eligibility").json()
-    assert bool(before) == home_ok  # 部分成功的联系方式即使 job 失败也要保留
+    assert before == []  # 无 AI 不自动记录；成功抽取仍保存到候选与证据。
+    lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
+    db.refresh(lead)
+    assert bool(lead.raw["contact_review"]["candidates"]) == home_ok
     monkeypatch.setattr(
         contacts, "scan_website", functools.partial(contacts.scan_website, web_transport=_web_transport())
     )
@@ -362,7 +367,11 @@ def test_failed_contact_pages_are_retryable_and_keep_successful_contacts(
     assert retried["status"] == "completed" and len(retried["jobs"]) == 1
     after = client.get(f"/api/leads/{lead_id}/eligibility").json()
     values = {(e["channel"], e["contact_ref"]) for e in after}
-    assert ("email", "jane.smith@vesper.example") in values  # 补上联系页的邮箱
+    db.refresh(lead)
+    assert any(
+        c["value"] == "jane.smith@vesper.example" for c in lead.raw["contact_review"]["candidates"]
+    )  # 重试补上邮箱候选。
+    assert values == set()
     assert len(values) == len(after)  # 重试不重复写入首页已有的联系方式
     assert {e["id"] for e in before} <= {e["id"] for e in after}
     assert all(e["eligibility"] == "unknown" and e["contact_usable"] == "unknown" for e in after)
@@ -370,7 +379,7 @@ def test_failed_contact_pages_are_retryable_and_keep_successful_contacts(
     assert again["jobs"] == []  # 完整成功后不再重复查找
 
 
-def test_long_email_list_selects_homepage_general_contact(client, db):
+def test_long_email_list_without_ai_is_not_selected_by_email_prefix(client, db):
     import uuid
 
     lead_id = _lead_id(client, db)
@@ -388,23 +397,10 @@ def test_long_email_list_selects_homepage_general_contact(client, db):
     result = contacts.collect(db, lead, scan)
     db.commit()
     rows = client.get(f"/api/leads/{lead_id}/eligibility").json()
-    assert [(r["channel"], r["contact_ref"], r["eligibility"]) for r in rows] == [
-        ("email", "enquiries@vesper.example", "unknown")
-    ]
-    assert result["held_for_review"] == 8
-    assert (
-        contacts.homepage_emails(
-            [
-                {
-                    "kind": "email",
-                    "value": "info@vesper.example",
-                    "sources": [{"type": "website", "ref": SITE + "/media"}],
-                }
-            ],
-            SITE,
-        )
-        == set()
-    )
+    assert rows == []
+    assert result["held_for_review"] == 9
+    assert result["ai_status"] == "ai_unavailable"
+    assert len(lead.raw["contact_review"]["candidates"]) == 9
 
 
 def test_contact_read_categories_snapshots_and_retry_preserve_results(client, db, monkeypatch):

@@ -209,6 +209,8 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
 
 
 def context(db: Session, lead: Lead) -> dict:
+    from app.modules.sales import contact_ranking
+
     contacts = list(
         db.scalars(
             select(ChannelEligibility)
@@ -254,6 +256,7 @@ def context(db: Session, lead: Lead) -> dict:
                 "id": str(e.id),
                 "channel": e.channel.value,
                 "contact_ref": e.contact_ref,
+                "recommendation": contact_ranking.stored(lead, e.channel.value, e.contact_ref),
                 "contact_source": e.contact_source,
                 "contact_usable": e.contact_usable.value,
                 "eligibility": e.eligibility.value,
@@ -480,12 +483,23 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                         .order_by(ContentPiece.version.desc())
                         .limit(1)
                     )
+                    from app.modules.sales import contact_ranking
+
+                    suitable = [
+                        e
+                        for e in contacts
+                        if not service.is_suppressed(db, identity, e.contact_ref)
+                        and (contact_ranking.stored(lead, e.channel.value, e.contact_ref) or {}).get(
+                            "recommendation", "recommended"
+                        )
+                        == "recommended"
+                    ]
                     d = Preparation(
                         lead_id=identity,
                         source_batch_id=batch.id if batch else None,
                         channel=body.channel.value,
                         execution_mode=body.execution_mode,
-                        eligibility_id=contacts[0].id if len(contacts) == 1 else None,
+                        eligibility_id=suitable[0].id if len(suitable) == 1 else None,
                         content_id=content.id if content else None,
                         assigned_to=body.assigned_to or op.username,
                         purpose=body.purpose,
