@@ -51,6 +51,7 @@ class EligibilityOut(EligibilityIn):
     reviewed_by: str | None
     reviewed_at: datetime | None
     recommendation: dict | None = None
+    auto_admission: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -159,7 +160,7 @@ def upsert_eligibility(
 
 @router.get("/leads/{lead_id}/eligibility", response_model=list[EligibilityOut])
 def list_eligibility(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
-    from app.modules.sales import contact_ranking
+    from app.modules.sales import admission, contact_ranking
 
     lead = _lead(db, lead_id)
     rows = list(db.scalars(select(ChannelEligibility).where(ChannelEligibility.lead_id == lead_id)).all())
@@ -167,6 +168,7 @@ def list_eligibility(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Oper
         {
             **EligibilityOut.model_validate(row).model_dump(),
             "recommendation": contact_ranking.stored(lead, row.channel.value, row.contact_ref),
+            "auto_admission": admission.public(db, lead, row),
         }
         for row in rows
     ]
@@ -201,6 +203,17 @@ def review_contacts(
     audit.record(db, op, "review_contact_candidates", "lead", lead_id, after=result["ai"])
     db.commit()
     return result
+
+
+@router.post("/leads/{lead_id}/auto-admission")
+def auto_admission(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> dict:
+    try:
+        result = contacts.review_contacts(db, _lead(db, lead_id))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    audit.record(db, op, "run_auto_admission", "lead", lead_id, after=result.get("admission"))
+    db.commit()
+    return {"summary": result.get("admission"), "ai": result["ai"]}
 
 
 class ContactConfirmationIn(BaseModel):
@@ -279,6 +292,10 @@ def record_contacts(
     _lead(db, lead_id)
     items = [i.model_dump(mode="json") for i in body.items]
     result = contacts.record_contacts(db, lead_id, items)
+    from app.modules.sales import admission
+
+    lead = _lead(db, lead_id)
+    admission.apply(db, lead)
     audit.record(db, op, "record_contacts", "lead", lead_id, after={**result, "items": items})
     db.commit()
     return result

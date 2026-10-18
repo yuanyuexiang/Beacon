@@ -42,6 +42,8 @@ def now() -> datetime:
 
 def upsert_eligibility(db: Session, lead_id: uuid.UUID, data: dict, by: str) -> ChannelEligibility:
     db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
+    if (data.get("rule_version") or "").startswith("ai-admission:"):
+        raise SalesError("AI 准入规则版本由系统写入，不能用于人工审核")
     elig = Eligibility(data["eligibility"])
     if elig == Eligibility.allowed and (not (data.get("evidence") or "").strip() or not data.get("rule_version")):
         raise SalesError("eligibility=allowed 必须提供证据与规则版本")
@@ -81,10 +83,29 @@ def is_suppressed(db: Session, lead_id: uuid.UUID, contact_ref: str | None) -> S
 
 def check_can_contact(db: Session, elig: ChannelEligibility, content: ContentPiece) -> None:
     """三个时点共用的复核；任一不满足抛 SalesError。"""
+    if (elig.rule_version or "").startswith("ai-admission:"):
+        db.scalar(
+            select(Lead).where(Lead.id == elig.lead_id).with_for_update().execution_options(populate_existing=True)
+        )
+        db.refresh(elig)
     if elig.lead_id != content.lead_id:
         raise SalesError("准入记录与内容不属于同一线索")
     if elig.eligibility != Eligibility.allowed:
         raise SalesError(f"渠道准入为 {elig.eligibility}，不能生成或执行任务")
+    if (elig.rule_version or "").startswith("ai-admission:"):
+        from app.modules.sales import admission
+
+        lead = db.get(Lead, elig.lead_id)
+        why = admission.stale_reason(db, lead, elig) if lead else "门店不存在"
+        if why:
+            raise SalesError(why)
+        spec = content.spec or {}
+        body = content.body_text or ""
+        if any(
+            not isinstance(spec.get(key), str) or not spec[key].strip() or spec[key].strip() not in body
+            for key in ("sender_identity", "opt_out_text")
+        ):
+            raise SalesError("自动准入邮件仍需明确的发送身份与退出说明")
     if elig.contact_usable == ContactUsable.invalid:
         raise SalesError("联系方式已标记无效")
     if elig.review_due_at and elig.review_due_at < now():

@@ -158,6 +158,11 @@ def review_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None
     original = website_review.snapshot(lead)
     found = find_contacts(db, lead, website_scan)
     meta = contact_ranking.rank(lead, found)
+    from app.modules.leads import policy
+    from app.modules.sales import admission
+
+    selected = policy.current(db)
+    prepared = admission.prepare(lead, found, selected)
     locked = _lead(db, lead.id, lock=True)
     if website_review.snapshot(locked) != original:
         raise ValueError("查找期间门店或官网发生变化，已保留最新资料，请重新查找")
@@ -171,6 +176,7 @@ def review_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None
         **(locked.raw or {}),
         "contact_review": {**meta, "website": locked.website, "candidates": found["candidates"]},
     }
+    found["admission"] = admission.apply(db, locked, prepared, admission.policy_stamp(selected))
     return found
 
 
@@ -187,6 +193,9 @@ def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None)
         source = "；".join(f"官网 {s['ref']}" if s["type"] == "website" else s["ref"] for s in c["sources"])
         items.append({"channel": c["channel"], "contact_ref": c["value"], "contact_source": source})
     result = record_contacts(db, lead.id, items) if items else {"created": 0, "skipped": 0}
+    from app.modules.sales import admission
+
+    auto = admission.apply(db, lead)
     pages = (found["website"] or {}).get("pages") or []
     scan = {
         "at": found["checked_at"],
@@ -198,6 +207,7 @@ def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None)
         "website": lead.website,
         "ai_status": found["ai"]["status"],
         "ai_reason": found["ai"]["reason"],
+        "auto_admission": auto,
         "ranking_version": contact_ranking.VERSION,
         "recommended": sum(c["assessment"]["recommendation"] == "recommended" for c in found["candidates"]),
         "page_errors": [{"url": p["url"], "error": p.get("error") or "页面读取失败"} for p in pages if not p["ok"]],

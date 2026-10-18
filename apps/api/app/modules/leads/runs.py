@@ -333,6 +333,8 @@ def contact_totals(
             "with_contacts",
             "with_recommended",
             "ai_pending",
+            "auto_admitted",
+            "admission_pending",
         ],
         0,
     )
@@ -343,6 +345,11 @@ def contact_totals(
         if scan is None or scan.get("execution_error"):
             counts["read_unknown"] += 1
             continue
+        auto = scan.get("auto_admission") or {}
+        if auto.get("allowed", 0):
+            counts["auto_admitted"] += 1
+        if auto.get("unknown", 0):
+            counts["admission_pending"] += 1
         if scan.get("found", 0):
             counts["with_contacts"] += 1
             if scan.get("recommended", 0):

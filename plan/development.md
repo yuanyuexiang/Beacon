@@ -263,3 +263,6 @@ D60 范围修正：首次准备及草稿留在名单侧；沟通页仅承接已�
 ## D66：联系方式确认闭环（2026-10-18）
 
 整页引用按候选值及来源绑定，修正合法证据被内部窗口 ID 误拒；contact-ranking-2。每行直接 AI 核验／人工确认／准入设置；手动事实确认、操作人及依据独立存储，AI 重跑合并保护。渠道确认就地完成并自动记录人工流程版本，不能由 AI 归属自动推导允许。无迁移，专项 tests/test_contact_ranking.py，界面 scripts/verify_contact_confirmation_ui.py；真实单家复核不发送，仅本地验收。
+
+
+D67 AI 自动准入：用户授权模型提取证据、版本化规则写入真实准入；首版可自动允许英国公司通用业务邮箱，电话／社媒仍须补对应证据。人工结果保护，发送前复查规则／设置／证据／时效及抑制；不自动发送。专项 `cd apps/api && uv run pytest tests/test_admission.py -q`；界面 `uv run --project apps/api --extra maps-worker python scripts/verify_auto_admission_ui.py`（模拟 API）。无迁移，只本地更新，见手册 D67。

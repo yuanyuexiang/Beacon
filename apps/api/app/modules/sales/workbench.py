@@ -209,7 +209,7 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
 
 
 def context(db: Session, lead: Lead) -> dict:
-    from app.modules.sales import contact_ranking
+    from app.modules.sales import admission, contact_ranking
 
     contacts = list(
         db.scalars(
@@ -257,6 +257,7 @@ def context(db: Session, lead: Lead) -> dict:
                 "channel": e.channel.value,
                 "contact_ref": e.contact_ref,
                 "recommendation": contact_ranking.stored(lead, e.channel.value, e.contact_ref),
+                "auto_admission": admission.public(db, lead, e),
                 "contact_source": e.contact_source,
                 "contact_usable": e.contact_usable.value,
                 "eligibility": e.eligibility.value,
@@ -301,7 +302,11 @@ def assess(db: Session, draft: Preparation) -> list[str]:
         if elig.lead_id != draft.lead_id or elig.channel.value != draft.channel:
             blockers.append("联系方式与客户或渠道不一致")
         if elig.eligibility != Eligibility.allowed:
-            blockers.append("渠道准入尚未允许，请人工核对证据")
+            from app.modules.sales import admission
+
+            lead = db.get(Lead, draft.lead_id)
+            auto = admission.public(db, lead, elig) if lead else None
+            blockers.append((auto or {}).get("reason") or "渠道准入尚未允许，请运行 AI 自动准入或补充证据")
         if elig.contact_usable == ContactUsable.invalid:
             blockers.append("联系方式无效")
         if elig.review_due_at and elig.review_due_at < service.now():
@@ -316,6 +321,12 @@ def assess(db: Session, draft: Preparation) -> list[str]:
         valid, why = content_service.approval_valid(db, piece)
         if not valid:
             blockers.append("文案审批无效：" + (why or "待审批"))
+    if elig and piece and (elig.rule_version or "").startswith("ai-admission:"):
+        try:
+            service.check_can_contact(db, elig, piece)
+        except service.SalesError as exc:
+            if str(exc) not in blockers:
+                blockers.append(str(exc))
     if draft.execution_mode == "social":
         found = db.scalar(
             select(Conversation.id)

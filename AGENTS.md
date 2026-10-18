@@ -118,3 +118,6 @@ D64 Google 优先：首次／过期／异常时查询当前官网，不因 Overt
 D65 联系方式 AI：显式 POST contact-review 与批量共用候选 ID／原文引用校验，最多每类两项优先推荐；不再按数量／邮箱前缀／Overture 同号直接自动记录。无真实 AI 不新增自动记录，GET 只读，旧渠道与准入保留。专项 tests/test_contact_ranking.py、tests/test_contacts.py；界面 scripts/verify_contact_ranking_ui.py（模拟）。无迁移，只本地更新，详见手册 D65。
 
 D66 联系方式确认闭环：每行 AI 自动核验／人工确认／准入设置，整页引用可按同源及联系值绑定，不以内部片段 ID 单独拒绝真实证据。人工事实独立保存、AI 不覆盖；准入人工流程版本自动填写，不代替允许依据。专项 tests/test_contact_ranking.py，界面 scripts/verify_contact_confirmation_ui.py（全模拟）。无迁移，只本地更新，见手册 D66。
+
+
+D67 AI 自动准入：用户授权模型提取证据、版本化规则写入真实准入；首版可自动允许英国公司通用业务邮箱，电话／社媒仍须补对应证据。人工结果保护，发送前复查规则／设置／证据／时效及抑制；不自动发送。专项 `cd apps/api && uv run pytest tests/test_admission.py -q`；界面 `uv run --project apps/api --extra maps-worker python scripts/verify_auto_admission_ui.py`（模拟 API）。无迁移，只本地更新，见手册 D67。

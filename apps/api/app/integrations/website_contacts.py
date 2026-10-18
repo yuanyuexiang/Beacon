@@ -45,6 +45,12 @@ FREE_MAIL_DOMAINS = {
 }
 # 通用职能前缀：指向岗位或门店而非个人
 GENERIC_LOCAL = {
+    "secretary",
+    "reception",
+    "receptionist",
+    "business",
+    "procurement",
+    "purchasing",
     "info",
     "hello",
     "hi",
