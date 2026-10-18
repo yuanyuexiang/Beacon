@@ -20,6 +20,7 @@ leads = {}
 requests = []
 advances = []
 errors = []
+cancel_fail_once = True
 fail_overture = True
 hold = False
 release = asyncio.Event()
@@ -43,7 +44,7 @@ def make_task(key, body):
 
 
 async def handle(route):
-    global fail_overture
+    global fail_overture, cancel_fail_once
     request = route.request
     path = urlsplit(request.url).path
     body = (
@@ -93,8 +94,12 @@ async def handle(route):
             result = make_task(key, body)
             status = 201
         elif path.endswith("/cancel"):
-            tasks[key]["status"] = "cancelled"
-            result = tasks[key]
+            if cancel_fail_once:
+                cancel_fail_once = False
+                status, result = 409, {"detail": "这份名单正在处理，请稍后查看进度"}
+            else:
+                tasks[key]["status"] = "cancelled"
+                result = tasks[key]
         elif path.endswith("/advance"):
             t = tasks[key]
             stage = t["steps"][t["step"]]
@@ -181,7 +186,7 @@ async def main():
         await page.route("**/api/**", handle)
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on(
-            "console", lambda m: errors.append(m.text) if m.type == "error" else None
+            "console", lambda m: errors.append(m.text) if m.type == "error" and "409" not in m.text else None
         )
         await page.goto("http://localhost:3000/leads")
         await page.get_by_text("ui-test", exact=True).wait_for()
@@ -282,6 +287,27 @@ async def main():
             path="data/devchecks/list-workflow-complete.png", full_page=True
         )
         await page.locator(".ant-drawer-close").click()
+        # 刷新后保存的 pending 任务可以结束；确认框必须在抽屉之上且可点击。
+        tasks["ui-workflow"]["status"] = "pending"
+        await page.reload()
+        await page.get_by_role("button", name="查看 / 继续任务", exact=True).click()
+        await page.get_by_role("button", name="结束任务", exact=True).click()
+        confirm = page.get_by_role("dialog", name="结束这个未完成任务？")
+        await expect(confirm).to_be_visible()
+        await confirm.get_by_role("button", name=re.compile(r"返\s*回")).click()
+        await expect(confirm).not_to_be_visible()
+        assert tasks["ui-workflow"]["status"] == "pending"
+        await page.get_by_role("button", name="结束任务", exact=True).click()
+        await confirm.get_by_role("button", name="结束任务", exact=True).click(timeout=5000)
+        await expect(confirm.get_by_text("未能结束任务", exact=True)).to_be_visible()
+        assert tasks["ui-workflow"]["status"] == "pending"
+        await page.screenshot(path="data/devchecks/list-workflow-cancel-retry.png", full_page=True)
+        await confirm.get_by_role("button", name="结束任务", exact=True).click(timeout=5000)
+        await expect(page.get_by_role("dialog")).to_have_count(0)
+        assert tasks["ui-workflow"]["status"] == "cancelled"
+        assert len(leads["ui-workflow"]) == 5
+        await page.reload()
+        await expect(page.get_by_role("button", name="完善名单", exact=True)).to_be_enabled()
         # 完整保留 CSV、空名单创建路径。
         await page.get_by_role("button", name="建立名单", exact=True).click()
         await page.get_by_role("radio", name="导入 CSV", exact=True).check()

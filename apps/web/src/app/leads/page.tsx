@@ -61,6 +61,9 @@ function LeadsInner() {
   const [busy, setBusy] = useState<string | null>(null);
   const [newOpen, setNewOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<{ key: string; id: string }>();
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string>();
   const [authFailed, setAuthFailed] = useState(false);
   const [authoritiesLoading, setAuthoritiesLoading] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
@@ -154,11 +157,22 @@ function LeadsInner() {
   };
   const cancelWorkflow = () => {
     if (!batchKey || !workflow) return;
-    const key = batchKey, id = workflow.id;
-    Modal.confirm({ title: "结束这个未完成任务？", content: "已加入的门店和已完成的结果会保留。结束后可开始新任务。", okText: "结束任务", cancelText: "返回", onOk: async () => {
+    setCancelError(undefined);
+    setCancelTarget({ key: batchKey, id: workflow.id });
+  };
+  const confirmCancelWorkflow = async () => {
+    if (!cancelTarget || cancelling) return;
+    const { key, id } = cancelTarget;
+    setCancelling(true);
+    setCancelError(undefined);
+    try {
       const task = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow/${id}/cancel`, { method: "POST" });
       if (activeKey.current === key) { setWorkflow(task); setBuildOpen(false); }
-    } });
+      setCancelTarget(undefined);
+      message.success("任务已结束，已有结果保留");
+    } catch (e) {
+      setCancelError((e as Error).message || "结束任务失败，请重试");
+    } finally { setCancelling(false); }
   };
   const createBatch = async (v: CreateValues) => {
     const authority = authorities.find((a) => a.name === v.region);
@@ -360,6 +374,10 @@ function LeadsInner() {
             <Button type="primary" htmlType="submit" block disabled={locked || !appendAuthority} loading={creating}>追加并完善</Button>
           </Form>
         </>}
+        <Modal title="结束这个未完成任务？" open={!!cancelTarget} onCancel={() => { if (!cancelling) setCancelTarget(undefined); }} onOk={confirmCancelWorkflow} confirmLoading={cancelling} closable={!cancelling} maskClosable={!cancelling} cancelButtonProps={{ disabled: cancelling }} okText="结束任务" cancelText="返回">
+          <p>已加入的门店和已完成的结果会保留。结束后可开始新任务。</p>
+          {cancelError && <Alert type="error" showIcon message="未能结束任务" description={cancelError} />}
+        </Modal>
       </Drawer>}
 
     </>
