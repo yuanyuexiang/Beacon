@@ -82,7 +82,11 @@ def main():
         )
         compose = json.loads(result.stdout)
         for name, service in compose["services"].items():
-            assert not service.get("ports"), name + " must not publish host ports"
+            if name == "postgres":
+                ports = service.get("ports", [])
+                assert len(ports) == 1 and ports[0]["target"] == 5432 and str(ports[0]["published"]) == "5432"
+            else:
+                assert not service.get("ports"), name + " must not publish host ports"
             assert not service.get("build"), name + " must use release images"
         assert compose["networks"]["ingress"]["external"]
         assert compose["networks"]["ingress"]["name"] == "matrix-network"

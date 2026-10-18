@@ -35,6 +35,7 @@ services:
       POSTGRES_USER: beacon
       POSTGRES_DB: beacon
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?database password required}
+    ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U beacon -d beacon"]

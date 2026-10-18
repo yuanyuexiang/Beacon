@@ -105,3 +105,10 @@ D50 扩展：新增第五个 GHCR 镜像 `beacon-maps`、`maps-worker` 与 `beac
 D57（2026-10-15，本地已准备、服务器未发布）：新增 directory-worker，复用 API 镜像，没有新增 registry／账号／凭据卷。发布清单 compatibility.directory_worker=true 才启动；恢复旧 API 时不启动它。迁移 d157a0010001 含新 pool 流水线阶段，旧代码不能处理，不声明跨迁移自动回滚。发布前按既有流程由管理员同步固定 gateway 与生产 Compose，并确认目标源码已本地验收；当前未执行服务器升级。
 
 2026-10-17：用户明确授权发布。固定 gateway／生产 Compose 已同步，[Actions 38929226284](https://github.com/yuanyuexiang/Beacon/actions/runs/38929226284) 成功发布 `405c68bc6673d100a7caaae7b752d22b1df00c30`，包含 D54～D59 及 8～128 字符密码要求。迁移到 `d159a0010001`；备份与公网 HTTPS 双端版本验证通过。原管理员密码仍可登录，角色迁移为 admin；用户／策略／门店池接口正常，directory-worker 在线，所有服务容器运行正常，pending 为空。本次不创建真实测试用户、不发送客户消息；Google／AI 匹配质量及来源池真实变化观测仍须另行验证。
+
+
+## PostgreSQL 远程连接（2026-10-18）
+
+用户授权在生产 Compose 发布 PostgreSQL `5432:5432`。安全组需仅允许可信客户端 IP；数据库连接主机 `18.175.156.130`、端口 `5432`、库名与用户名 `beacon`。密码保留在服务器受控 runtime.env，不写入文档。当前未配置 PostgreSQL 服务端 TLS；加密访问仍推荐 SSH 隧道，不能将公网直连描述为 TLS 加密连接。
+
+修改已通过固定 bootstrap 同步服务器规范，只重建 PostgreSQL，保留数据卷；先完成独立数据库备份并验证 dump。未发布本地其他应用变更，后续 Actions 继续沿用该端口映射。
