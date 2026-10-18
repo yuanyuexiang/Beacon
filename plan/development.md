@@ -266,3 +266,6 @@ D60 范围修正：首次准备及草稿留在名单侧；沟通页仅承接已�
 
 
 D67 AI 自动准入：用户授权模型提取证据、版本化规则写入真实准入；首版可自动允许英国公司通用业务邮箱，电话／社媒仍须补对应证据。人工结果保护，发送前复查规则／设置／证据／时效及抑制；不自动发送。专项 `cd apps/api && uv run pytest tests/test_admission.py -q`；界面 `uv run --project apps/api --extra maps-worker python scripts/verify_auto_admission_ui.py`（模拟 API）。无迁移，只本地更新，见手册 D67。
+
+
+D68 无菜单询问：详情页可直接准备询问菜单／负责人的短文案，mode=menu_inquiry 不依赖分析；审批／准入／抑制与发送检查保持生效。收到菜单后仍走原分析路径。专项 tests/test_menu_inquiry.py，界面 scripts/verify_menu_inquiry_ui.py（全模拟、不发送）。无需迁移，只本地更新，见手册 D68。

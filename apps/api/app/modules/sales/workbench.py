@@ -273,6 +273,7 @@ def context(db: Session, lead: Lead) -> dict:
                 "id": str(p.id),
                 "version": p.version,
                 "body_text": p.body_text,
+                "mode": (p.spec or {}).get("mode", "menu_analysis"),
                 "approved": content_service.approval_valid(db, p)[0],
                 "reason": content_service.approval_valid(db, p)[1],
             }

@@ -10,7 +10,7 @@ export function menuJourney(assets: MenuAssetState[], analyses: Record<string, M
   if (reviewed.length) return { current: 3, action: "准备触达", message: "菜单事实已核对，可以选择渠道并准备文案；样稿按需制作。", assetId: reviewed[0].asset.id };
   if (readable.length) return { current: 2, action: "核对菜单事实", message: "分析已完成。对照原文件核对菜名、价格，只确认有依据的问题。", assetId: readable[0].asset.id };
   if (fetched.length) return { current: 1, action: "开始分析", message: "已获取菜单。自动提取可读文字，图片和扫描菜单交给 AI。", assetId: fetched[0].id };
-  return { current: 0, action: "获取菜单", message: "先查找或上传菜单；联系方式可以同时完善。暂时没有菜单也能保存准备草稿。", assetId: undefined };
+  return { current: 0, action: "无菜单，准备询问", message: "尚未获取可用菜单，可以直接询问菜单或负责人；收到菜单后再分析。查找和上传菜单仍可继续。", assetId: undefined };
 }
 
 

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -20,7 +21,8 @@ router = APIRouter(tags=["content"])
 
 class ContentCreateIn(BaseModel):
     kind: ContentKind
-    analysis_id: uuid.UUID
+    analysis_id: uuid.UUID | None = None
+    mode: Literal["menu_analysis", "menu_inquiry"] = "menu_analysis"
     section: str | None = None
     item_indexes: list[int] | None = None
     sender_identity: str | None = None
@@ -100,22 +102,29 @@ def create_content(
     lead = db.get(Lead, lead_id)
     if lead is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "线索不存在")
-    a = db.get(MenuAnalysis, body.analysis_id)
-    if a is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "分析不存在")
     try:
-        if body.kind == ContentKind.sample_partial:
-            p = service.create_sample(db, lead, a, body.section or "Sample section", body.item_indexes, op.username)
+        if body.mode == "menu_inquiry":
+            if body.kind != ContentKind.message_short or body.analysis_id is not None:
+                raise service.ContentError("无菜单询问只能生成短文案，不能指定分析或生成样稿")
+            p = service.create_inquiry(db, lead, body.sender_identity or "", body.opt_out_text or "", op.username)
         else:
-            p = service.create_message(
-                db,
-                lead,
-                a,
-                body.sender_identity or "",
-                body.opt_out_text or "",
-                body.website or lead.website,
-                op.username,
-            )
+            if body.analysis_id is None:
+                raise service.ContentError("菜单分析文案或样稿必须指定来源分析")
+            a = db.get(MenuAnalysis, body.analysis_id)
+            if a is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "分析不存在")
+            if body.kind == ContentKind.sample_partial:
+                p = service.create_sample(db, lead, a, body.section or "Sample section", body.item_indexes, op.username)
+            else:
+                p = service.create_message(
+                    db,
+                    lead,
+                    a,
+                    body.sender_identity or "",
+                    body.opt_out_text or "",
+                    body.website or lead.website,
+                    op.username,
+                )
     except service.ContentError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     audit.record(db, op, "create_content", "content_piece", p.id, after={"kind": p.kind, "version": p.version})

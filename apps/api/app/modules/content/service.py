@@ -242,13 +242,93 @@ def create_message(
     return piece
 
 
+INQUIRY_TEMPLATE = "menu_inquiry_v1"
+
+
+def inquiry_source(lead: Lead) -> str:
+    return _sha({"mode": INQUIRY_TEMPLATE, "lead_id": str(lead.id), "name": lead.name})
+
+
+def check_inquiry(body: str) -> None:
+    # 此路径没有菜单事实依据；只允许询问，不作菜单诊断或虚构样稿／到店承诺。
+    low = body.lower()
+    forbidden = BANNED_CLAIMS + [
+        "we noticed",
+        "we looked at",
+        "we reviewed",
+        "we analysed",
+        "we analyzed",
+        "we prepared",
+        "your menu has",
+        "your menu is",
+        "we could not find",
+        "we couldn't find",
+        "已分析",
+        "发现您的菜单",
+        "菜单存在",
+        "已制作",
+        "没有菜单",
+    ]
+    if any(term in low for term in forbidden):
+        raise ContentError("无菜单询问不能包含未经核实的菜单诊断、缺失断言或样稿承诺")
+    if not body.strip():
+        raise ContentError("文案不能为空")
+
+
+def create_inquiry(db: Session, lead: Lead, sender_identity: str, opt_out_text: str, by: str) -> ContentPiece:
+    if not sender_identity.strip() or not opt_out_text.strip():
+        raise ContentError("必须提供发送身份与退出方式")
+    body = "\n".join(
+        [
+            f"Hello {lead.name},",
+            "",
+            "Could you point me to the person responsible for your menu design and printing?",
+            "If helpful, could you share a link or copy of your current menu so we can discuss your requirements?",
+            "",
+            sender_identity.strip(),
+            "",
+            opt_out_text.strip(),
+        ]
+    )
+    check_inquiry(body)
+    spec = {
+        "mode": "menu_inquiry",
+        "template": INQUIRY_TEMPLATE,
+        "sender_identity": sender_identity.strip(),
+        "opt_out_text": opt_out_text.strip(),
+        "cited_issue_indexes": [],
+    }
+    piece = ContentPiece(
+        lead_id=lead.id,
+        analysis_id=None,
+        kind=ContentKind.message_short,
+        version=_next_version(db, lead.id, ContentKind.message_short),
+        template_name=INQUIRY_TEMPLATE,
+        template_version="1",
+        engine="template",
+        spec=spec,
+        body_text=body,
+        content_hash=_sha({"body": body, "spec": spec}),
+        source_hash=inquiry_source(lead),
+        status=ContentStatus.draft,
+        created_by=by,
+    )
+    db.add(piece)
+    db.commit()
+    db.refresh(piece)
+    return piece
+
+
 def revise_message(db: Session, piece: ContentPiece, body_text: str, by: str) -> ContentPiece:
     if piece.kind != ContentKind.message_short:
         raise ContentError("只有文案可以直接编辑；样稿请重新生成")
     a = db.get(MenuAnalysis, piece.analysis_id) if piece.analysis_id else None
-    if a is None:
+    if piece.analysis_id is None and (piece.spec or {}).get("mode") == "menu_inquiry":
+        check_inquiry(body_text)
+    elif a is None:
         raise ContentError("内容缺少来源分析")
-    check_claims(body_text, a)
+    else:
+        check_claims(body_text, a)
     spec = dict(piece.spec or {})
     if spec.get("sender_identity") and spec["sender_identity"].strip() not in body_text:
         raise ContentError("编辑后的文案缺少发送身份")
@@ -277,6 +357,19 @@ def revise_message(db: Session, piece: ContentPiece, body_text: str, by: str) ->
 
 def source_still_valid(db: Session, piece: ContentPiece) -> tuple[bool, str | None]:
     if piece.analysis_id is None:
+        if (
+            piece.kind == ContentKind.message_short
+            and (piece.spec or {}).get("mode") == "menu_inquiry"
+            and piece.template_name == INQUIRY_TEMPLATE
+        ):
+            lead = db.get(Lead, piece.lead_id)
+            if lead is None or piece.source_hash != inquiry_source(lead):
+                return False, "询问文案的客户名称或来源已变化，请重新生成"
+            try:
+                check_inquiry(piece.body_text or "")
+            except ContentError as exc:
+                return False, str(exc)
+            return True, None
         return False, "内容缺少来源分析"
     a = db.get(MenuAnalysis, piece.analysis_id)
     if a is None:

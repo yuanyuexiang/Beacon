@@ -5,6 +5,8 @@ describe("菜单资料进度", () => {
   const assets = [{ id: "menu", fetch_status: "fetched" }];
   it("没有菜单仍可留在资料阶段，失败文件不算获取成功", () => {
     expect(menuJourney([], {}).current).toBe(0);
+    expect(menuJourney([], {}).action).toBe("无菜单，准备询问");
+    expect(menuJourney([], {}).message).toContain("收到菜单后再分析");
     expect(menuJourney([{ id: "menu", fetch_status: "failed" }], {}).current).toBe(0);
   });
   it("按获取、分析和事实核对推进，不要求样稿或发送审批", () => {

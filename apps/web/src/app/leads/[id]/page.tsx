@@ -147,7 +147,7 @@ export default function LeadDetail() {
     catch (e) { setActionError((e as Error).message); }
     finally { setIngesting(false); }
   };
-  const nextStep = () => journey.current === 3 ? setPrepareOpen(true) : journey.current === 2 ? scrollTo(`menu-review-${journey.assetId}`) : journey.current === 1 && journey.assetId ? analyse(journey.assetId) : scrollTo("menu-files");
+  const nextStep = () => (journey.current === 3 || journey.current === 0) ? setPrepareOpen(true) : journey.current === 2 ? scrollTo(`menu-review-${journey.assetId}`) : journey.current === 1 && journey.assetId ? analyse(journey.assetId) : scrollTo("menu-files");
 
   return (
     <ConfigProvider componentDisabled={me?.role === "viewer"}><div>
@@ -157,7 +157,7 @@ export default function LeadDetail() {
       <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: "14px 20px" } }}>
         <Steps aria-label="菜单资料流程" size="small" current={journey.current} onChange={(step) => step === 3 ? setPrepareOpen(true) : step === 2 && journey.assetId ? scrollTo(`menu-review-${journey.assetId}`) : scrollTo("menu-files")} items={[{ title: "获取菜单" }, { title: "AI 分析" }, { title: "核对事实" }, { title: "准备触达" }]} />
       </Card>
-      <Alert type="info" showIcon message={journey.message} description={`已记录 ${eligs.length} 个联系方式；准入和最终文案在“准备触达”中核对。创建任务不等于发送。`} action={<Button type="primary" loading={!!analysing || ingesting} onClick={nextStep}>{journey.action}</Button>} style={{ marginBottom: 16 }} />
+      <Alert type="info" showIcon message={journey.message} description={`已记录 ${eligs.length} 个联系方式；准入和最终文案在“准备触达”中核对。创建任务不等于发送。`} action={<Space><Button type="primary" loading={!!analysing || ingesting} onClick={nextStep}>{journey.action}</Button>{journey.current === 0 && <Button onClick={() => scrollTo("menu-files")}>继续查找菜单</Button>}</Space>} style={{ marginBottom: 16 }} />
       {actionError && <Alert type="error" showIcon message={actionError} style={{ marginBottom: 16 }} />}
       <Card size="small" title="基本信息与人工判断" style={{ marginBottom: 16 }}>
         <Form
