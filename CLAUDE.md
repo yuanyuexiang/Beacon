@@ -106,3 +106,6 @@ D68 无菜单询问：详情页可直接准备询问菜单／负责人的短文�
 
 
 D69（2026-10-20）：Google 单任务调用上限移除，旧 google_request_limit 忽略，Google 阶段旧额度耗尽检查点可恢复；项目分钟／每日保护保留。专项 tests/test_lead_policy.py、tests/test_google_places.py；界面 scripts/verify_lead_policy_ui.py。无需迁移，只本地更新，见手册 D69。
+
+
+D70 销售总监／门店分配（2026-10-20）：director 可分配全量业务门店，member 请求按 Lead.assigned_to 隔离关联资源及文件、统计、导出；历史门店保持未分配。任务默认继承归属，交接暂停并撤销待发确认，未知结果先对账，发送前复查归属。迁移 d170a0010001，专项 tests/test_assignment.py；界面 scripts/verify_assignment_ui.py（全 API 模拟、不发送）。只本地更新，用户确认前不发布，见操作手册 D70。

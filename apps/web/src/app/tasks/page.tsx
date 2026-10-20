@@ -24,7 +24,7 @@ const ACTIVE = ["pending", "opened", "paused"];
 
 function TasksInner() {
   const { me } = useOperator();
-  const canWrite = me?.role === "admin" || me?.role === "member";
+  const canWrite = me?.role === "admin" || me?.role === "director" || me?.role === "member";
   const router = useRouter();
   const sp = useSearchParams();
   const leadId = sp.get("lead") || undefined;

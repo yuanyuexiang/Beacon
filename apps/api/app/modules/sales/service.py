@@ -124,7 +124,9 @@ def check_can_contact(db: Session, elig: ChannelEligibility, content: ContentPie
 def create_task(
     db: Session, lead_id: uuid.UUID, eligibility_id: uuid.UUID, content_id: uuid.UUID, by: str, *, commit: bool = True
 ) -> ManualTask:
-    db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
+    lead = db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
+    if lead is None:
+        raise SalesError("门店不存在或无访问权限")
     elig = db.get(ChannelEligibility, eligibility_id)
     content = db.get(ContentPiece, content_id)
     if elig is None or content is None or elig.lead_id != lead_id:
@@ -148,6 +150,7 @@ def create_task(
         content_hash=content.content_hash,
         status=TaskStatus.pending,
         created_by=by,
+        assigned_to=lead.assigned_to or by,
     )
     db.add(t)
     if commit:
@@ -158,11 +161,27 @@ def create_task(
     return t
 
 
+def check_member_owner(db: Session, lead_id: uuid.UUID, username: str | None) -> None:
+    from app.core.models import Operator
+
+    member = db.scalar(select(Operator).where(Operator.username == username))
+    lead = db.scalar(select(Lead).where(Lead.id == lead_id))
+    if member and (not member.is_active or member.role not in {"admin", "director", "member"}):
+        raise SalesError("负责人已停用或无业务权限，请重新分配")
+    if not lead or (member and member.role == "member" and lead.assigned_to != username):
+        raise SalesError("任务负责人已无门店权限，请由销售总监重新分配")
+
+
+def check_task_owner(db: Session, task: ManualTask) -> None:
+    check_member_owner(db, task.lead_id, task.assigned_to or task.created_by)
+
+
 def _recheck_or_pause(db: Session, t: ManualTask) -> None:
     elig = db.get(ChannelEligibility, t.eligibility_id)
     content = db.get(ContentPiece, t.content_id)
     assert elig is not None and content is not None
     try:
+        check_task_owner(db, t)
         check_can_contact(db, elig, content)
         if content.content_hash != t.content_hash:
             raise SalesError("内容已变化，与任务创建时不一致")

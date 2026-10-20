@@ -144,6 +144,13 @@ def test_group_filter_owner_and_viewer_permissions(client, db):
     identity, _, _ = _ready(client, db)
     _elig(client, identity)
     assigned = create(client, "owner", "member")
+    assert (
+        client.post(
+            "/api/assignment/apply",
+            json={"expected": {identity: None}, "assigned_to": "owner", "reason": "测试门店归属"},
+        ).status_code
+        == 200
+    )
     draft = prepare(client, identity, assigned_to="owner", batch_key="b1")["draft"]
     group = str(uuid.uuid4())
     result = client.post(

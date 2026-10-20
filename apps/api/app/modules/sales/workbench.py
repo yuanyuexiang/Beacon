@@ -81,12 +81,16 @@ def lead_or_404(db: Session, identity: uuid.UUID, lock: bool = False) -> Lead:
 
 
 def owner(db: Session, username: str | None) -> None:
+    if db.info.get("member_scope") and username and username != db.info["member_scope"]:
+        raise HTTPException(403, "业务成员不能将任务分配给其他人")
     if username and not db.scalar(
         select(Operator.id).where(
-            Operator.username == username, Operator.is_active.is_(True), Operator.role.in_(["admin", "member"])
+            Operator.username == username,
+            Operator.is_active.is_(True),
+            Operator.role.in_(["admin", "director", "member"]),
         )
     ):
-        raise HTTPException(422, "负责人必须为有效管理员或业务成员")
+        raise HTTPException(422, "负责人必须为有效管理员、销售总监或业务成员")
 
 
 def check_mode(channel: str, mode: str) -> None:
@@ -287,9 +291,15 @@ def context(db: Session, lead: Lead) -> dict:
 
 def assess(db: Session, draft: Preparation) -> list[str]:
     blockers = []
+    try:
+        service.check_member_owner(db, draft.lead_id, draft.assigned_to)
+    except service.SalesError as exc:
+        blockers.append(str(exc))
     if draft.assigned_to and not db.scalar(
         select(Operator.id).where(
-            Operator.username == draft.assigned_to, Operator.is_active.is_(True), Operator.role.in_(["admin", "member"])
+            Operator.username == draft.assigned_to,
+            Operator.is_active.is_(True),
+            Operator.role.in_(["admin", "director", "member"]),
         )
     ):
         blockers.append("负责人已停用或无业务权限，请重新分配")
@@ -348,7 +358,7 @@ def assess(db: Session, draft: Preparation) -> list[str]:
         )
         if not found:
             blockers.append("没有已授权、准入匹配且处于回复窗口的社媒会话；可改为人工执行")
-    return blockers
+    return list(dict.fromkeys(blockers))
 
 
 def draft_public(db: Session, d: Preparation) -> dict:
@@ -377,7 +387,12 @@ def assignees(db: Session = Depends(get_db)):
         {"username": o.username, "display_name": o.display_name}
         for o in db.scalars(
             select(Operator)
-            .where(Operator.is_active.is_(True), Operator.role.in_(["admin", "member"]))
+            .where(Operator.is_active.is_(True), Operator.role.in_(["admin", "director", "member"]))
+            .where(
+                Operator.username == db.info["member_scope"]
+                if db.info.get("member_scope")
+                else Operator.is_active.is_(True)
+            )
             .order_by(Operator.username)
         )
     ]
@@ -518,7 +533,7 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                         execution_mode=body.execution_mode,
                         eligibility_id=suitable[0].id if len(suitable) == 1 else None,
                         content_id=content.id if content else None,
-                        assigned_to=body.assigned_to or op.username,
+                        assigned_to=body.assigned_to or lead.assigned_to or op.username,
                         purpose=body.purpose,
                         status="draft",
                         created_by=op.username,
@@ -555,6 +570,8 @@ def patch_draft(
         raise HTTPException(409, "该草稿已转换任务或结束，请查看现有任务")
     changes = body.model_dump(exclude_unset=True)
     if "assigned_to" in changes:
+        if db.info.get("member_scope") and body.assigned_to != db.info["member_scope"]:
+            raise HTTPException(403, "业务成员不能转交或收回任务")
         owner(db, body.assigned_to)
     if changes.get("execution_mode") is None and "execution_mode" in changes:
         raise HTTPException(422, "执行方式不能为空")
@@ -657,6 +674,8 @@ def patch_task(
         raise HTTPException(409, "已完成任务不能调整")
     changes = body.model_dump(exclude_unset=True)
     if "assigned_to" in changes:
+        if db.info.get("member_scope") and body.assigned_to != db.info["member_scope"]:
+            raise HTTPException(403, "业务成员不能转交或收回任务")
         owner(db, body.assigned_to)
     if "execution_mode" in changes:
         check_mode(t.channel.value, body.execution_mode or "")
@@ -664,6 +683,11 @@ def patch_task(
             raise HTTPException(422, "执行方式不能为空")
     for key, value in changes.items():
         setattr(t, key, value)
+    try:
+        service.check_task_owner(db, t)
+    except service.SalesError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
     audit.record(
         db,
         op,

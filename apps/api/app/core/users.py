@@ -15,7 +15,7 @@ from app.core.auth import current_operator, hash_password, lock_current, verify_
 from app.core.db import get_db
 from app.core.models import Operator
 
-Role = Literal["admin", "member", "viewer"]
+Role = Literal["admin", "director", "member", "viewer"]
 router = APIRouter(prefix="/users", tags=["users"])
 
 

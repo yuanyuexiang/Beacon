@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import LeadAssignment from "@/components/LeadAssignment";
 import OutreachJourney from "@/components/OutreachJourney";
 import WebsiteReview, { ResearchLead } from "@/components/WebsiteReview";
 import PrepareOutreach from "@/components/PrepareOutreach";
@@ -15,7 +16,7 @@ import { label } from "@/lib/format";
 import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, contactFailureLabel, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
-type Lead = ResearchLead & { communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
+type Lead = ResearchLead & { assigned_to?: string | null; communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
 type Authority = { id: number; name: string; region: string | null; count: number | null; pool_count: number; last_success_at: string | null; type_versions: Record<string, unknown> };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
@@ -28,7 +29,10 @@ const SCREENING = ["unchecked", "candidate", "unknown", "excluded_cafe", "exclud
 
 function LeadsInner() {
   const { me } = useOperator();
-  const canWrite = me?.role === "admin" || me?.role === "member";
+  const canWrite = me?.role === "admin" || me?.role === "director" || me?.role === "member";
+  const canManage = me?.role === "admin" || me?.role === "director";
+  const [ownerView, setOwnerView] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState<string>();
   const sp = useSearchParams();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
@@ -83,7 +87,7 @@ function LeadsInner() {
   activeKey.current = batchKey;
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  const locked = !canWrite || creating || !!busy || workflowLoading || workflowLoadError || workflowBlocksActions(workflow);
+  const locked = !canManage || creating || !!busy || workflowLoading || workflowLoadError || workflowBlocksActions(workflow);
   const generatedName = useRef("");
   useEffect(() => { if (newOpen) createForm.resetFields(); }, [newOpen, createForm]);
   const err = (e: Error) => message.error(e.message);
@@ -231,7 +235,7 @@ function LeadsInner() {
     if (buildOpen && result?.run_id) api<NonNullable<typeof contactRun>>(`/api/runs/${result.run_id}`).then((value) => { if (current) setContactRun(value); }).catch((e) => { if (current) setContactError(e.message); });
     return () => { current = false; };
   }, [buildOpen, workflow]);
-  const filtered = useMemo(() => leads.filter((l) => (!businessType || l.business_type_id === businessType) && (!screen || l.screening_class === screen) && (!q || l.name.toLowerCase().includes(q.toLowerCase()) || (l.postcode ?? "").toLowerCase().includes(q.toLowerCase()))), [leads, businessType, screen, q]);
+  const filtered = useMemo(() => leads.filter((l) => (me?.role !== "member" ? (ownerView !== "mine" || l.assigned_to === me?.username) && (ownerView !== "unassigned" || !l.assigned_to) && (!ownerFilter || l.assigned_to === ownerFilter) : true) && (!businessType || l.business_type_id === businessType) && (!screen || l.screening_class === screen) && (!q || l.name.toLowerCase().includes(q.toLowerCase()) || (l.postcode ?? "").toLowerCase().includes(q.toLowerCase()))), [leads, businessType, screen, q, me?.role, me?.username, ownerView, ownerFilter]);
   const stats = useMemo(() => ({ total: leads.length, website: leads.filter((l) => l.website).length, candidate: leads.filter((l) => l.screening_class === "candidate").length, unchecked: leads.filter((l) => l.screening_class === "unchecked").length }), [leads]);
   const run = (name: string, p: Promise<unknown>, done: (r: never) => string) => { setBusy(name); p.then((r) => { message.success(done(r as never)); loadLeads(batchKey); loadBatches(); }).catch(err).finally(() => setBusy(null)); };
 
@@ -258,6 +262,12 @@ function LeadsInner() {
         <Col xs={12} md={6}><StatCard icon={<UserOutlined />} color="#7c3aed" title="待人工筛选" value={stats.unchecked} hint="点击只看待筛选" onClick={() => setScreen("unchecked")} /></Col>
       </Row>
 
+      {me?.role === "member" && <Alert type="info" showIcon message="仅显示分配给你的门店。可进入门店详情补充资料、准备触达和跟进；名单分配及整批管理由销售总监处理。" style={{ marginBottom: 12 }} />}
+      <Space wrap style={{ marginBottom: 12 }}>
+        <Select aria-label="门店归属视图" value={me?.role === "member" ? "mine" : ownerView} disabled={me?.role === "member"} onChange={(v) => { setOwnerView(v); setListPage(1); }} style={{ width: 150 }} options={[{ value: "all", label: "全部门店" }, { value: "mine", label: "我的门店" }, { value: "unassigned", label: "未分配" }]} />
+        {me?.role !== "member" && <Select aria-label="门店负责人筛选" allowClear placeholder="负责人" value={ownerFilter} onChange={(v) => { setOwnerFilter(v); setListPage(1); }} style={{ width: 180 }} options={[...new Set(leads.map((l) => l.assigned_to).filter((v): v is string => !!v))].map((v) => ({ value: v, label: v }))} />}
+        <LeadAssignment leadIds={(leads.some((l) => selectedRows.includes(l.id)) ? leads.filter((l) => selectedRows.includes(l.id)) : filtered).map((l) => l.id)} onChanged={() => { loadLeads(batchKey); loadBatches(); selectRows([]); }} />
+      </Space>
       <Card size="small" title="线索" extra={<Space>
         <Input.Search allowClear key={q} defaultValue={q} placeholder="搜索名称 / 邮编" style={{ width: 220 }} onSearch={(v) => { setQ(v); setListPage(1); }} onChange={(e) => { if (!e.target.value) { setQ(""); setListPage(1); } }} />
         <Select allowClear placeholder="FSA 登记类型" style={{ width: 200 }} value={businessType} onChange={(v) => { setBusinessType(v); setListPage(1); }} options={BUSINESS_TYPES} />
@@ -274,6 +284,7 @@ function LeadsInner() {
         <Table<Lead> scroll={{ x: 1700 }} rowSelection={{ selectedRowKeys: selectedRows, onChange: selectRows, preserveSelectedRowKeys: true }} rowKey="id" size="small" dataSource={filtered} pagination={{ current: listPage, pageSize, onChange: (p, size) => { setListPage(p); setPageSize(size); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           columns={[
             { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
+            { title: "门店负责人", width: 130, render: (_, r) => r.assigned_to || "未分配" },
             { title: "FSA 登记类型", width: 160, render: (_, r) => businessLabel(r.business_type_id, r.business_type_name) },
             { title: "经营类型／官网核验", width: 230, render: (_, r) => <WebsiteReview lead={r} onChanged={() => loadLeads(batchKey)} /> },
             { title: "沟通进展", width: 120, render: (_, r) => ["not_started", "preparing"].includes(r.communication_progress?.status || "not_started") ? <Button type="link" size="small" disabled={!canWrite} onClick={() => { setPrepareLeadIds([r.id]); setPrepareOpen(true); }}>{r.communication_progress?.status === "preparing" ? "继续准备" : "准备触达"}</Button> : <Link href={taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })}><Tag color={r.communication_progress?.status === "suppressed" ? "red" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag></Link> },

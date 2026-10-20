@@ -412,7 +412,12 @@ def list_events(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator 
 
 @router.get("/suppressions", response_model=list[SuppressionOut])
 def list_suppressions(db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
-    return list(db.scalars(select(Suppression).order_by(Suppression.created_at)).all())
+    query = select(Suppression).order_by(Suppression.created_at)
+    if op.role == "member":
+        from app.modules.leads.models import Lead
+
+        query = query.where(Suppression.lead_id.in_(select(Lead.id)))
+    return list(db.scalars(query).all())
 
 
 class CostIn(BaseModel):
@@ -437,6 +442,8 @@ class CostOut(CostIn):
 def add_cost(body: CostIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
     if body.amount is None and body.minutes is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "amount 与 minutes 至少填一项")
+    if op.role == "member" and body.lead_id is None:
+        raise HTTPException(403, "业务成员只能记录自己门店的成本")
     if body.amount is not None and not body.currency:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "有金额必须填币种")
     if body.batch_id is None and body.lead_id is None:

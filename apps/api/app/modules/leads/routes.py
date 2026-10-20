@@ -13,7 +13,7 @@ from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.models import Operator
 from app.modules.leads import runs, service, workflows
-from app.modules.leads.models import Batch, Lead, ScreeningClass
+from app.modules.leads.models import Batch, BatchLead, Lead, ScreeningClass
 from app.modules.leads.schemas import BatchIn, BatchOut, ImportResult, LeadOut, LeadPatch
 
 router = APIRouter(tags=["leads"])
@@ -41,6 +41,8 @@ def idle_run(run_id: uuid.UUID, db: Session = Depends(get_db)):
 
 @router.get("/batches/{batch_key}/workflow", response_model=workflows.WorkflowOut | None)
 def get_workflow(batch_key: str, db: Session = Depends(get_db)):
+    if db.info.get("member_scope"):
+        return None
     batch = service.get_batch_by_key(db, batch_key)
     if batch is None:
         raise HTTPException(404, "批次不存在")
@@ -134,8 +136,29 @@ def create_batch(body: BatchIn, db: Session = Depends(get_db), op: Operator = De
 
 
 @router.get("/batches", response_model=list[BatchOut])
-def list_batches(db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> list[Batch]:
-    return list(db.scalars(select(Batch).order_by(Batch.created_at.desc())).all())
+def list_batches(db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
+    query = select(Batch).order_by(Batch.created_at.desc())
+    if op.role == "member":
+        query = query.where(
+            Batch.id.in_(
+                select(BatchLead.batch_id)
+                .join(Lead, Lead.id == BatchLead.lead_id)
+                .where(Lead.assigned_to == op.username)
+            )
+        )
+    rows = list(db.scalars(query).all())
+    if op.role == "member":
+        return [
+            BatchOut.model_validate(b).model_copy(
+                update={
+                    "candidate_count": db.scalar(
+                        select(func.count()).select_from(BatchLead).where(BatchLead.batch_id == b.id)
+                    )
+                }
+            )
+            for b in rows
+        ]
+    return rows
 
 
 @router.get("/batches/{batch_key}/delete-preview")

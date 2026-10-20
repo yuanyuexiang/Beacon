@@ -1,4 +1,5 @@
 "use client";
+import LeadAssignment, { AssignmentHistory } from "@/components/LeadAssignment";
 import { issueLabel, menuJourney } from "@/lib/menu-journey";
 import WebsiteReview from "@/components/WebsiteReview";
 import PrepareOutreach from "@/components/PrepareOutreach";
@@ -23,7 +24,7 @@ import ContactReviewActions from "@/components/ContactReviewActions";
 import ContactAssessmentView from "@/components/ContactAssessment";
 import { AutoAdmission, ContactAssessment } from "@/lib/contact-ranking";
 
-type Lead = { operating_type?: { category: string; reason: string; citations: { quote: string }[] }; google_enrichment?: { status: string; error?: string }; verified_websites?: { url: string }[]; website_history?: { url: string; source?: string }[]; id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
+type Lead = { assigned_to?: string | null; operating_type?: { category: string; reason: string; citations: { quote: string }[] }; google_enrichment?: { status: string; error?: string }; verified_websites?: { url: string }[]; website_history?: { url: string; source?: string }[]; id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null; entity_status: string; entity_evidence: string | null };
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
 type Issue = { issue_code: string; fact: string; severity: string; confirmed: boolean | null; confirmed_by: string | null; note: string | null; deleted?: boolean; evidence: Record<string, unknown> };
@@ -154,6 +155,7 @@ export default function LeadDetail() {
       <HeroBand kicker="LEAD" title={lead.name} subtitle={<>{lead.source_key} · {lead.postcode ?? ""} · {lead.website ? <a href={lead.website} target="_blank" rel="noreferrer" style={{ color: "#fab736" }}>{lead.website}</a> : "无官网"}</>}
         extra={<><Button type="primary" onClick={() => setPrepareOpen(true)}>准备触达</Button><Link style={{ color: "#fab736" }} href={taskLink({ lead: id, returnTo: back })}>查看沟通进展</Link><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /><Tag style={{ marginInlineEnd: 0 }}>主体 {label(lead.entity_status)}</Tag></>}>
       </HeroBand>
+      <Space style={{ margin: "12px 0" }}><Typography.Text>门店负责人：{lead.assigned_to || "未分配"}</Typography.Text><LeadAssignment leadIds={[id]} onChanged={() => reload()} /><AssignmentHistory leadId={id} /></Space>
       <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: "14px 20px" } }}>
         <Steps aria-label="菜单资料流程" size="small" current={journey.current} onChange={(step) => step === 3 ? setPrepareOpen(true) : step === 2 && journey.assetId ? scrollTo(`menu-review-${journey.assetId}`) : scrollTo("menu-files")} items={[{ title: "获取菜单" }, { title: "AI 分析" }, { title: "核对事实" }, { title: "准备触达" }]} />
       </Card>

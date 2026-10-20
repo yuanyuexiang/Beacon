@@ -50,7 +50,18 @@ api = APIRouter(prefix="/api")
 async def places_no_store(request: Request, call_next):
     response = await call_next(request)
     if (
-        request.url.path.startswith(("/api/auth", "/api/users"))
+        request.url.path.startswith(
+            (
+                "/api/auth",
+                "/api/users",
+                "/api/leads",
+                "/api/batches",
+                "/api/tasks",
+                "/api/files",
+                "/api/communication",
+                "/api/assignment",
+            )
+        )
         or "/google-places" in request.url.path
         or "/maps-menu" in request.url.path
         or "/gmail" in request.url.path
@@ -100,6 +111,9 @@ protected.include_router(gmail_router)
 from app.modules.leads.policy import router as policy_router  # noqa: E402
 
 protected.include_router(policy_router)
+from app.modules.leads.assignment import router as assignment_router  # noqa: E402
+
+protected.include_router(assignment_router)
 protected.include_router(leads_router)
 protected.include_router(directory_router)
 protected.include_router(auto_research_router)
@@ -127,7 +141,18 @@ include_module_routers()
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
-    if request.url.path.startswith(("/api/auth", "/api/users")):
+    if request.url.path.startswith(
+        (
+            "/api/auth",
+            "/api/users",
+            "/api/leads",
+            "/api/batches",
+            "/api/tasks",
+            "/api/files",
+            "/api/communication",
+            "/api/assignment",
+        )
+    ):
         return JSONResponse(
             status_code=422, content={"detail": "账号信息格式无效：请检查字段；新密码或临时密码需为 8～128 个字符"}
         )

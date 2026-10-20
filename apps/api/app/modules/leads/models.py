@@ -67,6 +67,9 @@ class Lead(UUIDPk, Timestamped, Base):
     lat: Mapped[float | None] = mapped_column(Float)
     lng: Mapped[float | None] = mapped_column(Float)
     website: Mapped[str | None] = mapped_column(String(512))
+    assigned_to: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("operator.username", ondelete="SET NULL"), index=True
+    )
     website_source: Mapped[str | None] = mapped_column(String(128))  # 官网来源说明（人工检索/来源字段）
     screening_class: Mapped[ScreeningClass] = mapped_column(
         _enum(ScreeningClass, "screening_class"), default=ScreeningClass.unchecked, nullable=False

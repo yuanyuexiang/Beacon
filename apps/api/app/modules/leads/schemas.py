@@ -29,6 +29,7 @@ class BatchOut(BatchIn):
 
 
 class LeadOut(BaseModel):
+    assigned_to: str | None = None
     id: uuid.UUID
     source_key: str
     source_name: str

@@ -18,6 +18,7 @@ from app.core.auth import (
     set_session_cookie,
     verify_password,
 )
+from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.files import UnsafePathError, resolve_within
 from app.core.models import Operator
@@ -117,12 +118,27 @@ def password(
 
 
 @router.get("/files/{rel_path:path}")
-def get_file(rel_path: str, op: Operator = Depends(current_operator)) -> FileResponse:
+def get_file(rel_path: str, op: Operator = Depends(current_operator), db: Session = Depends(get_db)) -> FileResponse:
     """受控文件下载：需登录；路径限定在数据目录内。"""
     try:
         p = resolve_within(rel_path)
     except UnsafePathError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    if op.role == "member":
+        from sqlalchemy import or_
+
+        from app.modules.content.models import ContentPiece
+        from app.modules.menus.models import MenuAsset
+
+        key = p.relative_to(get_settings().data_dir.resolve()).as_posix()
+        asset = db.scalar(select(MenuAsset.id).where(MenuAsset.storage_path == key))
+        content = db.scalar(
+            select(ContentPiece.id).where(
+                or_(ContentPiece.storage_path_html == key, ContentPiece.storage_path_png == key)
+            )
+        )
+        if not asset and not content:
+            raise HTTPException(404, "文件不存在或无访问权限")
     if not p.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文件不存在")
     return FileResponse(p)

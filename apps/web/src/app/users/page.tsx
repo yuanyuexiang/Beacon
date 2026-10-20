@@ -25,7 +25,7 @@ export default function UsersPage() {
   const act = async (work: () => Promise<void>) => { setBusy(true); setError(undefined); setSuccess(undefined); try { await work(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   const selfChanged = (id: string) => { if (id === me.id) { setMode(null); router.replace("/login"); return true; } return false; };
   return <>
-    <HeroBand kicker="USERS" title="用户管理" subtitle="管理员、业务成员和只读成员共享同一工作空间。" extra={<Button type="primary" disabled={busy} onClick={() => { setTarget(null); setMode("create"); }}>新增用户</Button>} />
+    <HeroBand kicker="USERS" title="用户管理" subtitle="管理员管理账号，销售总监分配门店，业务成员经营自己的门店。" extra={<Button type="primary" disabled={busy} onClick={() => { setTarget(null); setMode("create"); }}>新增用户</Button>} />
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
     {success && <Alert type="success" showIcon message={success} style={{ marginBottom: 16 }} />}
     <Alert type="info" showIcon message="初始／临时密码须由你安全交给用户，首次登录强制修改。停用、重置密码或调整角色会使该用户旧会话失效；至少保留一位有效管理员。" style={{ marginBottom: 16 }} />

@@ -60,7 +60,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           )}
         </Link>
         <Menu className="beacon-nav" theme="dark" mode="inline" selectedKeys={[section]}
-          items={NAV_GROUPS.filter((g) => g.key !== "system" || me?.role === "admin").map((g) => ({ key: g.key, type: "group" as const, label: g.label, children: g.items.map((n) => ({ key: n.key, icon: n.icon, label: <Link href={n.key}>{n.label}</Link> })) }))} />
+          items={NAV_GROUPS.filter((g) => g.key !== "system" || me?.role === "admin").map((g) => ({ key: g.key, type: "group" as const, label: g.label, children: g.items.filter((n) => !(me?.role === "member" && n.key === "/directory")).map((n) => ({ key: n.key, icon: n.icon, label: <Link href={n.key}>{n.label}</Link> })) }))} />
         <div className="beacon-sider-foot">
           {collapsed ? (
             <Tooltip placement="right" title="邮件与已连接社媒会话预览确认后发送，其余渠道人工触达"><SafetyCertificateOutlined /></Tooltip>

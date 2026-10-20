@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core import audit
@@ -163,6 +163,7 @@ def cancel(delivery_id: uuid.UUID, db: Session = Depends(get_db), op: Operator =
 
 @router.post("/deliveries/{delivery_id}/reconcile")
 def reconcile(delivery_id: uuid.UUID, db: Session = Depends(get_db)):
+    db.execute(text(f"SELECT pg_advisory_xact_lock({service.LOCK_KEY})"))
     row = db.scalar(select(EmailDelivery).where(EmailDelivery.id == delivery_id).with_for_update())
     if not row:
         raise HTTPException(404, "发送记录不存在")

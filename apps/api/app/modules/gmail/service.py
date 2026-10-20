@@ -61,6 +61,7 @@ def checked_task(db: Session, task_id: uuid.UUID) -> tuple[ManualTask, ChannelEl
         .execution_options(populate_existing=True)
     )
     assert elig is not None and content is not None
+    sales.check_task_owner(db, task)
     sales.check_can_contact(db, elig, content)
     if content.kind != ContentKind.message_short or not content.body_text or content.content_hash != task.content_hash:
         raise sales.SalesError("任务须使用当前已审批的邮件文案，内容版本不能改变")
@@ -70,6 +71,7 @@ def checked_task(db: Session, task_id: uuid.UUID) -> tuple[ManualTask, ChannelEl
 
 
 def preview(db: Session, task_id: uuid.UUID, subject: str, op: Operator, batch_key: str | None = None) -> EmailDelivery:
+    db.execute(text(f"select pg_advisory_xact_lock({LOCK_KEY})"))
     task, elig, content = checked_task(db, task_id)
     delivery = db.scalar(select(EmailDelivery).where(EmailDelivery.task_id == task_id).with_for_update())
     if delivery and delivery.status not in {"preview", "failed", "blocked", "expired", "cancelled"}:
@@ -113,6 +115,7 @@ def recheck(db: Session, delivery: EmailDelivery) -> ManualTask:
 
 
 def approve(db: Session, ids: list[uuid.UUID], op: Operator, queued: bool, preview_keys: dict[str, str]) -> list[dict]:
+    db.execute(text(f"select pg_advisory_xact_lock({LOCK_KEY})"))
     policy = client.call("GET", "/policy")
     if not policy["sending_enabled"]:
         raise sales.SalesError("请先在设置中开启 Gmail 发送")

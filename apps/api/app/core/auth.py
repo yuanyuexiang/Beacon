@@ -95,7 +95,13 @@ def current_operator(request: Request, db: Session = Depends(get_db)) -> Operato
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "操作者不存在或已停用")
     if payload.get("ver", 0) != op.session_version:
         raise HTTPException(401, "登录已失效，请重新登录")
+    db.info.pop("member_scope", None)
+    db.info["operator_role"], db.info["operator_username"] = op.role, op.username
     enforce_permissions(request, op)
+    if op.role == "member":
+        from app.core.access import set_scope
+
+        set_scope(db, op.username)
     return op
 
 
@@ -126,6 +132,15 @@ def enforce_permissions(request: Request, op: Operator) -> None:
     )
     if admin_only and op.role != "admin":
         raise HTTPException(403, "此操作需要管理员权限")
+    if op.role == "member":
+        if (
+            path.startswith(("/api/runs", "/api/directory", "/api/imports", "/api/lists"))
+            or (path == "/api/batches" and writes)
+            or (path.startswith("/api/batches/") and (writes or any(x in path for x in ("delete-preview", "/runs"))))
+        ):
+            raise HTTPException(403, "名单与门店池管理需要销售总监或管理员权限")
+        if path == "/api/gmail/sync-replies":
+            raise HTTPException(403, "全量回复同步需要销售总监或管理员权限")
     if writes and op.role == "viewer":
         raise HTTPException(403, "只读成员不能修改数据或发送消息")
 
@@ -145,7 +160,7 @@ def may_send(db: Session, username: str | None) -> bool:
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    return bool(op and op.is_active and not op.must_change_password and op.role in {"admin", "member"})
+    return bool(op and op.is_active and not op.must_change_password and op.role in {"admin", "director", "member"})
 
 
 def bootstrap_operator(db: Session) -> Operator | None:

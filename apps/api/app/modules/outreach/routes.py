@@ -25,6 +25,7 @@ public_router = APIRouter(prefix="/api/outreach", tags=["outreach-public"])
 
 @contextmanager
 def operation(db: Session):
+    db.execute(text(f"SELECT pg_advisory_xact_lock({service.LOCK_KEY})"))
     try:
         yield
     except (SalesError, client.ProviderError, IntegrityError) as exc:

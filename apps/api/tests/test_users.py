@@ -154,14 +154,14 @@ def test_viewer_cannot_write_but_can_read(client, db, method, path):
     assert c.get("/api/directory/regions").status_code == 200
 
 
-def test_member_can_create_business_data_and_viewer_can_change_own_password(client, db):
+def test_member_cannot_manage_lists_and_viewer_can_change_own_password(client, db):
     op = make_operator(db)
     op.role = "member"
     db.commit()
     c = session(op)
     assert (
         c.post("/api/batches", json={"batch_key": "member", "country": "GB", "source_name": "manual"}).status_code
-        == 201
+        == 403
     )
     op.role = "viewer"
     db.commit()

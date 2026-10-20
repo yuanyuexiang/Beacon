@@ -101,6 +101,7 @@ def checked_task(db: Session, task_id: uuid.UUID, c: Conversation, a: ChannelAcc
         .execution_options(populate_existing=True)
     )
     assert elig and content
+    sales.check_task_owner(db, t)
     sales.check_can_contact(db, elig, content)
     if content.kind != ContentKind.message_short or content.content_hash != t.content_hash or not content.body_text:
         raise sales.SalesError("须使用当前已审批的短文案")
@@ -114,6 +115,7 @@ def checked_task(db: Session, task_id: uuid.UUID, c: Conversation, a: ChannelAcc
 
 
 def preview(db: Session, task_id: uuid.UUID, conversation_id: uuid.UUID, op: Operator) -> OutreachDelivery:
+    db.execute(text(f"select pg_advisory_xact_lock({LOCK_KEY})"))
     c = db.get(Conversation, conversation_id)
     if not c:
         raise sales.SalesError("会话不存在；公开主页 URL 不能直接发送")
@@ -191,6 +193,7 @@ def recheck(db: Session, d: OutreachDelivery) -> tuple[ManualTask, ChannelAccoun
 
 
 def approve(db: Session, ids: list[uuid.UUID], keys: dict[str, str], queued: bool, op: Operator) -> list[dict]:
+    db.execute(text(f"select pg_advisory_xact_lock({LOCK_KEY})"))
     rows = []
     for did in sorted(ids):
         d = db.scalar(select(OutreachDelivery).where(OutreachDelivery.id == did).with_for_update())

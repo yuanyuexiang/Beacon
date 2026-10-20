@@ -12,7 +12,7 @@ from app.core.models_base import Base, Timestamped, UUIDPk
 
 class Operator(UUIDPk, Timestamped, Base):
     __tablename__ = "operator"
-    __table_args__ = (CheckConstraint("role IN ('admin', 'member', 'viewer')", name="ck_operator_role"),)
+    __table_args__ = (CheckConstraint("role IN ('admin', 'director', 'member', 'viewer')", name="ck_operator_role"),)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(80))
