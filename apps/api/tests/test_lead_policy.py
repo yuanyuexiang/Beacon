@@ -1,13 +1,13 @@
 """策略配置、人工保护、Google 预算与官网证据闭环；无真实网络。"""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.models import Operator
+from app.core.models import AuditLog, Operator
 from app.integrations import google_places as google
 from app.integrations import research_judge
 from app.modules.leads import google_places, places_enrichment, policy, service, website_review, workflows
@@ -29,7 +29,7 @@ def test_policy_conflict_validation_and_manual_protection(client, db):
     saved = client.put("/api/lead-policy", json=changed)
     assert saved.status_code == 200
     assert client.put("/api/lead-policy", json=changed).status_code == 409
-    assert client.put("/api/lead-policy", json={**saved.json(), "google_request_limit": 0}).status_code == 422
+    assert client.put("/api/lead-policy", json={**saved.json(), "stale_days": 0}).status_code == 422
     service.auto_screen(db, batch)
     assert lead.screening_class == ScreeningClass.excluded_cafe
     client.patch(f"/api/leads/{lead.id}", json={"screening_class": "candidate", "screening_reason": "人工已核对"})
@@ -67,7 +67,7 @@ def test_workflow_freezes_policy_and_google_skips_when_unconfigured(client, db):
     assert result["done"] and "未配置" in result["note"]
 
 
-def test_request_budget_counts_retries_and_survives_new_client(client, db):
+def test_workflow_does_not_limit_calls_but_keeps_minute_protection(client, db):
     _, lead = setup_lead(client, db)
     get_settings().google_places_api_key = "test-not-real"
     operator = db.scalar(select(Operator))
@@ -75,17 +75,22 @@ def test_request_budget_counts_retries_and_survives_new_client(client, db):
 
     def reply(request):
         calls.append(request)
-        return httpx.Response(500)
+        return httpx.Response(200, json={"places": []})
 
-    one = google_places._client(db, operator, lead.id, workflow_id="budget", request_limit=1)
-    one.transport = httpx.MockTransport(reply)
-    with pytest.raises(google.PlacesError, match="预算"):
+    for _ in range(20):
+        one = google_places._client(db, operator, lead.id, workflow_id="unlimited")
+        one.transport = httpx.MockTransport(reply)
         one.search("Cafe")
-    two = google_places._client(db, operator, lead.id, workflow_id="budget", request_limit=1)
+    two = google_places._client(db, operator, lead.id, workflow_id="unlimited")
     two.transport = httpx.MockTransport(reply)
-    with pytest.raises(google.PlacesError, match="预算"):
+    with pytest.raises(google.PlacesError, match="次数已达上限"):
         two.search("Cafe")
-    assert len(calls) == 1
+    assert len(calls) == 20
+    for record in db.scalars(select(AuditLog).where(AuditLog.action == "google_places_request")):
+        record.at = datetime.now(UTC) - timedelta(minutes=2)
+    db.commit()
+    two.search("Cafe")
+    assert len(calls) == 21  # 同一任务超过旧 20 次上限仍可调用。
     get_settings().google_places_api_key = None
 
 
@@ -225,3 +230,37 @@ def test_verified_operating_type_takes_priority_over_name_keywords(client, db):
     lead.raw = {"operating_type": {"category": "cafe", "citations": [{"quote": "a cafe"}]}}
     cls, reason, _ = policy.evaluate(lead, selected)
     assert cls == ScreeningClass.excluded_cafe and "官网原文" in reason
+
+
+def test_old_exhausted_workflow_can_continue_without_new_task(client, db, monkeypatch):
+    batch, lead = setup_lead(client, db)
+    monkeypatch.setattr(get_settings(), "google_places_api_key", "test")
+    task = workflows.start(db, batch, workflows.WorkflowIn(), "tester")
+    task.step = task.steps.index("google")
+    note = "本次任务 Google 调用预算已用完，剩余门店可另开补充任务"
+    lead.raw = {
+        "places_enrichment": {
+            "strategy_version": places_enrichment.STRATEGY_VERSION,
+            "google_status": "retry",
+            "status": "retry",
+            "reason": note,
+            "website": lead.website,
+            "manual": website_review.manual(lead),
+            "checked_at": datetime.now(UTC).isoformat(),
+        }
+    }
+    task.params = {**task.params, "policy": {**task.params["policy"], "google_request_limit": 20}}
+    task.results = [{}, {"processed": [str(lead.id)], "google_exhausted": True, "note": note}]
+    db.commit()
+    calls = []
+
+    def review(*args):
+        calls.append(str(args[1].id))
+        args[1].raw = {"places_enrichment": {"status": "insufficient", "google_status": "completed"}}
+        return "insufficient"
+
+    monkeypatch.setattr(places_enrichment, "review_one", review)
+    result = places_enrichment.advance(db, batch, task)
+    assert calls == [str(lead.id)] and result["done"]
+    assert "google_exhausted" not in result and "note" not in result
+    assert "google_request_limit" not in policy.Policy.model_validate(task.params["policy"]).model_dump()

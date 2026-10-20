@@ -124,3 +124,6 @@ D67 AI 自动准入：用户授权模型提取证据、版本化规则写入真�
 
 
 D68 无菜单询问：详情页可直接准备询问菜单／负责人的短文案，mode=menu_inquiry 不依赖分析；审批／准入／抑制与发送检查保持生效。收到菜单后仍走原分析路径。专项 tests/test_menu_inquiry.py，界面 scripts/verify_menu_inquiry_ui.py（全模拟、不发送）。无需迁移，只本地更新，见手册 D68。
+
+
+D69（2026-10-20）：Google 单任务调用上限移除，旧 google_request_limit 忽略，Google 阶段旧额度耗尽检查点可恢复；项目分钟／每日保护保留。专项 tests/test_lead_policy.py、tests/test_google_places.py；界面 scripts/verify_lead_policy_ui.py。无需迁移，只本地更新，见手册 D69。

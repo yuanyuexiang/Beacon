@@ -30,6 +30,8 @@ def needed(lead: Lead, settings: policy.Policy) -> bool:
         or record.get("manual") != website_review.manual(lead)
     ):
         return True
+    if "本次任务 Google 调用预算已用完" in record.get("reason", ""):
+        return True
     review = (lead.raw or {}).get("website_research") or {}
     try:
         age = datetime.now(UTC) - datetime.fromisoformat(record["checked_at"])
@@ -72,9 +74,7 @@ def review_one(
     status = "insufficient"
     original = website_review.snapshot(lead)
     if lookup:
-        client = google_places._client(
-            db, operator, lead.id, workflow_id=workflow_id, request_limit=selected.google_request_limit
-        )
+        client = google_places._client(db, operator, lead.id, workflow_id=workflow_id)
         linked = google_places._link(lead)
         try:
             candidates = (
@@ -174,6 +174,9 @@ def _save_status(
 def advance(db: Session, batch: Batch, task: "Workflow") -> dict:
     selected = policy.Policy.model_validate(task.params["policy"])
     state: dict[str, Any] = dict(task.results[task.step]) if len(task.results) > task.step else {}
+    # 兼容旧任务：只清除旧的单任务额度耗尽检查点，当前全局限流继续保留。
+    if "本次任务 Google 调用预算已用完" in state.get("note", ""):
+        state = {}
     for key, value in {
         "processed": [],
         "verified": 0,

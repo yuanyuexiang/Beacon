@@ -40,7 +40,6 @@ class Policy(BaseModel):
     corporate_email_auto: bool = True
     admission_valid_days: int = Field(default=30, ge=1, le=90)
     google_mode: Literal["off", "needed", "all"] = "needed"
-    google_request_limit: int = Field(default=20, ge=1, le=200)
     stale_days: int = Field(default=90, ge=1, le=365)
 
     @field_validator("chain_names", "institution_words")

@@ -17,7 +17,6 @@ saved = {
     "chain_names": ["Starbucks"],
     "institution_words": ["college"],
     "google_mode": "needed",
-    "google_request_limit": 20,
     "stale_days": 90,
 }
 writes = []
@@ -55,7 +54,7 @@ async def main():
         await expect(card).to_contain_text("咖啡馆／面包店／Deli")
         await expect(card).to_contain_text("Google 优先：首次、过期或异常时查询")
         await expect(card).to_contain_text("即使 Overture 已有官网")
-        await card.get_by_label("每个任务最多 API 尝试次数").fill("12")
+        await expect(card.get_by_label("每个任务最多 API 尝试次数")).to_have_count(0)
         await card.get_by_label("核验有效天数").fill("30")
         await (
             card.locator(".ant-form-item")
@@ -66,10 +65,10 @@ async def main():
         await page.get_by_title("标记待复核，继续研究", exact=True).last.click()
         await card.get_by_role("button", name="保存策略").click()
         await page.get_by_text("策略已保存，新任务生效", exact=True).wait_for()
-        assert writes[-1]["google_request_limit"] == 12 and writes[-1]["stale_days"] == 30
+        assert "google_request_limit" not in writes[-1] and writes[-1]["stale_days"] == 30
         assert writes[-1]["cafe_action"] == "review"
         await page.reload()
-        await expect(page.get_by_label("每个任务最多 API 尝试次数")).to_have_value("12")
+        await expect(page.get_by_label("每个任务最多 API 尝试次数")).to_have_count(0)
         await expect(page.get_by_label("核验有效天数")).to_have_value("30")
         await expect(page.get_by_role("button", name="保存策略", exact=True)).to_be_enabled()
         await page.screenshot(path="data/devchecks/lead-policy-settings.png", full_page=True)

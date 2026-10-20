@@ -98,7 +98,7 @@ def test_enrich_never_fetches_fsa_and_append_selects_new_members(setup, db, monk
         append = _advance(client, append)
     enrich = client.post("/api/batches/new/workflow", json={"kind": "enrich"}).json()
     assert enrich["steps"] == ["overture", "google", "screen", "contacts"]
-    assert enrich["params"]["policy"]["google_request_limit"] == 20
+    assert "google_request_limit" not in enrich["params"]["policy"]
     monkeypatch.setattr(fsa, "fetch_establishments", lambda *a, **k: pytest.fail("完善不应获取名录"))
     while enrich["status"] != "completed":
         enrich = _advance(client, enrich)
