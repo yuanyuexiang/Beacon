@@ -95,6 +95,20 @@ def retry_asset(
     return asset
 
 
+@router.get("/leads/{lead_id}/menu-workspace")
+def menu_workspace(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> dict:
+    """单家菜单资料批量读取，不逐文件发起 HTTP 请求。"""
+    _lead_or_404(db, lead_id)
+    assets = list(db.scalars(select(MenuAsset).where(MenuAsset.lead_id == lead_id).order_by(MenuAsset.created_at)))
+    analyses = db.scalars(
+        select(MenuAnalysis).where(MenuAnalysis.asset_id.in_([a.id for a in assets])).order_by(MenuAnalysis.version)
+    )
+    grouped: dict[str, list] = {str(a.id): [] for a in assets}
+    for analysis in analyses:
+        grouped[str(analysis.asset_id)].append(AnalysisOut.model_validate(analysis).model_dump(mode="json"))
+    return {"assets": [AssetOut.model_validate(a).model_dump(mode="json") for a in assets], "analyses": grouped}
+
+
 @router.get("/leads/{lead_id}/assets", response_model=list[AssetOut])
 def list_assets(
     lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)

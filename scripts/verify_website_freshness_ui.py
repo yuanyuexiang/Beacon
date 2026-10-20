@@ -55,9 +55,12 @@ async def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         await page.route("**/api/**", handle)
         await page.goto("http://localhost:3000/leads?batch=ai-test")
+        await page.locator(".ant-table-row-expand-icon-collapsed").first.wait_for()
+        while await page.locator(".ant-table-row-expand-icon-collapsed").count():
+            await page.locator(".ant-table-row-expand-icon-collapsed").first.click()
         await expect(page.get_by_text("官网：待重试", exact=True)).to_be_visible()
         await expect(page.get_by_text("官网：身份冲突，需人工核对", exact=True)).to_be_visible()
-        await page.get_by_role("button", name="查看依据／AI 核验", exact=True).first.click()
+        await page.get_by_role("button", name="查看核验结果", exact=True).first.click()
         await page.get_by_role("button", name="AI 核验／重试", exact=True).click()
         await expect(page.get_by_text("官网确认门店身份", exact=True)).to_be_visible()
         await expect(page.get_by_text("当前采用官网", exact=True)).to_be_visible()
@@ -75,7 +78,10 @@ async def main():
         await expect(page.get_by_text("供应餐食", exact=True)).to_be_visible()
         role = "viewer"
         await page.reload()
-        await page.get_by_role("button", name="查看依据／AI 核验", exact=True).first.click()
+        await page.locator(".ant-table-row-expand-icon-collapsed").first.wait_for()
+        while await page.locator(".ant-table-row-expand-icon-collapsed").count():
+            await page.locator(".ant-table-row-expand-icon-collapsed").first.click()
+        await page.get_by_role("button", name="查看核验结果", exact=True).first.click()
         await expect(page.get_by_role("button", name="AI 核验／重试", exact=True)).to_be_disabled()
         assert writes == ["/api/leads/1/website-review"], writes
         assert not errors, errors

@@ -18,9 +18,12 @@ export default function MapsMenu({ id, onAdded }: { id: string; onAdded: () => P
   const [error, setError] = useState<string | null>(null);
   const callback = useRef(onAdded);
   const notified = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { callback.current = onAdded; }, [onAdded]);
   const refresh = useCallback(async () => {
     const next = await api<State>(`/api/leads/${id}/maps-menu`, { cache: "no-store" });
+    if (!mounted.current) return next;
     setState(next); setError(null);
     if (next.run && !active(next.run) && notified.current !== next.run.id) {
       notified.current = next.run.id;

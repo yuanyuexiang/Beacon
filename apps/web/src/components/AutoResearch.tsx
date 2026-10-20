@@ -15,9 +15,12 @@ export default function AutoResearch({ id, onFinished }: { id: string; onFinishe
   const [error, setError] = useState<string | null>(null);
   const callback = useRef(onFinished);
   const notified = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => { callback.current = onFinished; }, [onFinished]);
   const refresh = useCallback(async () => {
     const next = await api<State>(`/api/leads/${id}/auto-research`, { cache: "no-store" });
+    if (!mounted.current) return next;
     setState(next); setError(null);
     if (next.run && !active(next.run) && notified.current !== next.run.id) {
       notified.current = next.run.id;

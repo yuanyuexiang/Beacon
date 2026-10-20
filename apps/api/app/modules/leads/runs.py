@@ -3,7 +3,7 @@
 
 import enum
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -183,9 +183,11 @@ def resume_run(db: Session, run: BatchRun) -> int:
     return n
 
 
-def execute(db: Session, run: BatchRun, max_jobs: int | None = None) -> BatchRun:
+def execute(
+    db: Session, run: BatchRun, max_jobs: int | None = None, should_stop: Callable[[], bool] | None = None
+) -> BatchRun:
     """顺序执行 pending job；抓取完成后重新规划一次，使同一轮里新抓到的文件也得到分析。"""
-    _execute_pending(db, run, max_jobs)
+    _execute_pending(db, run, max_jobs, should_stop)
     if "analyze" in run.steps and max_jobs is None:
         batch = db.get(Batch, run.batch_id)
         assert batch is not None
@@ -194,15 +196,21 @@ def execute(db: Session, run: BatchRun, max_jobs: int | None = None) -> BatchRun
     return _finalize(db, run)
 
 
-def _execute_pending(db: Session, run: BatchRun, max_jobs: int | None) -> None:
+def _execute_pending(
+    db: Session, run: BatchRun, max_jobs: int | None, should_stop: Callable[[], bool] | None = None
+) -> None:
     pending = db.scalars(
         select(BatchJob)
         .where(BatchJob.run_id == run.id, BatchJob.status == JobStatus.pending)
         .order_by(BatchJob.step, BatchJob.lead_id)
     ).all()
     chunk = pending if max_jobs is None else pending[:max_jobs]
+    if should_stop and should_stop():
+        return
     scans = _prefetch_websites(db, chunk)  # 联系方式步骤：先并行读完这一块的官网，数据库写入仍逐条进行
     for j in chunk:
+        if should_stop and should_stop():
+            break
         j.status, j.started_at, j.attempts = JobStatus.running, datetime.now(UTC), j.attempts + 1
         db.commit()
         try:

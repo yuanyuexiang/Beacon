@@ -12,9 +12,10 @@ from typing import Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import ForeignKey, Integer, String, Text, select, text
+from sqlalchemy import ForeignKey, Integer, String, Text, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, Session, mapped_column
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.models_base import Base, Timestamped, UUIDPk
 from app.modules.directory import service as directory
@@ -145,12 +146,33 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
     return task
 
 
+def cancelled(db: Session, task_id: uuid.UUID) -> bool:
+    with db.no_autoflush:
+        return db.scalar(select(Workflow.status).where(Workflow.id == task_id)) == "cancelled"
+
+
+def save_progress(db: Session, task: Workflow) -> None:
+    """条件更新防止晚到的执行结果覆盖并发取消；业务结果照常提交。"""
+    fields = {key: getattr(task, key) for key in ("status", "error", "step", "results")}
+    for key, value in fields.items():
+        set_committed_value(task, key, value)
+    with db.no_autoflush:
+        db.execute(
+            update(Workflow).where(Workflow.id == task.id, Workflow.status != "cancelled").values(**fields),
+            execution_options={"synchronize_session": False},
+        )
+    db.commit()
+    db.refresh(task)
+
+
 def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
     if task.status in {"completed", "cancelled"}:
         return task
     retry = task.status == "failed"
     task.status, task.error = "running", None
-    db.commit()
+    save_progress(db, task)
+    if task.status == "cancelled":
+        return task
     stage = task.steps[task.step]
     try:
         if stage == "pool":
@@ -188,7 +210,7 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
             if not result["done"]:
                 task.results = task.results[: task.step] + [result]
                 task.status = "pending"
-                db.commit()
+                save_progress(db, task)
                 return task
         elif stage == "screen":
             result = service.auto_screen(db, batch, policy_data=task.params.get("policy"))
@@ -204,7 +226,7 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
                 db.add(run)
                 db.flush()
                 task.contact_run_id = run.id
-                db.commit()
+                save_progress(db, task)
             saved_run = db.get(runs.BatchRun, task.contact_run_id)
             assert saved_run is not None
             run = saved_run
@@ -212,31 +234,34 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
             for job in db.scalars(select(runs.BatchJob).where(runs.BatchJob.run_id == run.id)).all():
                 if job.status == runs.JobStatus.running or (retry and job.status == runs.JobStatus.failed):
                     job.status, job.error = runs.JobStatus.pending, None
-            db.commit()
+            save_progress(db, task)
             runs.plan_jobs(db, run, batch)
-            runs.execute(db, run, max_jobs=20)
+            runs.execute(db, run, max_jobs=20, should_stop=lambda: cancelled(db, task.id))
             result = {"totals": run.totals, "run_id": str(run.id)}
             if (run.totals or {}).get("pending"):
                 task.status = "pending"
                 task.results = task.results[: task.step] + [result]
-                db.commit()
+                save_progress(db, task)
                 return task
             if (run.totals or {}).get("failed"):
                 task.results = task.results[: task.step] + [result]
-                db.commit()
+                save_progress(db, task)
                 counts = run.totals or {}
                 raise ValueError(
                     f"部分读取 {counts.get('read_partial', 0)} 家，读取失败 {counts.get('read_failed', 0)} 家；"
                     "成功结果已保留，可以继续使用名单，或只重试未完成项"
                 )
+        if cancelled(db, task.id):
+            db.refresh(task)
+            return task
         task.results = task.results[: task.step] + [result]
         task.step += 1
         task.status = "completed" if task.step == len(task.steps) else "pending"
-        db.commit()
+        save_progress(db, task)
     except Exception as exc:
         db.rollback()
         db.refresh(task)
         task.status, task.error = "failed", str(exc)[:2000]
-        db.commit()
+        save_progress(db, task)
     db.refresh(task)
     return task

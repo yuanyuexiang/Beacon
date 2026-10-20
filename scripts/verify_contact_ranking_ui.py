@@ -22,7 +22,13 @@ async def handle(route):
     path, method = urlsplit(route.request.url).path, route.request.method
     if method != "GET":
         writes.append(path)
-    if path == "/api/auth/me":
+    if path.endswith("/menu-workspace"):
+        data = {"assets": [], "analyses": {}}
+    elif path == "/api/communication/assignees":
+        data = []
+    elif path.startswith("/api/communication/leads/"):
+        data = {"lead": {"id": ID, "name": "Mock restaurant"}, "contacts": [], "contents": [], "analyses": [], "tasks": [], "drafts": [], "progress": {"status": "not_started"}}
+    elif path == "/api/auth/me":
         data = {"id": "ui", "username": "ui", "role": role, "must_change_password": False}
     elif path == f"/api/leads/{ID}":
         data = lead

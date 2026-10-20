@@ -76,6 +76,12 @@ def preview(db: Session, task_id: uuid.UUID, subject: str, op: Operator, batch_k
     delivery = db.scalar(select(EmailDelivery).where(EmailDelivery.task_id == task_id).with_for_update())
     if delivery and delivery.status not in {"preview", "failed", "blocked", "expired", "cancelled"}:
         raise sales.SalesError("已有排队、发送或结果未知的邮件；请先查询发送记录")
+    approved_subject = (content.spec or {}).get("subject", "")
+    if approved_subject and subject.strip() and subject.strip() != approved_subject:
+        raise sales.SalesError("主题与已确认消息不一致，请在客户消息中修改并重新确认")
+    subject = approved_subject or subject.strip()
+    if not subject:
+        raise sales.SalesError("请填写邮件主题")
     payload = {"to": [elig.contact_ref], "subject": subject.strip(), "body": content.body_text}
     result = client.call("POST", "/preview", payload)
     if (

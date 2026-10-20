@@ -3,8 +3,10 @@
 可靠性从高到低：官网写明的公司编号 > 官网写明的公司名 > 注册邮编与门店一致 > 店名相似。"""
 
 import re
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -20,7 +22,9 @@ FEW_POSTCODE_HITS = 3  # 同邮编餐饮公司不超过这个数时全部默认�
 MAX_WEBSITE_NUMBERS = 5
 MAX_WEBSITE_NAMES = 3
 SIC_DETAIL_N = 10  # 名称检索结果不含 SIC，按排序补前若干个的详情
-WEBSITE_TIMEOUT = 10.0
+WEBSITE_TIMEOUT = 15.0
+WEBSITE_ATTEMPTS = 3
+TRANSIENT_HTTP = {408, 429, 500, 502, 503, 504}
 WEBSITE_MAX_BYTES = 2 * 1024 * 1024
 NOTICE = (
     "候选仅供人工核对：官网写明的公司编号最可靠，但页面里也可能是建站公司等第三方；"
@@ -44,14 +48,38 @@ def site_fetch(transport: httpx.BaseTransport | None = None) -> Callable[[str], 
     s = get_settings()
 
     def fetch(url: str) -> fetcher.FetchResult:
-        return fetcher.fetch(
-            url,
-            max_bytes=WEBSITE_MAX_BYTES,
-            timeout=min(WEBSITE_TIMEOUT, s.fetch_timeout_seconds),
-            user_agent=s.fetch_user_agent,
-            transport=transport,
-            resolve_check=s.fetch_ip_check,
-        )
+        # 仅重试只读请求的临时故障；每次仍经过公网／重定向／大小校验。
+        # 不禁用 TLS 验证，不降级 HTTPS，不重试权限拒绝或永久失效页面。
+        for attempt in range(WEBSITE_ATTEMPTS):
+            delay = 0.5 * (2**attempt)
+            try:
+                result = fetcher.fetch(
+                    url,
+                    max_bytes=WEBSITE_MAX_BYTES,
+                    timeout=min(WEBSITE_TIMEOUT, s.fetch_timeout_seconds),
+                    user_agent=s.fetch_user_agent,
+                    transport=transport,
+                    resolve_check=s.fetch_ip_check,
+                )
+                if result.status not in TRANSIENT_HTTP or attempt == WEBSITE_ATTEMPTS - 1:
+                    return result
+                if result.retry_after:
+                    try:
+                        seconds = float(result.retry_after)
+                    except ValueError:
+                        try:
+                            seconds = (parsedate_to_datetime(result.retry_after) - datetime.now(UTC)).total_seconds()
+                        except (ValueError, TypeError, OverflowError):
+                            seconds = 0
+                    # 长等待交给后续任务，避免一个限流站点占满批处理线程。
+                    if seconds > 5:
+                        return result
+                    delay = max(delay, seconds)
+            except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+                if "CERTIFICATE_VERIFY_FAILED" in str(exc) or attempt == WEBSITE_ATTEMPTS - 1:
+                    raise
+            time.sleep(delay)
+        raise AssertionError("unreachable")
 
     return fetch
 

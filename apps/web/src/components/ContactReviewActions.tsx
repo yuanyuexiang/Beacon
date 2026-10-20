@@ -6,7 +6,7 @@ import { api, json } from "@/lib/api";
 import { AutoAdmission, ContactAssessment, CONTACT_PURPOSE, CONTACT_RANK_LABELS } from "@/lib/contact-ranking";
 
 type Row = { auto_admission?: AutoAdmission | null; id: string; channel: string; contact_ref: string | null; contact_source: string | null; contact_usable: string; eligibility: string; recommendation?: ContactAssessment | null };
-export default function ContactReviewActions({ leadId, row, website, busy, onAI, onAdmission, onChanged }: { leadId: string; row: Row; website?: string | null; busy: boolean; onAI: () => void; onAdmission: () => void; onChanged: () => Promise<void> }) {
+export default function ContactReviewActions({ leadId, row, website, busy, onChanged }: { leadId: string; row: Row; website?: string | null; busy: boolean; onAI: () => void; onAdmission: () => void; onChanged: () => Promise<void> }) {
   const [mode, setMode] = useState<"facts" | "admission">();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
@@ -15,7 +15,7 @@ export default function ContactReviewActions({ leadId, row, website, busy, onAI,
   const admission = mode === "admission";
   const eligibility = Form.useWatch("eligibility", form);
   const open = (next: "facts" | "admission") => { form.resetFields(); setConfirmed(false); setError(undefined); form.setFieldsValue(next === "facts" ? { recommendation: row.recommendation?.recommendation || "recommended", affiliation: row.recommendation?.affiliation === "unknown" ? "target" : row.recommendation?.affiliation || "target", owner: row.recommendation?.owner || "", purpose: row.recommendation?.purpose === "unknown" ? "general" : row.recommendation?.purpose || "general", reason: "", source_url: website || undefined, contact_usable: row.contact_usable } : { eligibility: row.eligibility, contact_usable: row.contact_usable, evidence: "" }); setMode(next); };
-  return <><Space size={0} wrap><Button size="small" type="link" disabled={busy} onClick={onAdmission}>AI 自动准入</Button><Button size="small" type="link" loading={busy} title="重新核验这家门店的全部联系方式" onClick={onAI}>AI 自动核验</Button><Button size="small" type="link" disabled={busy} onClick={() => open("facts")}>人工确认</Button><Button size="small" type="link" disabled={busy} onClick={() => open("admission")}>准入设置</Button></Space>
+  return <><Space size={0} wrap><Button size="small" type="link" disabled={busy} onClick={() => open("facts")}>人工确认</Button><Button size="small" type="link" disabled={busy} onClick={() => open("admission")}>准入设置</Button></Space>
     <Modal forceRender title={admission ? "渠道准入确认" : "确认联系方式归属与用途"} open={!!mode} onCancel={() => { if (!saving) setMode(undefined); }} onOk={() => form.submit()} okText={admission ? "保存准入确认" : "保存人工确认"} confirmLoading={saving} okButtonProps={{ disabled: admission && eligibility === "allowed" && !confirmed }}>
       <Typography.Paragraph strong>{row.contact_ref}</Typography.Paragraph>
       <Alert type="info" showIcon message={admission ? "依据实际审核结果确认渠道准入。AI 归属确认不代表允许发送；尚无明确依据时保持待核对。" : "在当前行完成归属与用途确认；结果会保留，后续 AI 不覆盖人工确认，也不会改变渠道准入。"} style={{ marginBottom: 16 }} />

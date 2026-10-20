@@ -1,6 +1,7 @@
 "use client";
 import { ApiOutlined, AuditOutlined, FileProtectOutlined, SafetyCertificateOutlined, SendOutlined, ShopOutlined } from "@ant-design/icons";
 import { Card, Col, Row, Typography } from "antd";
+import OutreachProfileSettings from "@/components/OutreachProfileSettings";
 import LeadPolicySettings from "@/components/LeadPolicySettings";
 import SocialSettings from "@/components/SocialSettings";
 import GmailSettings from "@/components/GmailSettings";
@@ -18,6 +19,7 @@ export default function SettingsPage() {
   return (
     <>
       <HeroBand kicker="SETTINGS" title="设置与说明" subtitle="管理邮件与社媒授权及发送设置，查看工作流程和系统边界。" extra={<a href="/api/docs" target="_blank" rel="noreferrer" style={{ color: BRAND.gold }}><ApiOutlined /> 接口文档</a>} />
+      <OutreachProfileSettings />
       <LeadPolicySettings />
       <GmailSettings />
       <SocialSettings />

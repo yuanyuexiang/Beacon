@@ -110,7 +110,7 @@ def deliveries(db: Session = Depends(get_db)):
 
 class PreviewIn(BaseModel):
     task_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
-    subject: str = Field(min_length=1, max_length=256)
+    subject: str = Field(default="", max_length=256)
 
 
 @router.post("/preview")

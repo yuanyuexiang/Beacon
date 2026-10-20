@@ -71,6 +71,7 @@ class LeadOut(BaseModel):
             return row
         return value
 
+    list_summary: dict | None = None
     communication_progress: dict | None = None
     contact_count: int = 0  # 已记录的联系方式数（仅列表接口填充）
     created_at: datetime
@@ -79,6 +80,7 @@ class LeadOut(BaseModel):
 
 
 class LeadPatch(BaseModel):
+    expected_website: str | None = None
     website: str | None = None
     website_source: str | None = None
     screening_class: ScreeningClass | None = None

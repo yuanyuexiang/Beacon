@@ -206,9 +206,16 @@ def review_contacts(
 
 
 @router.post("/leads/{lead_id}/auto-admission")
-def auto_admission(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> dict:
+def auto_admission(
+    lead_id: uuid.UUID, refresh: bool = True, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+) -> dict:
     try:
-        result = contacts.review_contacts(db, _lead(db, lead_id))
+        if refresh:
+            result = contacts.review_contacts(db, _lead(db, lead_id))
+        else:
+            from app.modules.sales import admission
+
+            result = {"admission": admission.apply(db, _lead(db, lead_id)), "ai": None}
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     audit.record(db, op, "run_auto_admission", "lead", lead_id, after=result.get("admission"))

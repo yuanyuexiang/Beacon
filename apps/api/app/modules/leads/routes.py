@@ -90,12 +90,21 @@ def cancel_workflow(
     task = db.get(workflows.Workflow, task_id)
     if batch is None or task is None or task.batch_id != batch.id:
         raise HTTPException(404, "任务不存在")
-    with workflows.lock(db, batch):
-        if task.status not in {"completed", "cancelled"}:
-            task.status, task.error = "cancelled", None
-            audit.record(db, op, "cancel_list_workflow", "list_workflow", task.id)
-            db.commit()
-        return task
+    # 取消不能等待正在进行的外部网络请求所持有的名单锁。
+    from sqlalchemy import update
+
+    changed = db.execute(
+        update(workflows.Workflow)
+        .where(workflows.Workflow.id == task.id, workflows.Workflow.status.notin_(["completed", "cancelled"]))
+        .values(status="cancelled", error=None)
+        .returning(workflows.Workflow.id),
+        execution_options={"synchronize_session": False},
+    ).scalar_one_or_none()
+    if changed:
+        audit.record(db, op, "cancel_list_workflow", "list_workflow", task.id)
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 class CreateListIn(BatchIn):
@@ -263,34 +272,50 @@ def list_leads(
             .group_by(ChannelEligibility.lead_id)
         ).all()
     )
+    from app.modules.leads.list_summary import summarize
     from app.modules.sales.workbench import progress
 
     states = progress(db, [lead.id for lead in leads])
+    summaries = summarize(db, [lead.id for lead in leads])
     out = []
     for lead in leads:
         row = LeadOut.model_validate(lead)
         row.contact_count = counts.get(lead.id, 0)
         row.communication_progress = states[lead.id]
+        row.list_summary = summaries[lead.id]
         out.append(row)
     return out
 
 
 @router.get("/leads/{lead_id}", response_model=LeadOut)
-def get_lead(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> Lead:
+def get_lead(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)) -> LeadOut:
     lead = db.get(Lead, lead_id)
     if lead is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "线索不存在")
-    return lead
+    from app.modules.leads.list_summary import summarize
+    from app.modules.sales.models import ChannelEligibility
+    from app.modules.sales.workbench import progress
+
+    row = LeadOut.model_validate(lead)
+    row.list_summary = summarize(db, [lead.id])[lead.id]
+    row.communication_progress = progress(db, [lead.id])[lead.id]
+    row.contact_count = (
+        db.scalar(select(func.count()).select_from(ChannelEligibility).where(ChannelEligibility.lead_id == lead.id))
+        or 0
+    )
+    return row
 
 
 @router.patch("/leads/{lead_id}", response_model=LeadOut)
 def patch_lead(
     lead_id: uuid.UUID, body: LeadPatch, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
 ) -> Lead:
-    lead = db.get(Lead, lead_id)
+    lead = db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update().execution_options(populate_existing=True))
     if lead is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "线索不存在")
-    changes = body.model_dump(exclude_unset=True)
+    changes = body.model_dump(exclude_unset=True, exclude={"expected_website"})
+    if "website" in changes and "expected_website" in body.model_fields_set and body.expected_website != lead.website:
+        raise HTTPException(409, "官网已被更新，请重新读取后确认，避免覆盖最新结果")
     before = {k: getattr(lead, k) for k in changes}
     for k, v in changes.items():
         setattr(lead, k, v)

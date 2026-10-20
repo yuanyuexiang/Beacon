@@ -31,10 +31,10 @@ export default function GmailOutreach({ tasks, name, onChanged, focusTaskId }: {
   return <>
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     {status && <Alert type={status.connected && status.send_authorized && status.policy?.sending_enabled ? "success" : "warning"} showIcon message={`Gmail 账号：${status.connected ? "已连接" : "未连接"} · 发送权限：${status.send_authorized ? "已授权" : "待授权"} · 发送开关：${status.policy?.sending_enabled ? "开启" : "暂停"}`} description={status.message} style={{ marginBottom: 12 }} />}
-    <Typography.Paragraph>选择已建立的邮箱任务，填写主题并完整预览。正文使用任务对应的已审批文案；<a href="/settings">发送账号和队列开关在设置中管理</a>。</Typography.Paragraph>
+    <Typography.Paragraph>选择已建立的邮箱任务，完整预览主题和正文。正文使用任务对应的已审批文案；<a href="/settings">发送账号和队列开关在设置中管理</a>。</Typography.Paragraph>
     <Space wrap style={{ marginBottom: 12 }}>
-      <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="邮件主题" maxLength={256} style={{ width: 340 }} />
-      <Button type="primary" loading={busy} disabled={!selected.length || !subject.trim()} onClick={() => act(async () => { const result = await api<Delivery[]>("/api/gmail/preview", json({ task_ids: selected, subject })); setPreviews(result); setConfirmed(false); })}>{selected.length > 1 ? "批量预览" : "预览邮件"}</Button>
+      <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="留空使用消息中已确认的主题" maxLength={256} style={{ width: 340 }} />
+      <Button type="primary" loading={busy} disabled={!selected.length} onClick={() => act(async () => { const result = await api<Delivery[]>("/api/gmail/preview", json({ task_ids: selected, subject })); setPreviews(result); setConfirmed(false); })}>{selected.length > 1 ? "批量预览" : "预览邮件"}</Button>
       <Button loading={busy} onClick={() => act(async () => { const result = await api<{ checked: number; replies: number }>("/api/gmail/sync-replies", json({})); message.success(`检查 ${result.checked} 个线程，新增 ${result.replies} 条回复记录`); })}>同步回复</Button>
     </Space>
     <Table<Task> size="small" rowKey="id" pagination={{ pageSize: 10 }} dataSource={candidates} rowSelection={{ selectedRowKeys: selected, onChange: setSelected }} columns={[

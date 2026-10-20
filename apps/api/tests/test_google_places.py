@@ -315,3 +315,34 @@ def test_google_website_rejects_stale_state(client, db, monkeypatch, change):
 @pytest.mark.parametrize("url", ["http://127.0.0.1", "javascript:alert(1)", "https://user:password@restaurant.example"])
 def test_google_website_disallows_private_and_credentials(url):
     assert google.Place.model_validate({**PLACE, "websiteUri": url}).websiteUri is None
+
+
+def test_state_reuses_saved_review_without_provider_request(client, db, monkeypatch):
+    lead_id = setup(client, db, monkeypatch)
+    lead = db.get(Lead, lead_id)
+    lead.raw = {
+        "places_enrichment": {
+            "status": "verified",
+            "google_status": "completed",
+            "website": lead.website,
+            "checked_at": "2026-10-20T00:00:00+00:00",
+            "reason": "官网证据已核验",
+            "priceLevel": "must-not-leak",
+            "photos": ["must-not-leak"],
+        },
+    }
+    db.commit()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Reading saved results must not query Google")
+
+    monkeypatch.setattr(routes, "_client", forbidden)
+    response = client.get(f"/api/leads/{lead_id}/google-places")
+    assert response.status_code == 200
+    saved = response.json()["saved_review"]
+    assert saved["google_status"] == "completed" and not saved["website_changed"]
+    assert response.json()["link"] is None  # 查询完成并不等于确认关联。
+    assert "must-not-leak" not in response.text
+    lead.website = "https://changed.example"
+    db.commit()
+    assert client.get(f"/api/leads/{lead_id}/google-places").json()["saved_review"]["website_changed"]

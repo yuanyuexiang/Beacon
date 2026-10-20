@@ -11,7 +11,7 @@ from app.core import audit
 from app.core.auth import current_operator
 from app.core.db import get_db
 from app.core.models import Operator
-from app.modules.content import service
+from app.modules.content import outreach_ai, service
 from app.modules.content.models import ApprovalDecision, ContentKind, ContentPiece, ContentStatus
 from app.modules.leads.models import Lead
 from app.modules.menus.models import MenuAnalysis
@@ -61,6 +61,45 @@ class DecisionIn(BaseModel):
 
 class ReviseIn(BaseModel):
     body_text: str
+    subject: str | None = None
+
+
+@router.get("/outreach-profile", response_model=outreach_ai.ServiceProfile)
+def get_outreach_profile(db: Session = Depends(get_db)):
+    return outreach_ai.profile(db)
+
+
+@router.put("/outreach-profile", response_model=outreach_ai.ServiceProfile)
+def put_outreach_profile(
+    body: outreach_ai.ServiceProfile, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+):
+    try:
+        return outreach_ai.save_profile(db, body, op)
+    except service.ContentError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/leads/{lead_id}/outreach-message", response_model=ContentOut, status_code=201)
+def generate_outreach_message(
+    lead_id: uuid.UUID,
+    body: outreach_ai.GenerateIn,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
+    from app.integrations.llm import ProviderUnavailable
+
+    lead = db.get(Lead, lead_id)
+    if lead is None:
+        raise HTTPException(404, "门店不存在")
+    try:
+        piece = outreach_ai.create(db, lead, body, op.username)
+    except service.ContentError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ProviderUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    audit.record(db, op, "create_ai_outreach", "content_piece", piece.id, after={"engine": piece.engine})
+    db.commit()
+    return _out(db, piece)
 
 
 def _out(db: Session, p: ContentPiece) -> ContentOut:
@@ -171,7 +210,7 @@ def revise_content(
 ) -> ContentOut:
     p = _piece_or_404(db, content_id)
     try:
-        nv = service.revise_message(db, p, body.body_text, op.username)
+        nv = service.revise_message(db, p, body.body_text, op.username, body.subject)
     except service.ContentError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     audit.record(

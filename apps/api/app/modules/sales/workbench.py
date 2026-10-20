@@ -208,6 +208,8 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
             "status": state,
             "task_id": str(selected_task.id) if selected_task else None,
             "draft_id": str(ds[0].id) if ds else None,
+            "contact_selected": bool(ds and ds[0].eligibility_id),
+            "content_selected": bool(ds and ds[0].content_id),
         }
     return result
 
@@ -238,6 +240,7 @@ def context(db: Session, lead: Lead) -> dict:
             .order_by(MenuAnalysis.created_at.desc())
         )
     )
+    source_assets = {a.id: a for a in db.scalars(select(MenuAsset).where(MenuAsset.lead_id == lead.id))}
     seen: set[uuid.UUID] = set()
     verified = []
     for a in analyses:
@@ -245,8 +248,16 @@ def context(db: Session, lead: Lead) -> dict:
             continue
         seen.add(a.asset_id)
         facts = [i.get("fact", "") for i in (a.issues or []) if i.get("confirmed") is True and not i.get("deleted")]
-        if a.review_state == "reviewed" and facts:
-            verified.append({"id": str(a.id), "version": a.version, "facts": facts})
+        if a.review_state == "reviewed":
+            asset = source_assets.get(a.asset_id)
+            verified.append(
+                {
+                    "id": str(a.id),
+                    "version": a.version,
+                    "facts": facts,
+                    "label": (asset.original_filename or asset.source_url or "菜单") if asset else "菜单",
+                }
+            )
     return {
         "lead": {
             "id": str(lead.id),
@@ -278,6 +289,12 @@ def context(db: Session, lead: Lead) -> dict:
                 "version": p.version,
                 "body_text": p.body_text,
                 "mode": (p.spec or {}).get("mode", "menu_analysis"),
+                "subject": (p.spec or {}).get("subject", ""),
+                "rationale": (p.spec or {}).get("rationale"),
+                "missing": (p.spec or {}).get("missing", []),
+                "sources": (p.spec or {}).get("sources", []),
+                "engine": p.engine,
+                "analysis_id": str(p.analysis_id) if p.analysis_id else None,
                 "approved": content_service.approval_valid(db, p)[0],
                 "reason": content_service.approval_valid(db, p)[1],
             }
@@ -325,7 +342,7 @@ def assess(db: Session, draft: Preparation) -> list[str]:
         if draft.execution_mode == "manual" and not manual_target(draft.channel, elig.contact_ref):
             blockers.append("缺少有效邮箱、电话或该平台的 HTTPS 主页链接")
     if not piece:
-        blockers.append("尚未准备已审批文案")
+        blockers.append("尚未确认触达消息")
     elif piece.lead_id != draft.lead_id or piece.kind != ContentKind.message_short:
         blockers.append("文案与客户不一致或不是短文案")
     else:

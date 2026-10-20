@@ -183,6 +183,34 @@ def test_old_preview_cannot_confirm_replaced_content(client, db, setup):
     assert next(body for _, path, body in calls if path == "/send")["subject"] == "Changed subject"
 
 
+def test_preview_reuses_confirmed_message_subject_and_rejects_override(client, db, setup):
+    task, calls, _ = setup
+    piece = client.get(f"/api/leads/{task['lead_id']}/content").json()[-1]
+    revised = client.post(
+        f"/api/content/{piece['id']}/revise",
+        json={
+            "body_text": piece["body_text"],
+            "subject": "Menu design collaboration",
+        },
+    )
+    assert revised.status_code == 201, revised.text
+    content = revised.json()
+    client.post(f"/api/content/{content['id']}/approve", json={"decision": "approved"})
+    new_task = client.post(
+        f"/api/leads/{task['lead_id']}/tasks",
+        json={
+            "eligibility_id": task["eligibility_id"],
+            "content_id": content["id"],
+        },
+    ).json()
+    response = client.post("/api/gmail/preview", json={"task_ids": [new_task["id"]]})
+    assert response.status_code == 200, response.text
+    assert response.json()[0]["payload"]["subject"] == "Menu design collaboration"
+    override = client.post("/api/gmail/preview", json={"task_ids": [new_task["id"]], "subject": "Another subject"})
+    assert override.status_code == 409
+    assert not any(path == "/send" for _, path, _ in calls)
+
+
 def test_batch_confirmation_is_atomic_and_queue_can_pause(client, db, setup):
     task, calls, policy = setup
     elig = _elig(client, task["lead_id"], contact_ref="second@example.com").json()

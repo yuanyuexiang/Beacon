@@ -187,9 +187,8 @@ def compose_message(
     lines += [f"- {f}" for _, f in facts]
     lines += [
         "",
-        "We prepared a small sample layout of one section, using your own dish names and prices, "
-        "so you can see the difference.",
-        "Would you like us to send it over?",
+        "We offer menu design and printing services.",
+        "Would you be open to discussing your menu requirements?",
         "",
         sender_identity.strip(),
         "",
@@ -319,7 +318,9 @@ def create_inquiry(db: Session, lead: Lead, sender_identity: str, opt_out_text: 
     return piece
 
 
-def revise_message(db: Session, piece: ContentPiece, body_text: str, by: str) -> ContentPiece:
+def revise_message(
+    db: Session, piece: ContentPiece, body_text: str, by: str, subject: str | None = None
+) -> ContentPiece:
     if piece.kind != ContentKind.message_short:
         raise ContentError("只有文案可以直接编辑；样稿请重新生成")
     a = db.get(MenuAnalysis, piece.analysis_id) if piece.analysis_id else None
@@ -330,6 +331,14 @@ def revise_message(db: Session, piece: ContentPiece, body_text: str, by: str) ->
     else:
         check_claims(body_text, a)
     spec = dict(piece.spec or {})
+    if subject is not None:
+        if len(subject) > 200 or "\n" in subject or "\r" in subject:
+            raise ContentError("邮件主题需为单行且不超过 200 字")
+        spec["subject"] = subject.strip()
+        if a:
+            check_claims(subject, a)
+        else:
+            check_inquiry(subject + "\n" + body_text)
     if spec.get("sender_identity") and spec["sender_identity"].strip() not in body_text:
         raise ContentError("编辑后的文案缺少发送身份")
     if spec.get("opt_out_text") and spec["opt_out_text"].strip() not in body_text:
@@ -356,6 +365,18 @@ def revise_message(db: Session, piece: ContentPiece, body_text: str, by: str) ->
 
 
 def source_still_valid(db: Session, piece: ContentPiece) -> tuple[bool, str | None]:
+    if (piece.spec or {}).get("template") == "ai_outreach_v1":
+        from app.modules.content.outreach_ai import profile
+
+        if profile(db).version != (piece.spec or {}).get("profile_version"):
+            return False, "服务资料已更新，请重新起草并确认消息"
+        lead = db.get(Lead, piece.lead_id)
+        if lead is None or (piece.spec or {}).get("lead_snapshot") != {
+            "name": lead.name,
+            "address": lead.address,
+            "postcode": lead.postcode,
+        }:
+            return False, "门店资料已变化，请重新起草并确认消息"
     if piece.analysis_id is None:
         if (
             piece.kind == ContentKind.message_short

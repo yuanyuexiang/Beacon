@@ -18,7 +18,13 @@ async def handle(route):
     path, method = urlsplit(route.request.url).path, route.request.method
     if method != "GET":
         writes.append(path)
-    if path == "/api/auth/me":
+    if path.endswith("/menu-workspace"):
+        data = {"assets": [], "analyses": {}}
+    elif path == "/api/communication/assignees":
+        data = []
+    elif path.startswith("/api/communication/leads/"):
+        data = {"lead": {"id": ID, "name": "Mock restaurant"}, "contacts": [], "contents": [], "analyses": [], "tasks": [], "drafts": [], "progress": {"status": "not_started"}}
+    elif path == "/api/auth/me":
         data = {"id": "ui", "username": "ui", "role": role, "must_change_password": False}
     elif path == f"/api/leads/{ID}":
         data = lead
@@ -59,17 +65,20 @@ async def main():
         await page.route("**/api/**", handle)
         await page.goto(f"http://localhost:3000/leads/{ID}")
         await expect(page.get_by_role("button", name="人工确认", exact=True)).to_be_visible()
-        await page.get_by_role("button", name="AI 自动核验", exact=True).click()
-        await expect(page.get_by_text("AI 已确认", exact=True)).to_be_visible()
+        await page.get_by_role("button", name="查找联系方式", exact=True).click()
+        await expect(page.get_by_role("dialog", name="联系方式 · AI 推荐").get_by_text("AI 已确认", exact=True)).to_be_visible()
+        await page.get_by_role("dialog", name="联系方式 · AI 推荐").get_by_role("button", name="Close", exact=True).click()
+        await page.locator("#customer-contacts .ant-table-row-expand-icon-collapsed").first.click()
         await page.get_by_role("button", name="人工确认", exact=True).click()
         facts = page.get_by_role("dialog", name="确认联系方式归属与用途")
         await facts.get_by_label("所属门店／部门").fill("Club Test 门店团队")
         await facts.get_by_label("确认依据", exact=True).fill("人工核对官网联系页及部门用途")
         await facts.get_by_role("button", name="保存人工确认", exact=True).click()
         await expect(facts).not_to_be_visible()
-        await expect(page.get_by_text("人工已确认", exact=True)).to_be_visible()
-        await page.get_by_role("button", name="AI 自动核验", exact=True).click()
-        await expect(page.get_by_text("人工已确认", exact=True)).to_be_visible()
+        await expect(page.locator("#customer-contacts").get_by_text("人工已确认", exact=True)).to_be_visible()
+        await page.get_by_role("button", name="查找联系方式", exact=True).click()
+        await page.get_by_role("dialog", name="联系方式 · AI 推荐").get_by_role("button", name="Close", exact=True).click()
+        await expect(page.locator("#customer-contacts").get_by_text("人工已确认", exact=True)).to_be_visible()
         await page.get_by_role("button", name="准入设置", exact=True).click()
         admission = page.get_by_role("dialog", name="渠道准入确认")
         await admission.locator(".ant-form-item").filter(has=page.get_by_text("渠道准入", exact=True)).locator(".ant-select-selector").click()
@@ -84,7 +93,7 @@ async def main():
         await expect(page.get_by_text("允许", exact=True)).to_be_visible()
         role = "viewer"
         await page.reload()
-        for name in ["人工确认", "准入设置", "AI 自动核验"]:
+        for name in ["人工确认", "准入设置", "查找联系方式"]:
             await expect(page.get_by_role("button", name=name, exact=True)).to_be_disabled()
         assert len(writes) == 4, writes
         assert not errors, errors

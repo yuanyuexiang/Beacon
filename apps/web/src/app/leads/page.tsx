@@ -7,6 +7,8 @@ import LeadAssignment from "@/components/LeadAssignment";
 import OutreachJourney from "@/components/OutreachJourney";
 import WebsiteReview, { ResearchLead } from "@/components/WebsiteReview";
 import PrepareOutreach from "@/components/PrepareOutreach";
+import { MENU_STATES, ListSummary, leadNextAction } from "@/lib/lead-list";
+import { channelLabel } from "@/lib/format";
 import { PROGRESS, Progress, taskLink } from "@/lib/communication";
 import { useOperator } from "@/lib/auth";
 import { api, json } from "@/lib/api";
@@ -16,7 +18,7 @@ import { label } from "@/lib/format";
 import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, contactFailureLabel, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
-type Lead = ResearchLead & { assigned_to?: string | null; communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; entity_status: string; contact_count: number };
+type Lead = ResearchLead & { list_summary?: ListSummary | null; assigned_to?: string | null; communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; contact_count: number };
 type Authority = { id: number; name: string; region: string | null; count: number | null; pool_count: number; last_success_at: string | null; type_versions: Record<string, unknown> };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
@@ -281,19 +283,16 @@ function LeadsInner() {
         <a href={batchKey ? `/api/batches/${encodeURIComponent(batchKey!)}/export.csv` : undefined}><Button disabled={!batchKey}>导出 CSV</Button></a>
       </Space>}>
         <Typography.Text type="secondary">已选择 {leads.filter((l) => selectedRows.includes(l.id)).length} 家；未勾选时，“准备触达”使用当前筛选结果 {filtered.length} 家；分配门店需在弹窗明确选择范围。</Typography.Text>
-        <Table<Lead> scroll={{ x: 1700 }} rowSelection={{ selectedRowKeys: selectedRows, onChange: selectRows, preserveSelectedRowKeys: true }} rowKey="id" size="small" dataSource={filtered} pagination={{ current: listPage, pageSize, onChange: (p, size) => { setListPage(p); setPageSize(size); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+        <Table<Lead> scroll={{ x: 1120 }} rowSelection={{ selectedRowKeys: selectedRows, onChange: selectRows, preserveSelectedRowKeys: true }} rowKey="id" size="small" dataSource={filtered} pagination={{ current: listPage, pageSize, onChange: (p, size) => { setListPage(p); setPageSize(size); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+          expandable={{ expandedRowRender: (r) => <Space align="start" size={32} wrap><div><div>来源：{r.source_key}</div><div>FSA 登记类型：{businessLabel(r.business_type_id, r.business_type_name)}</div><div>官网：{r.website ? <a href={r.website} target="_blank" rel="noreferrer">{r.website}</a> : "未登记"}</div><ScreenTag value={r.screening_class} reason={r.screening_reason} /></div><WebsiteReview lead={r} onChanged={() => loadLeads(batchKey)} /></Space> }}
           columns={[
-            { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },
-            { title: "门店负责人", width: 130, render: (_, r) => r.assigned_to || "未分配" },
-            { title: "FSA 登记类型", width: 160, render: (_, r) => businessLabel(r.business_type_id, r.business_type_name) },
-            { title: "经营类型／官网核验", width: 230, render: (_, r) => <WebsiteReview lead={r} onChanged={() => loadLeads(batchKey)} /> },
-            { title: "沟通进展", width: 120, render: (_, r) => ["not_started", "preparing"].includes(r.communication_progress?.status || "not_started") ? <Button type="link" size="small" disabled={!canWrite} onClick={() => { setPrepareLeadIds([r.id]); setPrepareOpen(true); }}>{r.communication_progress?.status === "preparing" ? "继续准备" : "准备触达"}</Button> : <Link href={taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })}><Tag color={r.communication_progress?.status === "suppressed" ? "red" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag></Link> },
-            { title: "来源键", dataIndex: "source_key", width: 120 },
-            { title: "邮编", dataIndex: "postcode", width: 100 },
-            { title: "官网", dataIndex: "website", ellipsis: true, render: (v, r) => (v ? <a href={v} target="_blank" rel="noreferrer"><GlobalOutlined style={{ marginRight: 6, color: "#d97706" }} />{v.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "")}</a> : <Link href={`/leads/${r.id}`} title="进入详情页搜索并核对官网">搜索补官网</Link>) },
-            { title: "筛选", dataIndex: "screening_class", width: 120, render: (v, r) => <ScreenTag value={v} reason={r.screening_reason} />, filters: SCREENING.map((s) => ({ text: SCREEN_ZH[s] ?? s, value: s })), onFilter: (val, r) => r.screening_class === val },
-            { title: "联系方式", dataIndex: "contact_count", width: 90, sorter: (a, b) => a.contact_count - b.contact_count, render: (v) => (v ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{v} 项</Tag> : <span style={{ color: "#9ca3af" }}>-</span>) },
-            { title: "主体", dataIndex: "entity_status", width: 90, render: (v) => (v === "unknown" ? <span className="beacon-muted">未知</span> : <Tag color="green" style={{ marginInlineEnd: 0 }}>{label(v)}</Tag>) },
+            { title: "门店", dataIndex: "name", width: 260, fixed: "left", render: (v, r) => <div><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link><div style={{ marginTop: 4, fontSize: 12, color: "#888" }}>{r.postcode || "邮编未登记"}{r.operating_type?.category && r.operating_type.category !== "unknown" && <Tag style={{ marginLeft: 8 }}>{({ restaurant: "餐厅", cafe: "咖啡馆", takeaway: "外卖店", pub: "Pub／酒吧", institution: "机构餐饮" } as Record<string, string>)[r.operating_type.category] || r.operating_type.category}</Tag>}{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</div></div>, sorter: (a, b) => a.name.localeCompare(b.name) },
+            ...(["admin", "director"].includes(me?.role || "") ? [{ title: "负责人", width: 110, render: (_: unknown, r: Lead) => r.assigned_to || "未分配" }] : []),
+            { title: "沟通进展", width: 120, render: (_, r) => <Tag color={r.communication_progress?.status === "suppressed" ? "red" : r.communication_progress?.status === "replied" ? "green" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag> },
+            { title: "下一步", width: 200, render: (_, r) => { const action = leadNextAction(r); return <Button type="link" size="small" disabled={!canWrite && action.target === "prepare"} onClick={() => { if (action.target === "tasks") router.push(taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })); else if (action.target === "prepare") { setPrepareLeadIds([r.id]); setPrepareOpen(true); } else router.push(`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}${action.target === "contacts" ? "#customer-contacts" : ""}`); }}>{action.text}</Button>; } },
+            { title: "联系方式", width: 180, render: (_, r) => r.contact_count ? <div>{r.list_summary?.channels.map((c) => channelLabel(c)).join("／") || "已记录"}<div style={{ fontSize: 12, color: "#888" }}>{r.contact_count} 项 · 准入见详情</div></div> : <span className="beacon-muted">待补充</span> },
+            { title: "菜单", width: 110, render: (_, r) => <Tag color={r.list_summary?.menu_status === "reviewed" ? "green" : undefined}>{MENU_STATES[r.list_summary?.menu_status || ""] || "待检查"}</Tag> },
+            { title: "操作", width: 100, render: (_, r) => <Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`}>查看详情</Link> },
           ]} />
       </Card>
 
@@ -367,7 +366,7 @@ function LeadsInner() {
             <p style={{ color: "#6b7280" }}>{workflow.status === "failed" ? "本次补充已停止。关闭面板即可继续操作名单；重试只处理未完成项。" : "关闭面板后本页会继续执行。刷新或离开页面后，可从保存的步骤继续；已完成步骤不重做。"}</p>
             <Space>
               <Button type="primary" loading={creating} disabled={!canWrite || creating || !!busy} onClick={() => executeWorkflow(batchKey!, workflow)}>{workflow.status === "failed" ? "重试未完成步骤" : "继续任务"}</Button>
-              <Button disabled={!canWrite || creating || !!busy} onClick={cancelWorkflow}>结束任务</Button>
+              <Button disabled={!canWrite || cancelling} onClick={cancelWorkflow}>结束任务</Button>
             </Space>
           </>}
         </> : <p>正在读取任务进度…</p> : mode === "enrich" ? <>
@@ -386,7 +385,7 @@ function LeadsInner() {
           </Form>
         </>}
         <Modal title="结束这个未完成任务？" open={!!cancelTarget} onCancel={() => { if (!cancelling) setCancelTarget(undefined); }} onOk={confirmCancelWorkflow} confirmLoading={cancelling} closable={!cancelling} maskClosable={!cancelling} cancelButtonProps={{ disabled: cancelling }} okText="结束任务" cancelText="返回">
-          <p>已加入的门店和已完成的结果会保留。结束后可开始新任务。</p>
+          <p>已加入的门店和已完成的结果会保留。正在进行的请求可能需要收尾，收尾期间请稍候再开始新任务。</p>
           {cancelError && <Alert type="error" showIcon message="未能结束任务" description={cancelError} />}
         </Modal>
       </Drawer>}

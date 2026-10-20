@@ -208,6 +208,10 @@ def advance(db: Session, batch: Batch, task: "Workflow") -> dict:
     ]
     chunk = 1 if configured else 2
     for lead in leads[:chunk]:
+        from app.modules.leads.workflows import cancelled
+
+        if cancelled(db, task.id):
+            break
         try:
             status = review_one(db, lead, operator, selected, str(task.id))
             if status == "changed":

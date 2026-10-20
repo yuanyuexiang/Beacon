@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import json
+import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -17,6 +18,7 @@ analyses = []
 piece = None
 approved = False
 task = None
+draft_created = False
 requests = []
 errors = []
 analysis_gate = asyncio.Event()
@@ -33,14 +35,19 @@ def draft():
 
 
 async def handle(route):
-    global piece, approved, task
+    global piece, approved, task, draft_created
     request = route.request
     url = urlsplit(request.url)
     path, method = url.path, request.method
     body = request.post_data_json if request.post_data else None
     requests.append((method, path, body))
     data = None
-    if path == "/api/auth/me":
+    if path == "/api/files/test.pdf":
+        await route.fulfill(status=200, content_type="application/pdf", body=Path("apps/api/tests/fixtures/mini.pdf").read_bytes())
+        return
+    if path.endswith("/menu-workspace"):
+        data = {"assets": assets, "analyses": {ASSET: analyses} if assets else {}}
+    elif path == "/api/auth/me":
         data = {"id": "ui", "username": "ui", "role": "admin", "must_change_password": False}
     elif path == f"/api/leads/{ID}":
         data = lead
@@ -67,9 +74,9 @@ async def handle(route):
             updated["issues"][0]["confirmed"] = True
             analyses.append(updated)
         data = analyses[-1]
-    elif path == f"/api/leads/{ID}/content":
+    elif path in {f"/api/leads/{ID}/content", f"/api/leads/{ID}/outreach-message"}:
         if method == "POST":
-            assert body["kind"] == "message_short"
+            assert body["analysis_id"] == analyses[-1]["id"]
             piece = {"id": "content", "kind": "message_short", "version": 1, "status": "draft", "approval_valid": False, "approval_invalid_reason": "待审批", "body_text": "Hello, " + FACT + " Contact Test Company, 1 Test Road. Please let us know to opt out.", "html_url": None, "png_url": None, "spec": {}}
             data = piece
         else:
@@ -88,6 +95,7 @@ async def handle(route):
     elif path == "/api/communication/assignees":
         data = [{"username": "ui", "display_name": "UI"}]
     elif path == "/api/communication/prepare":
+        draft_created = True
         data = {"items": [{"lead_id": ID, "name": lead["name"], "draft": draft(), "existing_task": None}]}
     elif path == "/api/communication/drafts/draft":
         data = draft()
@@ -100,7 +108,7 @@ async def handle(route):
     elif path == "/api/communication/overview":
         data = {"total": 1, "items": [{"id": ID, "name": lead["name"], "postcode": "AB1", "progress": context()["progress"]}]}
     elif path == f"/api/communication/leads/{ID}":
-        data = context()
+        data = {**context(), "drafts": [draft()] if draft_created and not task else []}
     elif path == f"/api/communication/activity/{ID}":
         data = {"timeline": [], "deliveries": [], "conversations": []}
     else:
@@ -115,30 +123,29 @@ async def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         await page.route("**/api/**", handle)
         await page.goto(f"http://localhost:3000/leads/{ID}?returnTo=%2Fleads%3Fbatch%3Dtest")
-        steps = page.get_by_label("菜单资料流程")
-        await expect(steps.locator(".ant-steps-item-process")).to_contain_text("获取菜单")
-        await expect(steps).not_to_contain_text("审批")
-        await page.get_by_placeholder("人工核对过的菜单 URL").fill("https://example.com/menu.pdf")
+        await page.get_by_role("tab", name="菜单资料", exact=True).click()
+        await page.get_by_placeholder("菜单文件链接").fill("https://example.com/menu.pdf")
         await page.get_by_role("button", name="获取并分析", exact=True).click()
-        await expect(steps.locator(".ant-steps-item-process")).to_contain_text("AI 分析")
         analysis_gate.set()
-        await expect(steps.locator(".ant-steps-item-process")).to_contain_text("核对事实")
-        await page.get_by_role("switch").click()
+        await expect(page.get_by_text("核对菜单事实 · pdf · 分析 v1", exact=False)).to_be_visible()
+        await page.get_by_label("问题 1 核对结果", exact=True).first.click()
+        await page.get_by_title("属实", exact=True).click()
+        await expect(page.get_by_text("核对菜单事实 · pdf · 分析 v2", exact=False)).to_be_visible()
         await page.get_by_role("button", name="完成事实核对", exact=True).click()
-        await expect(steps.locator(".ant-steps-item-process")).to_contain_text("准备触达")
         output = Path("data/devchecks")
         output.mkdir(parents=True, exist_ok=True)
-        await steps.screenshot(path=str(output / "d63-menu-steps.png"), animations="disabled")
         await page.locator(f"#menu-review-{ASSET}").screenshot(path=str(output / "d63-menu-facts.png"), animations="disabled")
-        await page.get_by_role("button", name="准备触达", exact=True).first.click()
-        drawer = page.get_by_role("dialog")
+        await expect(page.get_by_role("button", name=re.compile("获取并分析"))).not_to_have_class(re.compile("ant-btn-loading"), timeout=15000)
+        await page.evaluate("window.scrollTo({top: 0, behavior: 'instant'})")
+        await page.get_by_role("tab", name="销售准备", exact=True).click()
+        await expect(page.get_by_role("tab", name="销售准备", exact=True)).to_have_attribute("aria-selected", "true")
+        drawer = page.locator("#sales-composer")
+        await page.screenshot(path="data/devchecks/d63-workspace-before-editor.png", full_page=True, animations="disabled")
         await drawer.get_by_label("发件身份", exact=True).fill("Test Company, 1 Test Road")
-        await drawer.get_by_role("button", name="检查并保存草稿", exact=True).click()
-        await drawer.locator(".ant-table-row-expand-icon").click()
-        await drawer.get_by_text("准备与核对内容", exact=True).click()
-        await drawer.get_by_role("button", name="按已确认事实生成待审批文案", exact=True).click()
+        await drawer.get_by_role("button", name="保存并检查草稿", exact=True).click()
+        await drawer.get_by_role("button", name="AI 起草触达消息", exact=True).click()
         await drawer.get_by_role("checkbox", name="我已核对引用事实、身份和退出说明", exact=True).check()
-        await drawer.get_by_role("button", name="确认审批此版本", exact=True).click()
+        await drawer.get_by_role("button", name="确认消息内容", exact=True).click()
         await drawer.get_by_role("button", name="创建就绪任务（1）", exact=True).click()
         await page.screenshot(path=str(output / "d63-preparation.png"), full_page=False, animations="disabled")
         await drawer.get_by_role("link", name="进入本次触达工作台 →").click()

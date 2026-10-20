@@ -23,6 +23,7 @@ class FetchResult:
     content_type: str | None
     body: bytes
     kind: str  # pdf / image / html / unknown
+    retry_after: str | None = None
 
 
 def _literal_private(host: str) -> bool:
@@ -121,5 +122,6 @@ def fetch(
                     content_type=ct,
                     body=body,
                     kind=sniff_kind(body, ct),
+                    retry_after=r.headers.get("retry-after"),
                 )
     raise FetchBlocked(f"重定向超过 {MAX_REDIRECTS} 次")

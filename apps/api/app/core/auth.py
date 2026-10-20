@@ -116,7 +116,7 @@ def enforce_permissions(request: Request, op: Operator) -> None:
     admin_only = path.startswith("/api/users") or (
         writes
         and (
-            path == "/api/lead-policy"
+            path in {"/api/lead-policy", "/api/outreach-profile"}
             or path.startswith("/api/directory/")
             or path
             in {

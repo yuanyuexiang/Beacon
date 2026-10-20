@@ -18,7 +18,13 @@ async def handle(route):
     path, method = urlsplit(route.request.url).path, route.request.method
     if method != "GET":
         writes.append(path)
-    if path == "/api/auth/me":
+    if path.endswith("/menu-workspace"):
+        data = {"assets": [], "analyses": {}}
+    elif path == "/api/communication/assignees":
+        data = []
+    elif path.startswith("/api/communication/leads/"):
+        data = {"lead": {"id": ID, "name": "Mock restaurant"}, "contacts": [], "contents": [], "analyses": [], "tasks": [], "drafts": [], "progress": {"status": "not_started"}}
+    elif path == "/api/auth/me":
         data = {"id": "ui", "username": "ui", "role": role, "must_change_password": False}
     elif path == f"/api/leads/{ID}":
         data = lead
@@ -50,7 +56,7 @@ async def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         await page.route("**/api/**", handle)
         await page.goto(f"http://localhost:3000/leads/{ID}")
-        await page.get_by_role("button", name="AI 自动准入全部", exact=True).click()
+        await page.get_by_role("button", name="重新评估准入", exact=True).click()
         await expect(page.get_by_text("自动允许", exact=True)).to_be_visible()
         await expect(page.get_by_text("待补证据", exact=True)).to_be_visible()
         await expect(page.locator("#customer-contacts").get_by_text("缺少有效 TPS 筛查结果；缺少有效 CTPS 筛查结果", exact=True)).to_be_visible()
@@ -63,8 +69,8 @@ async def main():
         await dialog.get_by_role("button", name="Close", exact=True).click()
         role = "viewer"
         await page.reload()
-        await expect(page.get_by_role("button", name="AI 自动准入全部", exact=True)).to_be_disabled()
-        await expect(page.get_by_role("button", name="AI 自动准入", exact=True).first).to_be_disabled()
+        await expect(page.get_by_role("button", name="重新评估准入", exact=True)).to_be_disabled()
+        await expect(page.get_by_role("button", name="重新评估准入", exact=True).first).to_be_disabled()
         assert writes == [f"/api/leads/{ID}/auto-admission"], writes
         assert not errors, errors
         await browser.close()

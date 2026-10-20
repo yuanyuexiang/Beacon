@@ -129,14 +129,14 @@ def test_pending_blocks_mutations_cancel_keeps_members(setup):
     assert client.post("/api/batches/new/workflow", json={"kind": "enrich"}).status_code == 201
 
 
-def test_lock_rejects_second_executor_and_cancel(setup, db):
+def test_lock_rejects_second_executor_but_allows_cancel(setup, db):
     client = setup
     task = _new(client).json()["workflow"]
     batch = db.scalar(select(Batch).where(Batch.batch_key == "new"))
     with workflows.lock(db, batch):
         assert client.post(f"/api/batches/new/workflow/{task['id']}/advance").status_code == 409
-        assert client.post(f"/api/batches/new/workflow/{task['id']}/cancel").status_code == 409
-    assert _advance(client, task)["step"] == 1
+        assert client.post(f"/api/batches/new/workflow/{task['id']}/cancel").status_code == 200
+    assert _advance(client, task)["status"] == "cancelled"
 
 
 def test_atomic_pool_checkpoint_rolls_back_members_on_crash(setup, db, monkeypatch):
@@ -382,3 +382,53 @@ def test_failed_workflow_allows_operations_and_new_task_archives_failure(setup, 
     assert previous.status == "cancelled" and previous.error == "offline"
     assert _advance(client, failed)["status"] == "cancelled"
     assert len(client.get("/api/leads?batch_key=new").json()) == 4
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_cancel_during_execution_cannot_be_overwritten(setup, db, monkeypatch, fail):
+    client = setup
+    task = _new(client).json()["workflow"]
+    task = _advance(client, task)
+    count = db.scalar(select(Batch.candidate_count).where(Batch.batch_key == "new"))
+
+    def finish_after_cancel(*args, **kwargs):
+        response = client.post(f"/api/batches/new/workflow/{task['id']}/cancel")
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+        if fail:
+            raise ValueError("late network failure")
+        return {"matched": 1}
+
+    monkeypatch.setattr(service, "enrich_overture", finish_after_cancel)
+    result = _advance(client, task)
+    assert result["status"] == "cancelled" and result["error"] is None
+    assert _advance(client, result)["status"] == "cancelled"
+    assert client.post(f"/api/batches/new/workflow/{task['id']}/cancel").json()["status"] == "cancelled"
+    assert db.scalar(select(Batch.candidate_count).where(Batch.batch_key == "new")) == count
+
+
+def test_contact_cancel_stops_next_job_and_keeps_finished_job(setup, db, monkeypatch):
+    client = setup
+    task = _new(client).json()["workflow"]
+    for _ in range(4):
+        task = _advance(client, task)
+    for lead in db.scalars(select(Lead)).all():
+        lead.website = "https://example.test"
+    db.commit()
+    monkeypatch.setattr(runs, "_prefetch_websites", lambda *a: {})
+    handled = []
+
+    def collect(session, run, job, scans):
+        handled.append(job.id)
+        response = client.post(f"/api/batches/new/workflow/{task['id']}/cancel")
+        assert response.status_code == 200
+        return {"pages_failed": 0, "pages_ok": 1}
+
+    monkeypatch.setattr(runs, "_collect_contacts", collect)
+    result = _advance(client, task)
+    assert result["status"] == "cancelled"
+    assert len(handled) == 1
+    db.expire_all()
+    jobs = db.scalars(select(runs.BatchJob)).all()
+    assert sum(j.status == runs.JobStatus.succeeded for j in jobs) == 1
+    assert sum(j.status == runs.JobStatus.pending for j in jobs) == 2

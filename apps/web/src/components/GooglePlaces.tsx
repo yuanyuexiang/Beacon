@@ -71,7 +71,7 @@ export default function GooglePlaces({ id, name, address, postcode, website, onW
     api<PlacesState>(`/api/leads/${id}/google-places`, { cache: "no-store" }).then((v) => { if (active) setState(v); }).catch((e) => { if (active) setError(e.message); });
     const timer = setInterval(() => setNow(Date.now()), 15000);
     return () => { active = false; clearInterval(timer); };
-  }, [id]);
+  }, [id, website]);
   // 浏览器恢复旧页面时也清除实时内容；不使用 localStorage / sessionStorage。
   useEffect(() => {
     const clear = () => { setDetails(null); setLookup(null); setPicked(null); };
@@ -114,14 +114,16 @@ export default function GooglePlaces({ id, name, address, postcode, website, onW
   const searchExpired = !!lookup && new Date(lookup.expires_at).getTime() <= now;
   const photoExpired = !!details && new Date(details.expires_at).getTime() <= now;
   const p = details?.place;
-  return <Card size="small" title="Google 门店参考" style={{ marginBottom: 16 }} extra={<Space><a href="/terms" target="_blank" rel="noreferrer">使用说明</a><a href="/privacy" target="_blank" rel="noreferrer">隐私说明</a></Space>}>
-    <Typography.Paragraph type="secondary">核对门店后查看价格参考与地点照片。照片可能不是菜单或已过时；消费档位不能代表采购预算。</Typography.Paragraph>
+  return <Card size="small" title="Google 门店信息" style={{ marginBottom: 16 }} extra={<Space><a href="/terms" target="_blank" rel="noreferrer">使用说明</a><a href="/privacy" target="_blank" rel="noreferrer">隐私说明</a></Space>}>
+    <Typography.Paragraph type="secondary">优先使用完善名单时保存的核验结果，打开页面不会重新查询 Google。价格与照片需按需实时获取；照片可能不是现行菜单，消费档位不能代表采购预算。</Typography.Paragraph>
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     {state && !state.configured && <Alert type="info" message="Google 查询尚未配置，请联系工作台管理员" style={{ marginBottom: 12 }} />}
     {state?.configured && <Typography.Paragraph type="secondary">今日查询尝试 {state.attempts_today} / {state.daily_limit}（含重试，照片加载另计；实际费用以 Google 账单为准）</Typography.Paragraph>}
+    {state?.saved_review && <Alert style={{ marginBottom: 12 }} type={state.saved_review.website_changed ? "warning" : "info"} showIcon message={state.saved_review.website_changed ? "官网已变化，以下为历史核验结果" : "已读取完善名单的核验记录"} description={<>{state.saved_review.reason || "核验结果已保存"}{state.saved_review.checked_at && <div>核验时间：{new Date(state.saved_review.checked_at).toLocaleString("zh-CN")}</div>}<div>Google 查询：{({ completed: "已完成", retry: "待重试", not_queried: "未查询" } as Record<string, string>)[state.saved_review.google_status || ""] || "未记录"}；门店关联：{state.link ? "已关联，直接复用" : "尚未确认，可核对候选"}</div></>} />}
+    <Typography.Paragraph>当前采用官网：{website ? <a href={website} target="_blank" rel="noreferrer">{website}</a> : "未登记"}</Typography.Paragraph>
     <Space wrap>
-      <Button disabled={busy || !state?.configured} onClick={() => { setOpen(true); setLookup(null); setPicked(null); setError(null); }}>查找 / 更换 Google 门店</Button>
-      {state?.link && <><Button loading={busy} disabled={!state.configured} onClick={view}>查看最新信息</Button><Popconfirm title="解除 Google 门店关联？" onConfirm={unlink}><Button disabled={busy}>解除关联</Button></Popconfirm></>}
+      <Button disabled={busy || !state?.configured} onClick={() => { setOpen(true); setLookup(null); setPicked(null); setError(null); }}>{state?.link ? "核对 / 更换关联" : "查找 Google 门店"}</Button>
+      {state?.link && <><Button loading={busy} disabled={!state.configured} onClick={view}>{details ? "刷新实时价格与照片" : "获取实时价格与照片"}</Button><Popconfirm title="解除 Google 门店关联？" onConfirm={unlink}><Button disabled={busy}>解除关联</Button></Popconfirm></>}
     </Space>
     {state?.link && <Typography.Paragraph type="secondary" style={{ marginTop: 10, marginBottom: 0 }}>已关联 · {state.link.reviewed_by} 于 {new Date(state.link.reviewed_at).toLocaleString("zh-CN")} 核对</Typography.Paragraph>}
     <Modal title="确认采用 Google 返回的官网" open={websiteOpen} onCancel={() => setWebsiteOpen(false)} onOk={adoptWebsite} confirmLoading={busy} okText="采用官网" okButtonProps={{ disabled: !officialChecked || !websiteAddressChecked || !websiteEvidence.trim() || photoExpired }}>
@@ -148,7 +150,7 @@ export default function GooglePlaces({ id, name, address, postcode, website, onW
       {p.googleMapsUri && <a href={p.googleMapsUri} target="_blank" rel="noreferrer">打开 Google Maps 核对</a>}
       <GoogleAttribution providers={p.attributions} />
       <Typography.Paragraph type="secondary" style={{ marginTop: 16 }}>地点照片（最多 10 张；点击才加载）</Typography.Paragraph>
-      {photoExpired && <Alert type="warning" message="照片引用已过期，请点击“查看最新信息”刷新" style={{ marginBottom: 12 }} />}
+      {photoExpired && <Alert type="warning" message="照片引用已过期，请点击“刷新实时价格与照片”" style={{ marginBottom: 12 }} />}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>{details!.photos.map((photo) => <GooglePhoto key={photo.token} leadId={id} photo={photo} expired={photoExpired} />)}</div>
       {!details!.photos.length && <Typography.Text type="secondary">本次未返回照片</Typography.Text>}
     </div>}

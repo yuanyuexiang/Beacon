@@ -7,7 +7,7 @@ import { api, json } from "@/lib/api";
 type Candidate = { url: string; kind: string; label: string; source_url: string };
 type Lookup = { website: string; pages: { url: string; ok: boolean; error: string | null }[]; candidates: Candidate[]; notice: string };
 
-export default function WebsiteMenus({ id, website, onAdded }: { id: string; website: string | null; onAdded: () => Promise<void> }) {
+export default function WebsiteMenus({ id, website, onAdded, onIngest }: { id: string; website: string | null; onAdded: () => Promise<void>; onIngest?: (request: Promise<{ id: string; fetch_status: string; fetch_error: string | null }>) => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lookup, setLookup] = useState<Lookup | null>(null);
@@ -24,17 +24,20 @@ export default function WebsiteMenus({ id, website, onAdded }: { id: string; web
     if (!picked || lookup?.website !== website) return;
     setBusy(true);
     try {
-      const asset = await api<{ fetch_status: string; fetch_error: string | null }>(`/api/leads/${id}/assets`, json({ url: picked.url }));
+      const request = api<{ id: string; fetch_status: string; fetch_error: string | null }>(`/api/leads/${id}/assets`, json({ url: picked.url }));
+      if (onIngest) { await onIngest(request); setPicked(null); setOpen(false); return; }
+      const asset = await request;
       await onAdded(); setPicked(null);
       if (asset.fetch_status === "failed") setError(asset.fetch_error || "文件抓取失败，可在菜单文件中重试");
-      else message.success("菜单已抓取，可在菜单文件中分析");
+      else message.success("菜单已获取，可在菜单资料中开始分析");
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
   return <>
-    <Button disabled={!website} onClick={search}>查找官网菜单</Button>
+    <Button disabled={!website} onClick={() => { setOpen(true); if (!lookup) void search(); }}>{lookup ? "查看官网菜单候选" : "查找官网菜单"}</Button>
     <Modal title="官网菜单候选" open={open} onCancel={() => setOpen(false)} footer={null} width={1000}>
       <Typography.Paragraph>当前官网：{website}</Typography.Paragraph>
+      <Button loading={busy} onClick={search} style={{ marginBottom: 12 }}>重新查找官网菜单</Button>
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
       {lookup && <>
         <Typography.Paragraph type="secondary">{lookup.notice}</Typography.Paragraph>

@@ -34,11 +34,20 @@ class PlacesLink(BaseModel):
     reviewed_at: str
 
 
+class SavedPlacesReview(BaseModel):
+    status: str
+    checked_at: str | None = None
+    reason: str | None = None
+    google_status: str | None = None
+    website_changed: bool = False
+
+
 class PlacesState(BaseModel):
     configured: bool
     link: PlacesLink | None
     attempts_today: int
     daily_limit: int
+    saved_review: SavedPlacesReview | None = None
 
 
 class PlacesSearchIn(BaseModel):
@@ -202,7 +211,17 @@ def state(
         )
         or 0
     )
+    saved = (lead.raw or {}).get("places_enrichment") or {}
     return {
+        "saved_review": SavedPlacesReview(
+            status=saved.get("status") or "unknown",
+            checked_at=saved.get("checked_at"),
+            reason=saved.get("reason"),
+            google_status=saved.get("google_status"),
+            website_changed=saved.get("website") != lead.website,
+        )
+        if saved
+        else None,
         "configured": bool(get_settings().google_places_api_key),
         "link": _link(lead),
         "attempts_today": attempts,

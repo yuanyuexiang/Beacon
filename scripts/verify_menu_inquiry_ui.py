@@ -52,8 +52,8 @@ async def handle(route):
         result = [{"username": "ui-test", "display_name": "UI Tester"}]
     elif path == "/api/communication/prepare":
         result = {"items": [{"lead_id": i, "name": context(i)["lead"]["name"], "draft": draft(i), "existing_task": None} for i in body["lead_ids"]]}
-    elif path == f"/api/leads/{LEAD}/content":
-        assert body["mode"] == "menu_inquiry" and "analysis_id" not in body
+    elif path == f"/api/leads/{LEAD}/outreach-message":
+        assert body["analysis_id"] is None and body["channel"] == "email"
         piece = {"id": "inquiry", "version": 1, "mode": "menu_inquiry", "body_text": "Who is responsible for your menu design?\n" + body["sender_identity"] + "\n" + body["opt_out_text"], "approved": False, "reason": "待审批"}
         result = piece
     elif path == f"/api/communication/drafts/{DRAFT}":
@@ -93,15 +93,15 @@ async def main():
         await page.goto("http://localhost:3000/leads?batch=测试")
         await page.get_by_role("button", name="准备触达", exact=True).first.click()
         await page.get_by_role("button", name="检查并保存草稿").click()
-        await page.locator(".ant-table-row-expand-icon").first.click()
-        await expect(page.get_by_text("暂无可引用的已确认菜单问题，可直接询问菜单或负责人。", exact=True)).to_be_visible()
+        await page.get_by_role("dialog").locator(".ant-table-row-expand-icon").first.click()
+        await expect(page.get_by_text("结合门店、已核对菜单与我们的服务起草；没有菜单也可以询问菜单或负责人。", exact=True)).to_be_visible()
         await page.get_by_text("补充联系方式／人工核对渠道准入", exact=True).first.click()
         await expect(page.get_by_label("准入规则版本", exact=True).first).to_have_value("manual-review:v1")
         await page.get_by_label("发件身份", exact=True).fill("Beacon Menu Studio")
-        await page.get_by_role("button", name="生成询问菜单／负责人文案", exact=True).first.click()
+        await page.get_by_role("button", name="AI 起草触达消息", exact=True).first.click()
         await expect(page.get_by_label("文案内容", exact=True)).to_contain_text("Who is responsible")
         await page.get_by_text("我已核对引用事实、身份和退出说明", exact=True).first.click()
-        await page.get_by_role("button", name="确认审批此版本", exact=True).first.click()
+        await page.get_by_role("button", name="确认消息内容", exact=True).first.click()
         await expect(page.get_by_role("button", name="创建就绪任务（1）")).to_be_enabled()
         await page.screenshot(path="data/devchecks/d68-menu-inquiry.png", full_page=True)
         assert not any("/gmail/" in path or path.endswith("/sent") for _, path, _ in requests)
