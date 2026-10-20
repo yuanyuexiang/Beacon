@@ -115,3 +115,5 @@ D57（2026-10-15，本地已准备、服务器未发布）：新增 directory-wo
 
 
 2026-10-18：用户明确授权发布，开发分支快进合并 main 并推送；[Actions 39115107357](https://github.com/yuanyuexiang/Beacon/actions/runs/39115107357) 检查、五镜像构建、备份、迁移及公网验证全部成功。云端 Web／API 版本均为 `1624dd6a4cf67db09069fbd49e28b430846269d7`，数据库 `d161a0010001`，服务容器正常，pending 为空，5432 映射保留。包含 D60～D67、联系方式核验／准入及结束任务修复；未更改发送开关、未执行客户测试触达。
+
+2026-10-20：用户明确授权发布，开发分支快进合并 main；[Actions 39415861487](https://github.com/yuanyuexiang/Beacon/actions/runs/39415861487) 成功发布 `d14c3d1fb3a71f5686acae7e680bb9c31d12f926`。515 项后端测试、前端、provider、部署配置检查及五镜像构建全部通过。数据库迁移到 `d170a0010001`，数据库／资产／Gmail／Meta／Maps 数据卷备份齐全；公网 Web／API SHA 一致，9 个业务容器运行正常，pending 为空。DeepSeek 已配置，新 AI 触达路由存在；未调用真实模型或发送客户消息。首次使用需在设置中填写真实服务介绍。验证产物保存在受控 `data/devops/release-20261020-verification.json`。

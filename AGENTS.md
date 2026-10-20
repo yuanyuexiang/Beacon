@@ -135,3 +135,5 @@ D70 销售总监／门店分配（2026-10-20）：director 可分配全量业务
 D71 单家销售工作区（2026-10-20）：详情分销售准备／菜单资料／来源与历史，与名单共用沟通进展；单家直接读取既有草稿，查看不创建或发送。官网未保存输入及并发覆盖保护；菜单批量读取、所有导入入口获取后分析、显式强制生成新分析版本，左右核对、问题三态、文案选择来源分析。整家联系核验与当前项操作区分，准入仍由后台复核。专项 `cd apps/api && uv run pytest tests/test_detail_workspace.py -q`；界面 `uv run --project apps/api --extra maps-worker python scripts/verify_detail_workspace_ui.py`（全 API 模拟，不发送）。无需迁移，仅本地更新，见 [客户沟通工作台](docs/客户沟通工作台.md)。
 
 D72 AI 触达消息：设置页管理员维护公司与服务资料，真实 DeepSeek 结合门店、已核对菜单及有引用的经营／联系人信息起草。主题和正文共同版本化确认，不自动发送；服务／菜单／门店变化重新生成。专项 `cd apps/api && uv run pytest tests/test_outreach_ai.py tests/test_content.py tests/test_gmail.py -q`；界面 `scripts/verify_detail_workspace_ui.py`、`scripts/verify_outreach_profile_ui.py`（全 API 模拟）。无迁移，仅本地更新。操作见客户沟通工作台 D72。
+
+2026-10-20 发布状态：用户授权后 D68～D72 及此前本地修复已发布，云端提交 d14c3d1、迁移 d170a0010001，Actions 39415861487 全流程成功，公网双端版本与服务状态已核验。后续新变更仍须用户确认才发布。
