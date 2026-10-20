@@ -265,8 +265,8 @@ function LeadsInner() {
       {me?.role === "member" && <Alert type="info" showIcon message="仅显示分配给你的门店。可进入门店详情补充资料、准备触达和跟进；名单分配及整批管理由销售总监处理。" style={{ marginBottom: 12 }} />}
       <Space wrap style={{ marginBottom: 12 }}>
         <Select aria-label="门店归属视图" value={me?.role === "member" ? "mine" : ownerView} disabled={me?.role === "member"} onChange={(v) => { setOwnerView(v); setListPage(1); }} style={{ width: 150 }} options={[{ value: "all", label: "全部门店" }, { value: "mine", label: "我的门店" }, { value: "unassigned", label: "未分配" }]} />
-        {me?.role !== "member" && <Select aria-label="门店负责人筛选" allowClear placeholder="负责人" value={ownerFilter} onChange={(v) => { setOwnerFilter(v); setListPage(1); }} style={{ width: 180 }} options={[...new Set(leads.map((l) => l.assigned_to).filter((v): v is string => !!v))].map((v) => ({ value: v, label: v }))} />}
-        <LeadAssignment leadIds={(leads.some((l) => selectedRows.includes(l.id)) ? leads.filter((l) => selectedRows.includes(l.id)) : filtered).map((l) => l.id)} onChanged={() => { loadLeads(batchKey); loadBatches(); selectRows([]); }} />
+        {me?.role !== "member" && <Select aria-label="门店负责人筛选" allowClear placeholder="筛选已有负责人" value={ownerFilter} onChange={(v) => { setOwnerFilter(v); setListPage(1); }} style={{ width: 180 }} notFoundContent="当前名单尚无已分配负责人，请使用右侧分配门店" options={[...new Set(leads.map((l) => l.assigned_to).filter((v): v is string => !!v))].map((v) => ({ value: v, label: v }))} />}
+        <LeadAssignment leadIds={leads.filter((l) => selectedRows.includes(l.id)).map((l) => l.id)} filteredLeadIds={filtered.map((l) => l.id)} onChanged={() => { loadLeads(batchKey); loadBatches(); selectRows([]); }} />
       </Space>
       <Card size="small" title="线索" extra={<Space>
         <Input.Search allowClear key={q} defaultValue={q} placeholder="搜索名称 / 邮编" style={{ width: 220 }} onSearch={(v) => { setQ(v); setListPage(1); }} onChange={(e) => { if (!e.target.value) { setQ(""); setListPage(1); } }} />
@@ -280,7 +280,7 @@ function LeadsInner() {
         <Button disabled={!batchKey || locked} loading={busy === "run"} onClick={() => run("run", api(`/api/batches/${encodeURIComponent(batchKey!)}/runs`, json({ steps: ["fetch", "analyze"] })), (r: { status: string; totals: Record<string, number> }) => `批量运行 ${label(r.status)}：${JSON.stringify(r.totals)}`)}>批量抓取 + 分析</Button>
         <a href={batchKey ? `/api/batches/${encodeURIComponent(batchKey!)}/export.csv` : undefined}><Button disabled={!batchKey}>导出 CSV</Button></a>
       </Space>}>
-        <Typography.Text type="secondary">已选择 {leads.filter((l) => selectedRows.includes(l.id)).length} 家；未勾选时，“准备触达”使用当前筛选结果 {filtered.length} 家。</Typography.Text>
+        <Typography.Text type="secondary">已选择 {leads.filter((l) => selectedRows.includes(l.id)).length} 家；未勾选时，“准备触达”使用当前筛选结果 {filtered.length} 家；分配门店需在弹窗明确选择范围。</Typography.Text>
         <Table<Lead> scroll={{ x: 1700 }} rowSelection={{ selectedRowKeys: selectedRows, onChange: selectRows, preserveSelectedRowKeys: true }} rowKey="id" size="small" dataSource={filtered} pagination={{ current: listPage, pageSize, onChange: (p, size) => { setListPage(p); setPageSize(size); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           columns={[
             { title: "门店", dataIndex: "name", render: (v, r) => <Space wrap><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link>{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</Space>, sorter: (a, b) => a.name.localeCompare(b.name) },

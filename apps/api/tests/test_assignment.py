@@ -61,6 +61,7 @@ def test_director_permissions_and_optimistic_transfer(client, db, team):
     assert assign(boss, identity, "alice").json()["items"][0]["changed"]
     preview = boss.post("/api/assignment/preview", json={"lead_ids": [identity]}).json()
     assert preview["expected"] == {identity: "alice"}
+    assert preview["names"][identity] == "Test Restaurant"
     assert "已变化" in assign(boss, identity, "bob").json()["items"][0]["error"]
     history = boss.get(f"/api/leads/{identity}/assignment-history").json()[0]
     assert history["after"]["assigned_to"] == "alice"

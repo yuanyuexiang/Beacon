@@ -59,6 +59,10 @@ async def main():
         await expect(page.get_by_role("link", name="Store 3", exact=True)).to_have_count(0)
         await page.get_by_role("button", name="分配门店", exact=True).click()
         dialog = page.get_by_role("dialog", name="分配／转交门店", exact=True)
+        await expect(dialog.get_by_text("尚未选择分配范围。可先勾选门店，或在这里明确选择当前筛选全部门店。", exact=True)).to_be_visible()
+        assert not any(path == "/api/assignment/preview" for _, path, _ in requests)
+        await expect(dialog.get_by_role("button", name="确认分配", exact=True)).to_be_disabled()
+        await dialog.get_by_role("radio", name="当前筛选全部 2 家（包含其他分页）", exact=True).check()
         await expect(dialog.get_by_text("本次 2 家", exact=False)).to_be_visible()
         await dialog.get_by_text("查看团队工作量", exact=True).click()
         await expect(dialog.get_by_role("columnheader", name="未完成任务", exact=True)).to_be_visible()
@@ -71,6 +75,11 @@ async def main():
         await expect(dialog.get_by_text(re.compile("成功 1 家，失败 1 家"))).to_be_visible()
         await expect(dialog.get_by_text("门店负责人已变化，请重新预览", exact=True)).to_be_visible()
         await page.screenshot(path="data/devchecks/d70-assignment-result.png", full_page=True, animations="disabled")
+        await dialog.locator(".ant-modal-close").click()
+        await page.locator('.ant-table-row[data-row-key="2"]').get_by_role("checkbox").check()
+        await page.get_by_role("button", name="分配门店", exact=True).click()
+        await expect(dialog.get_by_text("本次 1 家", exact=False)).to_be_visible()
+        assert [body for _, path, body in requests if path == "/api/assignment/preview"][-1]["lead_ids"] == ["2"]
         await dialog.locator(".ant-modal-close").click()
         role = "member"
         await page.reload()

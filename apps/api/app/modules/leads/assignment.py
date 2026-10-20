@@ -116,6 +116,7 @@ def preview(body: Selection, db: Session = Depends(get_db), op: Operator = Depen
         raise HTTPException(422, "单次最多分配 5000 家，请缩小筛选范围")
     return {
         "count": len(rows),
+        "names": {str(p.id): p.name for p in rows},
         "owners": dict(Counter(p.assigned_to or "未分配" for p in rows)),
         "expected": {str(p.id): p.assigned_to for p in rows},
     }
