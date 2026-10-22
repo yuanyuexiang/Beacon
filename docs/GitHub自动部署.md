@@ -2,7 +2,7 @@
 
 ## 部署范围
 
-用户于 2026-10-14 调整发布策略：向 `main` 提交只自动执行 CI 和构建 GHCR 镜像，不自动更新服务器。先完成本地测试，用户明确确认发布后，手动运行工作流并勾选 `deploy`；该选项默认关闭。PR 只检查；失败的测试不发布。服务器为 `18.175.156.130`。访问域名为 `https://beacon.ai-onestep.com`。Traefik 是独立基础设施，应用发布不重启它。
+用户于 2026-10-22 澄清发布策略：本地验证后由用户自行提交并推送到 `main`，自动执行 CI、构建 GHCR 镜像并部署云端，无需再手动确认。PR 只检查；失败的检查不发布。手动工作流仍可使用 `deploy=true` 发布（默认 false），main 推送不受该手动选项限制。服务器为 `18.175.156.130`，域名为 `https://beacon.ai-onestep.com`。Traefik 独立维护，应用发布不重启它。
 
 仓库：`yuanyuexiang/Beacon`。流水线入口是 [ci-cd.yml](../.github/workflows/ci-cd.yml)。构建与发布都在 GitHub 托管 runner 上运行，服务器不安装 runner、不现场编译源码。
 
@@ -75,7 +75,7 @@ CI 不读取应用密钥，不发送真实客户消息。发布不改业务发�
 
 ## 基础设施升级与维护
 
-业务源码提交不会自动上线。用户确认发布后，通过 Actions 的 Run workflow 在 main 上运行并勾选 deploy；或执行 `gh workflow run ci-cd.yml --ref main -f deploy=true`。发布前核对 main 对应提交已经完成本地验证；未获用户明确确认时不得触发 deploy=true。修改生产 Compose 或固定 gateway 时，先用管理员 bootstrap 同步相同版本，再提交并发布；脚本 hash 不一致会在停止服务前拒绝部署。Traefik 自身升级独立执行，不混入应用 CD。
+提交前完成本地验证，由用户自行提交并推送 main 后自动上线。仅本地 git commit 不触发 GitHub Actions，必须推送到远程 main。也可通过 Actions 的 Run workflow 在 main 上勾选 deploy，或执行 `gh workflow run ci-cd.yml --ref main -f deploy=true` 手动发布。修改生产 Compose 或固定 gateway 时，先用管理员 bootstrap 同步相同版本，再提交并发布；脚本 hash 不一致会在停止服务前拒绝部署。Traefik 自身升级独立执行，不混入应用 CD。
 
 发布前备份包含校验和，并检查数据库 dump 可被 pg_restore 读取；完整恢复演练应在独立环境进行。默认保留最近至少 5 份完整备份，超过 14 天的更旧完整备份在成功发布后清理；不自动清理未完成备份或上一版本镜像。
 
