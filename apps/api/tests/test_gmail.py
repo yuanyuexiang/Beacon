@@ -294,3 +294,23 @@ def test_queue_rechecks_operator_permission_before_submission(client, db, setup,
     row = db.get(EmailDelivery, uuid.UUID(delivery["id"]))
     assert row.status == "blocked" and "发送权限" in row.last_error
     assert not any(path == "/send" for _, path, _ in calls)
+
+
+def test_reconnect_expires_unsent_preview_and_preserves_task(client, db, setup, monkeypatch):
+    task, calls, _ = setup
+    delivery = preview(client, task)
+
+    def oauth_call(method, path, body=None):
+        if path == "/auth/start":
+            return {"url": "https://accounts.google.com/mock"}
+        assert path == "/auth/callback"
+        return {"connected": True}
+
+    monkeypatch.setattr(gmail_client, "call", oauth_call)
+    client.post("/api/gmail/connect", json={"purpose": "send"})
+    callback = client.get("/api/gmail/oauth/callback?state=mock&code=mock", follow_redirects=False)
+    assert callback.headers["location"] == "/settings?gmail=connected"
+    rows = client.get("/api/gmail/deliveries").json()
+    assert next(r for r in rows if r["id"] == delivery["id"])["status"] == "expired"
+    assert db.get(ManualTask, uuid.UUID(task["id"])).status.value == "pending"
+    assert not any(path == "/send" for _, path, _ in calls)

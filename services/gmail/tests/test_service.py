@@ -4,7 +4,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from gmail_service import core, server
+from gmail_service import core, oauth, server
 
 SECRET = "test-service-token-0123456789abcdef"
 AUTH = {"Authorization": "Bearer " + SECRET}
@@ -28,6 +28,15 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(
         core.urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network forbidden"))
     )
+    monkeypatch.setattr(
+        oauth,
+        "validate_token",
+        lambda config, token: (
+            {**token, "access_token": "qa", "expires_in": 3600, "obtained_at": int(time.time())},
+            "qa@example.com",
+        ),
+    )
+    monkeypatch.setattr(oauth, "identity", lambda *a: {"email": "qa@example.com"})
     client = TestClient(server.app)
     yield client
     client.close()
@@ -108,7 +117,9 @@ def test_unknown_attempt_not_retried_and_audit_recovery(setup, monkeypatch):
 
 
 def test_web_oauth_state_single_use_and_connection_check(setup, monkeypatch):
-    credentials = {"web": CREDENTIALS["installed"]}
+    credentials = {
+        "web": {**CREDENTIALS["installed"], "redirect_uris": ["http://localhost:3000/api/gmail/oauth/callback"]}
+    }
     setup.post("/auth/import", headers=AUTH, json={"credentials": credentials})
     url = setup.post("/auth/start", headers=AUTH).json()["url"]
     from urllib.parse import parse_qs, urlsplit
@@ -181,3 +192,22 @@ def test_readonly_budget_prevents_unbounded_network_operations(setup, monkeypatc
 def test_ambiguous_oauth_client_configuration_rejected(setup):
     configuration = {"web": CREDENTIALS["installed"], "installed": CREDENTIALS["installed"]}
     assert setup.post("/auth/import", headers=AUTH, json={"credentials": configuration}).status_code == 400
+
+
+def test_fixed_test_mail_paused_idempotent_and_bound_to_recipient(setup, monkeypatch):
+    client = setup
+    monkeypatch.setattr(server, "verify_connection", lambda: {"email": "sender@example.com"})
+    calls = []
+    monkeypatch.setattr(
+        core, "send_approved", lambda payload, token: calls.append(payload) or {"status": "sent", "id": "mock"}
+    )
+    preview = client.post("/test/preview", headers=AUTH, json={"to": ["me@example.com"]})
+    assert preview.status_code == 200
+    assert preview.json()["from_email"] == "sender@example.com"
+    body = {"to": ["me@example.com"], "approval_token": preview.json()["approval_token"], "request_key": "test-one"}
+    assert client.post("/test/send", headers=AUTH, json=body).json()["status"] == "sent"
+    assert client.post("/test/send", headers=AUTH, json=body).json()["status"] == "sent"
+    assert len(calls) == 1 and calls[0]["subject"] == server.TEST_SUBJECT
+    assert server.policy()["sending_enabled"] is False
+    changed = {**body, "to": ["other@example.com"]}
+    assert client.post("/test/send", headers=AUTH, json=changed).status_code >= 400

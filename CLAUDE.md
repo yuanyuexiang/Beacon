@@ -116,3 +116,5 @@ D71 单家销售工作区（2026-10-20）：详情分销售准备／菜单资料
 D72 AI 触达消息：管理员在设置维护真实服务资料；单家／批量草稿支持真实 DeepSeek 起草，模型仅接收存量已核对菜单和带引用的业务信息，不额外抓取网站／Places。主题、正文、生成依据及来源快照保存，确认后创建任务，仍须完整发送预览。Fake／失败不冒充 AI，不改旧消息；菜单、门店或服务变化需要重新生成。无迁移，只本地更新；专项 tests/test_outreach_ai.py，模拟界面 scripts/verify_outreach_profile_ui.py 和 scripts/verify_detail_workspace_ui.py。见客户沟通工作台 D72。
 
 2026-10-20 用户已明确授权云发布：D68～D72 等本地功能现已上线，提交 d14c3d1、迁移 d170a0010001，Actions 39415861487 成功；此前“仅本地”描述属于实施时状态。后续新增修改仍须本地验收并经用户确认后发布。
+
+D73（2026-10-22）：网页 Gmail OAuth，设置页 Web 客户端向导／分次发送与邮件头权限、候选凭据验证后替换、浏览器和管理员会话绑定及 PKCE。导入为高级兼容，成功连接暂停发送且未执行预览过期，未知发送记录保留。专项服务 `cd services/gmail && uv run pytest -q`，API tests/test_gmail_oauth.py，模拟界面 scripts/verify_gmail_oauth_ui.py。无 PG 迁移，仅本地验证，未真实授权／发送／发布。见 docs/Gmail邮件服务.md。

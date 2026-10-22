@@ -30,7 +30,9 @@ from typing import Any
 
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
-GMAIL_SCOPES = (GMAIL_SEND_SCOPE, GMAIL_READONLY_SCOPE)
+GMAIL_METADATA_SCOPE = "https://www.googleapis.com/auth/gmail.metadata"
+GMAIL_IDENTITY_SCOPES = ("openid", "email")
+GMAIL_SCOPES = (GMAIL_SEND_SCOPE, GMAIL_READONLY_SCOPE)  # Desktop 导入兼容
 DEFAULT_DIR = Path.home() / ".config" / "opc-business-os" / "gmail"
 DEFAULT_AUDIT_DB = Path.home() / ".opc-business-os" / "gmail-audit.db"
 TOKEN_TTL_SECONDS = 30 * 60
@@ -45,7 +47,9 @@ class GmailError(ValueError):
 
 @contextmanager
 def request_budget(seconds: int):
-    token = REQUEST_DEADLINE.set(time.monotonic() + seconds)
+    previous = REQUEST_DEADLINE.get()
+    deadline = time.monotonic() + seconds
+    token = REQUEST_DEADLINE.set(min(previous, deadline) if previous is not None else deadline)
     try:
         yield
     finally:
@@ -58,7 +62,7 @@ def request_timeout() -> float:
         return 30
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise GmailError("Gmail 只读操作已达到时间上限，请稍后再试")
+        raise GmailError("Google 连接操作已达到时间上限，请稍后再试")
     return min(30, remaining)
 
 
@@ -207,7 +211,7 @@ def _access_token(required_scope: str | None = None) -> str:
     except (OSError, json.JSONDecodeError) as exc:
         raise GmailError(f"Gmail Token 无法读取：{path}") from exc
     if required_scope and required_scope not in _granted_scopes(token):
-        raise GmailError("当前 Gmail Token 没有收件箱只读权限，请运行 gmail_mcp_server.py auth 重新授权")
+        raise GmailError("missing_send_scope" if required_scope == GMAIL_SEND_SCOPE else "missing_read_scope")
     expires_at = int(token.get("obtained_at", 0)) + int(token.get("expires_in", 0)) - 60
     if token.get("access_token") and time.time() < expires_at:
         return token["access_token"]
@@ -241,17 +245,25 @@ def auth_status() -> dict[str, Any]:
         "token_present": path.is_file(),
         "requested_scopes": list(GMAIL_SCOPES),
         "send_authorized": GMAIL_SEND_SCOPE in granted,
-        "readonly_authorized": GMAIL_READONLY_SCOPE in granted,
+        "readonly_authorized": bool({GMAIL_READONLY_SCOPE, GMAIL_METADATA_SCOPE} & granted),
         "test_sender": os.environ.get("GMAIL_SENDER_EMAIL"),
         "local_daily_send_limit": daily_send_limit(),
     }
+
+
+def _read_scope() -> str:
+    try:
+        scopes = _granted_scopes(json.loads(token_path().read_text()))
+        return GMAIL_METADATA_SCOPE if GMAIL_METADATA_SCOPE in scopes else GMAIL_READONLY_SCOPE
+    except (OSError, ValueError):
+        return GMAIL_READONLY_SCOPE
 
 
 def _gmail_get(path: str, params: list[tuple[str, str]] | None = None) -> dict[str, Any]:
     query = "?" + urllib.parse.urlencode(params or [], doseq=True) if params else ""
     req = urllib.request.Request(
         "https://gmail.googleapis.com/gmail/v1/users/me/" + path + query,
-        headers={"Authorization": f"Bearer {_access_token(GMAIL_READONLY_SCOPE)}"},
+        headers={"Authorization": f"Bearer {_access_token(_read_scope())}"},
     )
     last_error: Exception | None = None
     for attempt in range(SAFE_HTTP_ATTEMPTS):

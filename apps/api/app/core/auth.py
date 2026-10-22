@@ -121,7 +121,10 @@ def enforce_permissions(request: Request, op: Operator) -> None:
             or path
             in {
                 "/api/gmail/credentials",
+                "/api/gmail/configure",
                 "/api/gmail/check",
+                "/api/gmail/test/preview",
+                "/api/gmail/test/send",
                 "/api/gmail/connect",
                 "/api/gmail/disconnect",
                 "/api/gmail/policy",

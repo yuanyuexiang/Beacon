@@ -8,21 +8,32 @@
 4. 打开“设置 → Gmail 邮件服务”，点击“检查连接”。此操作刷新 access token 并读取 Gmail 账户信息，不发送邮件。
 5. 发送和批量队列默认关闭；准备开始已确认的邮件任务时再保存开关设置。每日限额 0 表示没有本地额度限制；Google 限额仍生效。
 
-## OAuth 管理与服务器部署
+## 网页授权（D73，2026-10-22，本地验收）
 
-- 设置页“配置 OAuth 或导入已有授权”上传 Google OAuth 客户端 JSON；可同时上传兼容的已有 Token JSON（包含 scope、refresh_token，OPC 格式兼容）。只上传客户端会清除旧令牌，需要重新授权。
-- 服务器“连接 / 重新授权 Gmail”使用 Web application 类型客户端，Google Cloud 中登记完全相同的回调地址。`BEACON_GMAIL_REDIRECT_URI` 默认 `http://localhost:3000/api/gmail/oauth/callback`；部署时改为实际 HTTPS 域名。
-- 原 Desktop 客户端 + refresh token 可导入离线使用；不将 Desktop 客户端直接用于服务器 Web 授权回调。
-- 现有 OAuth 客户端和 refresh token 必须属于同一 Google Cloud 客户端。导入检查未验证 Google 项目发布状态；External/Testing 的 Gmail 刷新令牌可能七天过期，需在 Google Cloud 检查。
-- `BEACON_GMAIL_PROXY` 可配置 HTTP CONNECT 代理，本机容器示例 `http://host.docker.internal:7890`；服务器按网络情况设置，不要求代理。
-- 服务访问密钥和 Google OAuth 令牌不同：前者通过 Compose secret 给 API 与邮件服务；后者仅在 gmail-service 的 `beacon-gmail-data` 卷中持久化。Compose secret 不是自动加密密钥库；备份卷含敏感数据，需限制访问。
-- 导入或重新授权会暂停发送并使旧预览令牌失效；避免旧账号审批的邮件从新账号发出。断开仅移除服务中令牌并暂停发送，不代表撤销 Google Cloud 侧授权。
+日常连接不需要终端或上传 Token：管理员进入“设置 → Gmail 邮箱连接”，首次配置 Web OAuth，之后直接点击“连接 Gmail／重新连接 Gmail”。
+
+1. 在 Google 项目启用 Gmail API，创建 **Web application** OAuth 客户端。Google 项目若处于 External／Testing，添加登录账号为测试用户；这类项目的 Gmail 刷新授权通常七天到期，长期使用前应检查发布与验证要求。
+2. 将页面显示的完整回调地址登记到该客户端，再下载 JSON。开发默认 `http://localhost:3000/api/gmail/oauth/callback`；云端 `https://beacon.ai-onestep.com/api/gmail/oauth/callback`。开发／云端建议用不同客户端。本地由浏览器访问 localhost，不需要公网或终端回调；访问域名必须与回调一致。
+3. 在“管理员首次配置／更换 Web 客户端”上传 JSON 并保存。仅保存候选配置，不删除原 Token，也不替换当前邮箱。
+4. 点击“连接 Gmail”，在正常 Chrome／Safari 中选账号并同意发送和身份权限。回到工作台显示邮箱与授权状态，发送和队列仍暂停。
+5. 需要回复同步时再点击“开启／重新授权回复同步”，申请 `gmail.metadata` 邮件头权限。旧 `gmail.readonly` 授权兼容；两者都是 Google 受限权限，metadata 不代表免验证。
+6. 核对连接邮箱，先用自己可控的收件邮箱测试单家任务。开启发送、限额 1、批量队列关闭，完整预览确认后才发送。
+
+`invalid_grant` 显示重新连接及 Testing 状态提示；客户端、回调不匹配、取消／测试用户、身份读取、浏览器／会话失败各有处理提示。未展示的 Google 原始响应、Token、code 与客户端 secret 不回显。
+
+重新连接绑定发起管理员、会话版本及 HttpOnly 浏览器 nonce，state 单次使用／十分钟有效，并使用 PKCE S256。配置与令牌通过 Google 验证成功后才替换旧连接；失败保留原凭据。成功后暂停发送、轮换预览密钥，并将 Beacon 中未执行的 preview／ready／queued 标记过期；已发送或结果未知记录不修改。任务与历史保留，重新预览后再执行。
+
+高级入口支持对应的 Desktop／Web OAuth 客户端 JSON + Token JSON 一起导入，服务器先强制刷新核对客户端配套与邮箱，再替换；错误 Token 不覆盖旧连接。Desktop 客户端不能用于网页重新授权。
+
+独立服务仍保存令牌，API 仅代理控制接口，前端不获取 Token。新 SQLite 表 `oauth_sessions_v2` 不改变旧表结构，不新增 PostgreSQL 迁移。仅本地验收，未执行真实 OAuth、未发送、未发布。
+
+参考：[Web OAuth](https://developers.google.com/identity/protocols/oauth2/web-server)、[Token 到期](https://developers.google.com/identity/protocols/oauth2#expiration)、[Gmail 权限](https://developers.google.com/workspace/gmail/api/auth/scopes)。
 
 ## 单家发送与批量队列
 
-1. 在线索页完成菜单审核、生成并审批文案。
+1. 在线索页完善资料，生成并确认触达消息；没有菜单也可起草询问菜单／负责人的消息。
 2. “任务 → 渠道准入”给该邮箱设置 allowed，填写证据和规则版本，创建邮箱任务。
-3. “任务 → Gmail 邮件”选择任务、输入主题，点击预览。每封正文来自其已审批内容，收件人来自准入记录。
+3. 在“触达任务与回复”打开邮箱任务并预览邮件。主题可留空复用已确认消息；正文来自已确认内容，收件人来自准入记录。
 4. 弹窗完整展示所有收件人、主题和正文；勾选已核对后确认。单家进入 ready，多家进入 queued；每封独立发送，不抄送其他客户。
 5. 每次发送前再次复核地址、文案版本、准入、复核日期、抑制和预览有效期。完整预览令牌 30 分钟有效，过期需重新预览确认，不能靠后台自行延长。
 6. 批量队列默认暂停，需要设置页打开队列执行。暂停开关阻止后续请求，不承诺撤回已经提交给 Gmail 的邮件。
@@ -47,3 +58,9 @@
 普通测试禁止访问真实 Gmail；真实导入、OAuth 刷新和账户连接检查单列记录。当前不向客户发送开发测试邮件。
 
 依据：[Google OAuth](https://developers.google.com/identity/protocols/oauth2/web-server)、[Docker Compose secrets](https://docs.docker.com/compose/how-tos/use-secrets/)、[MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)。
+
+### 设置页发送测试邮件
+
+连接成功并取得发送权限后，在“发送测试邮件”输入自己的邮箱，点击“预览测试邮件”，核对发件人、收件人和固定正文，再点击“确认发送一封”。
+
+测试无需开启客户发送或批量队列，不创建客户任务，仍受每日限额及重复发送检查约束。成功提示表示 Gmail 已接受，请检查收件箱或垃圾邮件。失败请检查授权、限额及服务记录；结果未知或网络中断时先查 Gmail 已发送邮件，不要直接重复发送。每次预览只能提交一次，修改收件人必须重新预览。
