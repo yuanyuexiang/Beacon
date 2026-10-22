@@ -54,9 +54,12 @@ def test_oauth_failure_is_actionable_and_sanitized(client, db, monkeypatch):
 def test_settings_test_mail_forwarded_without_creating_customer_task(client, db, monkeypatch):
     login(client, db)
     calls = []
-    monkeypatch.setattr(
-        gmail_client, "call", lambda method, path, body: calls.append((path, body)) or {"status": "sent"}
-    )
+
+    def fake_call(method, path, body):
+        calls.append((path, body))
+        return {"status": "sent"}
+
+    monkeypatch.setattr(gmail_client, "call", fake_call)
     body = {"to": ["self@example.com"]}
     assert client.post("/api/gmail/test/preview", json=body).status_code == 200
     assert (
