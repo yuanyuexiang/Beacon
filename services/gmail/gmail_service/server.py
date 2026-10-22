@@ -301,7 +301,7 @@ def send(payload: dict, approval_token: str, key: str, *, test: bool = False) ->
         try:
             result = core.send_approved(normalized, approval_token)
             result.pop("audit_db", None)
-        except (core.GmailError, OSError, ValueError):
+        except (core.GmailError, OSError, ValueError) as error:
             # 服务端审计是发送结果依据；错误消息不输出 OAuth 响应或凭据。
             attempt = conn.execute(
                 "SELECT * FROM sends WHERE fingerprint=? AND id>? ORDER BY id DESC LIMIT 1", (fingerprint, before)
@@ -310,6 +310,9 @@ def send(payload: dict, approval_token: str, key: str, *, test: bool = False) ->
                 state = attempt["status"]
                 result = {
                     "status": "unknown" if state == "pending" else state,
+                    "reason": str(error)
+                    if isinstance(error, core.GmailError) and str(error).startswith("Gmail 发送失败（HTTP")
+                    else "发送被拒绝或结果待核对，请查看服务审计；不要自动重发",
                     "attempt_id": attempt["id"],
                     "id": attempt["gmail_message_id"],
                     "threadId": attempt["gmail_thread_id"],

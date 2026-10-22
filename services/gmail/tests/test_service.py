@@ -211,3 +211,23 @@ def test_fixed_test_mail_paused_idempotent_and_bound_to_recipient(setup, monkeyp
     assert server.policy()["sending_enabled"] is False
     changed = {**body, "to": ["other@example.com"]}
     assert client.post("/test/send", headers=AUTH, json=changed).status_code >= 400
+
+
+def test_send_rejection_reason_retained_and_private_response_omitted(setup, monkeypatch):
+    import io
+    import urllib.error
+
+    monkeypatch.setattr(core, "_access_token", lambda *a: "mock")
+
+    def rejected(*a, **k):
+        payload = b'{"error":{"message":"private details","details":[{"reason":"SERVICE_DISABLED"}]}}'
+        raise urllib.error.HTTPError("https://gmail.googleapis.com", 403, "Forbidden", {}, io.BytesIO(payload))
+
+    monkeypatch.setattr(core.urllib.request, "urlopen", rejected)
+    preview = core.preview(server.test_mail(["self@example.com"]))
+    body = {"to": ["self@example.com"], "approval_token": preview["approval_token"], "request_key": "rejected"}
+    result = setup.post("/test/send", headers=AUTH, json=body).json()
+    assert result["status"] == "failed"
+    assert "HTTP 403" in result["reason"] and "启用 Gmail API" in result["reason"]
+    assert "private" not in str(result)
+    assert setup.post("/test/send", headers=AUTH, json=body).json() == result

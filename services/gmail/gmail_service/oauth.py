@@ -8,18 +8,29 @@ from . import core
 
 
 def identity(access_token: str, scopes: set[str]) -> dict:
-    legacy = bool({core.GMAIL_READONLY_SCOPE, core.GMAIL_METADATA_SCOPE} & scopes)
+    legacy = not ({"openid", "email", "https://www.googleapis.com/auth/userinfo.email"} & scopes) and bool(
+        {core.GMAIL_READONLY_SCOPE, core.GMAIL_METADATA_SCOPE} & scopes
+    )
     url = (
         "https://gmail.googleapis.com/gmail/v1/users/me/profile"
         if legacy
         else "https://openidconnect.googleapis.com/v1/userinfo"
     )
     req = urllib.request.Request(url, headers={"Authorization": "Bearer " + access_token})
-    try:
-        with urllib.request.urlopen(req, timeout=core.request_timeout()) as response:
-            data = json.load(response)
-    except (OSError, ValueError) as exc:
-        raise core.GmailError("account_identity_failed") from exc
+    for attempt in range(core.SAFE_HTTP_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=core.request_timeout()) as response:
+                data = json.load(response)
+            break
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {429, 500, 502, 503, 504} or attempt == core.SAFE_HTTP_ATTEMPTS - 1:
+                raise core.GmailError(f"account_identity_http_{exc.code}") from None
+        except OSError:
+            if attempt == core.SAFE_HTTP_ATTEMPTS - 1:
+                raise core.GmailError("account_identity_network") from None
+        except ValueError:
+            raise core.GmailError("account_identity_response") from None
+        core.time.sleep(core.SAFE_HTTP_BACKOFF_SECONDS[attempt])
     email = data.get("emailAddress") if legacy else data.get("email")
     if not email or ("@" not in str(email)) or (not legacy and data.get("email_verified") is not True):
         raise core.GmailError("account_identity_failed")
@@ -47,6 +58,22 @@ def validate_token(config: dict, token: dict) -> tuple[dict, str]:
 def diagnostic(error: Exception | str) -> dict:
     message = str(error)
     cases = [
+        (
+            "account_identity_http_403",
+            "account_identity_http_403",
+            "Google 拒绝邮箱身份查询（403），请核对身份权限及 Gmail API 是否已启用。",
+        ),
+        (
+            "account_identity_http_401",
+            "account_identity_http_401",
+            "Google 拒绝当前身份令牌（401），请重新连接并授予邮箱身份权限。",
+        ),
+        (
+            "account_identity_network",
+            "account_identity_network",
+            "邮箱身份查询网络连接失败，请检查 Gmail 服务到 Google 的网络后重新连接。",
+        ),
+        ("account_identity_response", "account_identity_response", "Google 身份查询返回格式异常，请稍后重新连接。"),
         (
             "invalid_grant",
             "invalid_grant",

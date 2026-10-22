@@ -7,6 +7,10 @@ type Action = "connect" | "replies" | "check" | "refresh" | "disconnect" | "conf
 type Policy = { sending_enabled: boolean; queue_enabled: boolean; daily_limit: number };
 type Status = { configured: boolean; message?: string; connection_error?: string; connected?: boolean; token_present?: boolean; send_authorized?: boolean; readonly_authorized?: boolean; email?: string; policy?: Policy; client_type?: string; redirect_uri?: string; pending_configuration?: boolean; oauth_configured?: boolean };
 const ERRORS: Record<string, string> = {
+  account_identity_http_403: "Google 拒绝身份查询（403）。请确认 Gmail API 已启用，并重新连接授予邮箱身份权限。",
+  account_identity_http_401: "Google 拒绝身份令牌（401），请重新连接 Gmail。",
+  account_identity_network: "服务端查询邮箱身份时网络连接失败，请检查 Gmail 服务网络后重新连接。",
+  account_identity_response: "Google 身份响应异常，请稍后重新连接。",
   invalid_grant: "Google 授权失效或授权码不可用，请重新连接。若反复失效，请核对 Google 项目的 Testing 状态。",
   invalid_client: "OAuth 客户端无效，请检查对应环境的 Web 客户端配置。",
   redirect_uri_mismatch: "回调地址不一致，请将下方完整地址登记到 Google 客户端。",
@@ -70,7 +74,7 @@ export default function GmailSettings() {
   const web = status?.client_type === "web";
   return <Card title="Gmail 邮箱连接" style={{ marginBottom: 16 }}>
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
-    {notice && <Alert type="success" showIcon message={notice} style={{ marginBottom: 12 }} />}
+    {notice && status?.configured && <Alert type="success" showIcon message={notice} style={{ marginBottom: 12 }} />}
     {status && !status.configured && <Alert type="warning" message={status.message || "Gmail 服务暂不可达"} />}
     {status?.connection_error && <Alert type="warning" message={status.connection_error} style={{ marginBottom: 12 }} />}
     <Typography.Paragraph><strong>{status?.email || "尚未连接邮箱"}</strong> · 连接：{status?.connected ? "已验证" : "待连接／检查"} · 发送权限：{status?.send_authorized ? "已授权" : "未授权"} · 回复同步：{status?.readonly_authorized ? "已授权邮件头读取" : "未开启"}</Typography.Paragraph>
@@ -81,8 +85,8 @@ export default function GmailSettings() {
       <Button disabled={blocked("refresh")} loading={activeAction === "refresh"} onClick={() => act("refresh", refresh)}>刷新状态</Button>
       <Button danger disabled={blocked("disconnect") || !status?.token_present} loading={activeAction === "disconnect"} onClick={() => act("disconnect", async () => { await api("/api/gmail/disconnect", json({})); await refresh(); })}>断开并暂停发送</Button>
     </Space>
-    {(!web || status?.pending_configuration) && <Alert type="info" showIcon message={status?.client_type === "desktop" ? "现有 Desktop 授权可继续使用；网页重新连接需要配置 Web 客户端" : status?.pending_configuration ? "新客户端等待授权验证，原邮箱连接尚未替换" : "首次由管理员配置 Web OAuth，之后直接点击连接，无需终端或 Token 文件"} style={{ marginBottom: 12 }} />}
-    <details open={!status?.oauth_configured}><summary>管理员首次配置／更换 Web 客户端</summary>
+    {status?.configured && (!web || status?.pending_configuration) && <Alert type="info" showIcon message={status?.client_type === "desktop" ? (status.token_present ? "当前配置为 Desktop 客户端；已有令牌需检查有效性。网页连接请先配置 Web 客户端。" : "当前只有 Desktop 客户端配置，没有邮箱授权令牌。请先展开下方配置，保存 Web 客户端 JSON，再点击连接 Gmail。") : status?.pending_configuration ? "新客户端等待授权验证，原邮箱连接尚未替换" : "首次由管理员配置 Web OAuth，之后直接点击连接，无需终端或 Token 文件"} style={{ marginBottom: 12 }} />}
+    <details open={!!status?.configured && !web}><summary>管理员首次配置／更换 Web 客户端</summary>
       <Typography.Paragraph>在 Google 项目中启用 Gmail API，创建 Web application 客户端，登记以下回调地址后下载 JSON。测试中的项目还需添加登录账号为测试用户。本地与云端建议使用不同客户端。</Typography.Paragraph>
       <Typography.Paragraph copyable={!!status?.redirect_uri} code>{status?.redirect_uri || "等待服务返回当前环境回调地址"}</Typography.Paragraph>
       <Typography.Paragraph type="secondary">本地回调由浏览器访问 localhost，不需要公网连接。本操作先保存候选配置，授权验证成功后才替换原连接。</Typography.Paragraph>
@@ -98,6 +102,7 @@ export default function GmailSettings() {
     <div style={{ marginTop: 20, marginBottom: 16 }}>
       <Typography.Title level={5}>发送测试邮件</Typography.Title>
       <Typography.Paragraph type="secondary">输入你自己的邮箱，预览确认后发送一封固定测试邮件。不会开启客户发送或批量队列；仍受发送限额约束。</Typography.Paragraph>
+      {(!status?.connected || !status?.send_authorized) && <Alert type="warning" showIcon style={{marginBottom: 12}} message={!status?.configured ? "Gmail 服务暂不可达，请恢复服务后刷新状态；无需重新上传客户端或授权。" : !web ? "尚不能测试：先保存 Web 客户端 JSON → 连接 Gmail 并授权 → 再预览测试邮件。" : !status?.token_present ? "尚不能测试：点击上方“连接 Gmail”，完成 Google 邮箱授权。" : "尚不能测试：请检查连接；若授权失效，请重新连接 Gmail 并授予发送权限。"} />}
       <Space wrap>
         <Input aria-label="测试收件邮箱" placeholder="你的收件邮箱" value={testTo} disabled={busy} onChange={e => setTestTo(e.target.value)} style={{ width: 320 }} />
         <Button disabled={blocked("testPreview") || !status?.connected || !status?.send_authorized || !testTo.trim()} loading={activeAction === "testPreview"} onClick={() => act("testPreview", async () => {

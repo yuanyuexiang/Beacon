@@ -139,3 +139,50 @@ def test_storage_failure_restores_previous_connection(setup, monkeypatch):
         core.token_path().read_bytes(),
         core.secret_path().read_bytes(),
     )
+
+
+def test_identity_prefers_openid_even_with_previous_gmail_read_grant(monkeypatch):
+    import io
+    import json
+
+    urls = []
+
+    def open_url(request, **kwargs):
+        urls.append(request.full_url)
+        return io.BytesIO(json.dumps({"email": "qa@example.com", "email_verified": True}).encode())
+
+    monkeypatch.setattr(oauth.urllib.request, "urlopen", open_url)
+    assert oauth.identity("mock", {"openid", "email", core.GMAIL_READONLY_SCOPE})["email"] == "qa@example.com"
+    assert urls == ["https://openidconnect.googleapis.com/v1/userinfo"]
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_identity_http_error_is_actionable_without_leaking_response(monkeypatch, code):
+    import urllib.error
+
+    def reject(*args, **kwargs):
+        raise urllib.error.HTTPError("https://example.com", code, "private-token-response", {}, None)
+
+    monkeypatch.setattr(oauth.urllib.request, "urlopen", reject)
+    with pytest.raises(core.GmailError) as caught:
+        oauth.identity("private-token", {"openid", "email"})
+    detail = oauth.diagnostic(caught.value)
+    assert detail["code"] == f"account_identity_http_{code}"
+    assert "private" not in str(detail)
+
+
+def test_identity_retries_transient_network_without_reauthorization(monkeypatch):
+    import io
+
+    calls = []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) < 3:
+            raise OSError("temporary TLS failure")
+        return io.BytesIO(b'{"email":"qa@example.com","email_verified":true}')
+
+    monkeypatch.setattr(oauth.urllib.request, "urlopen", flaky)
+    monkeypatch.setattr(core.time, "sleep", lambda seconds: None)
+    assert oauth.identity("mock", {"openid", "email"})["email"] == "qa@example.com"
+    assert len(calls) == 3

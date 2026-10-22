@@ -562,7 +562,20 @@ def send_approved(payload: dict[str, Any], approval_token: str, allow_duplicate:
                         f"Gmail 触发发送限额或请求频率限制（HTTP 429）；尝试 {attempt_id}。"
                         "这是 Google 服务端限制，不是插件本地预算；请稍后再试，插件不会自动重发。"
                     ) from exc
-                raise GmailError(f"Gmail 发送失败（HTTP {exc.code}）；尝试 {attempt_id}") from exc
+                hint = ""
+                try:
+                    details = json.loads(exc.read()).get("error", {})
+                    reasons = {item.get("reason") for item in details.get("errors", [])}
+                    reasons.update(item.get("reason") for item in details.get("details", []))
+                    if reasons & {"accessNotConfigured", "SERVICE_DISABLED"}:
+                        hint = "；此 OAuth 项目尚未启用 Gmail API，请在 Google Cloud 启用"
+                    elif reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
+                        hint = "；发送权限不足，请重新授权 gmail.send"
+                    elif reasons & {"rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded"}:
+                        hint = "；Google 发送限额或频率限制，请稍后再试"
+                except (OSError, ValueError, TypeError, AttributeError):
+                    pass
+                raise GmailError(f"Gmail 发送失败（HTTP {exc.code}）{hint}；尝试 {attempt_id}") from exc
             raise GmailError(
                 f"发送结果未知（尝试 {attempt_id}），已保留审计且不会自动重试或写入 outbound。"
                 "请先核对 Gmail 已发送邮件，再使用 resolve-send 记录结果。"
