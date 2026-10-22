@@ -3,7 +3,7 @@ import { Alert, Button, Card, Form, Input, InputNumber, Modal, Space, Switch, Ty
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, json } from "@/lib/api";
 
-type Action = "connect" | "replies" | "check" | "refresh" | "disconnect" | "configure" | "policy" | "import" | "testPreview" | "testSend";
+type Action = "connect" | "replies" | "check" | "refresh" | "disconnect" | "configure" | "policy" | "testPreview" | "testSend";
 type Policy = { sending_enabled: boolean; queue_enabled: boolean; daily_limit: number };
 type Status = { configured: boolean; message?: string; connection_error?: string; connected?: boolean; token_present?: boolean; send_authorized?: boolean; readonly_authorized?: boolean; email?: string; policy?: Policy; client_type?: string; redirect_uri?: string; pending_configuration?: boolean; oauth_configured?: boolean };
 const ERRORS: Record<string, string> = {
@@ -28,8 +28,8 @@ export default function GmailSettings() {
   const [testSubmitted, setTestSubmitted] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [webCredentials, setWebCredentials] = useState<File | null>(null);
-  const [credentials, setCredentials] = useState<File | null>(null);
-  const [token, setToken] = useState<File | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const policyDirty = useRef(false);
   const [activeAction, setActiveAction] = useState<Action | null>(null);
   const inFlight = useRef(false);
   const busy = activeAction !== null;
@@ -39,7 +39,7 @@ export default function GmailSettings() {
   const [form] = Form.useForm<Policy>();
   const refresh = useCallback(async () => {
     const next = await api<Status>("/api/gmail/status");
-    setStatus(next); if (next.policy) form.setFieldsValue(next.policy);
+    setStatus(next); if (next.policy && !policyDirty.current) form.setFieldsValue(next.policy);
   }, [form]);
   useEffect(() => {
     refresh().catch((e) => setError(e.message));
@@ -53,18 +53,17 @@ export default function GmailSettings() {
     setActiveAction(action); setError(undefined); setNotice(undefined);
     try { await work(); } catch (e) { setError((e as Error).message); await refresh().catch(() => {}); } finally { inFlight.current = false; setActiveAction(null); }
   };
-  const files = async (legacy: boolean) => {
-    const selected = legacy ? credentials : webCredentials;
-    if (!selected) throw new Error("请选择 Google OAuth 客户端 JSON");
-    if (selected.size > 65536 || (token && token.size > 65536)) throw new Error("文件不能超过 64 KB");
-    if (legacy && !token) throw new Error("高级导入需同时选择对应的 Token JSON");
-    let c, t;
-    try { c = JSON.parse(await selected.text()); t = legacy ? JSON.parse(await token!.text()) : undefined; } catch { throw new Error("文件不是有效的 JSON，请重新选择"); }
-    if (!legacy && !c.web) throw new Error("请选择 Web application 类型客户端；Desktop 请使用高级导入");
-    await api(legacy ? "/api/gmail/credentials" : "/api/gmail/configure", json({ credentials: c, token: t }));
-    if (legacy) { setCredentials(null); setToken(null); } else setWebCredentials(null);
+  const files = async () => {
+    if (!webCredentials) throw new Error("请选择 Web OAuth 客户端 JSON");
+    if (webCredentials.size > 65536) throw new Error("文件不能超过 64 KB");
+    let credentials;
+    try { credentials = JSON.parse(await webCredentials.text()); } catch { throw new Error("文件不是有效的 JSON，请重新选择"); }
+    if (!credentials.web || credentials.installed) throw new Error("请选择 Web application 类型客户端 JSON");
+    await api("/api/gmail/configure", json({ credentials }));
+    setWebCredentials(null);
+    if (fileInput.current) fileInput.current.value = "";
     await refresh();
-    setNotice(legacy ? "已有授权已验证并导入。发送保持暂停。" : "Web 客户端已保存，原连接保留。现在可以连接 Gmail。");
+    setNotice("Web 客户端已保存，请点击“连接 Gmail”完成邮箱授权；原连接在新授权成功前保留。");
   };
   const connect = (purpose: "send" | "replies") => act(purpose === "send" ? "connect" : "replies", async () => {
     if (status?.redirect_uri && new URL(status.redirect_uri).origin !== window.location.origin) throw new Error(`当前访问地址与回调不一致，请从 ${new URL(status.redirect_uri).origin}/settings 打开工作台后重新连接。`);
@@ -89,13 +88,13 @@ export default function GmailSettings() {
     <details open={!!status?.configured && !web}><summary>管理员首次配置／更换 Web 客户端</summary>
       <Typography.Paragraph>在 Google 项目中启用 Gmail API，创建 Web application 客户端，登记以下回调地址后下载 JSON。测试中的项目还需添加登录账号为测试用户。本地与云端建议使用不同客户端。</Typography.Paragraph>
       <Typography.Paragraph copyable={!!status?.redirect_uri} code>{status?.redirect_uri || "等待服务返回当前环境回调地址"}</Typography.Paragraph>
-      <Typography.Paragraph type="secondary">本地回调由浏览器访问 localhost，不需要公网连接。本操作先保存候选配置，授权验证成功后才替换原连接。</Typography.Paragraph>
-      <Space wrap><label>Web OAuth 客户端 JSON <input disabled={busy} type="file" accept=".json" onChange={(e) => setWebCredentials(e.target.files?.[0] ?? null)} /></label><Button disabled={blocked("configure") || !status?.redirect_uri} loading={activeAction === "configure"} onClick={() => act("configure", () => files(false))}>保存 Web 客户端</Button></Space>
+      <Typography.Paragraph type="secondary">当前回调必须登记在 Google 客户端的重定向 URI 中。本操作先保存候选配置，授权验证成功后才替换原连接。</Typography.Paragraph>
+      <Space wrap><label>Web OAuth 客户端 JSON <input ref={fileInput} disabled={activeAction === "configure"} type="file" accept=".json" onChange={(e) => setWebCredentials(e.target.files?.[0] ?? null)} /></label><Button disabled={blocked("configure") || !status?.redirect_uri || !webCredentials} loading={activeAction === "configure"} onClick={() => act("configure", files)}>保存 Web 客户端</Button></Space>
     </details>
-    <Form form={form} layout="inline" initialValues={{ sending_enabled: false, queue_enabled: false, daily_limit: 0 }} onFinish={(values) => act("policy", async () => { await api("/api/gmail/policy", json(values, "PUT")); await refresh(); setNotice("发送设置已保存。"); })} style={{ margin: "20px 0 12px", rowGap: 8 }}>
-      <Form.Item name="sending_enabled" label="允许发送" valuePropName="checked"><Switch disabled={busy || !status?.connected || !status?.send_authorized} /></Form.Item>
-      <Form.Item name="queue_enabled" label="运行批量队列" valuePropName="checked"><Switch disabled={busy || !status?.connected || !status?.send_authorized} /></Form.Item>
-      <Form.Item name="daily_limit" label="滚动 24 小时限额"><InputNumber min={0} max={100000} precision={0} /></Form.Item>
+    <Form form={form} layout="inline" onValuesChange={() => { policyDirty.current = true; }} initialValues={{ sending_enabled: false, queue_enabled: false, daily_limit: 0 }} onFinish={(values) => act("policy", async () => { await api("/api/gmail/policy", json(values, "PUT")); policyDirty.current = false; await refresh(); setNotice("发送设置已保存。"); })} style={{ margin: "20px 0 12px", rowGap: 8 }}>
+      <Form.Item name="sending_enabled" label="允许发送" valuePropName="checked"><Switch disabled={activeAction === "policy" || !status?.connected || !status?.send_authorized} /></Form.Item>
+      <Form.Item name="queue_enabled" label="运行批量队列" valuePropName="checked"><Switch disabled={activeAction === "policy" || !status?.connected || !status?.send_authorized} /></Form.Item>
+      <Form.Item name="daily_limit" label="滚动 24 小时限额"><InputNumber disabled={activeAction === "policy"} min={0} max={100000} precision={0} /></Form.Item>
       <Button htmlType="submit" loading={activeAction === "policy"} disabled={blocked("policy") || !status?.policy}>保存发送设置</Button>
     </Form>
     <Typography.Paragraph type="secondary">连接成功不会自动发送。首次建议限额 1、批量队列关闭；逐封预览并确认后执行。0 表示不设本地限额。</Typography.Paragraph>
@@ -104,7 +103,7 @@ export default function GmailSettings() {
       <Typography.Paragraph type="secondary">输入你自己的邮箱，预览确认后发送一封固定测试邮件。不会开启客户发送或批量队列；仍受发送限额约束。</Typography.Paragraph>
       {(!status?.connected || !status?.send_authorized) && <Alert type="warning" showIcon style={{marginBottom: 12}} message={!status?.configured ? "Gmail 服务暂不可达，请恢复服务后刷新状态；无需重新上传客户端或授权。" : !web ? "尚不能测试：先保存 Web 客户端 JSON → 连接 Gmail 并授权 → 再预览测试邮件。" : !status?.token_present ? "尚不能测试：点击上方“连接 Gmail”，完成 Google 邮箱授权。" : "尚不能测试：请检查连接；若授权失效，请重新连接 Gmail 并授予发送权限。"} />}
       <Space wrap>
-        <Input aria-label="测试收件邮箱" placeholder="你的收件邮箱" value={testTo} disabled={busy} onChange={e => setTestTo(e.target.value)} style={{ width: 320 }} />
+        <Input aria-label="测试收件邮箱" placeholder="你的收件邮箱" value={testTo} disabled={activeAction === "testPreview" || activeAction === "testSend"} onChange={e => setTestTo(e.target.value)} style={{ width: 320 }} />
         <Button disabled={blocked("testPreview") || !status?.connected || !status?.send_authorized || !testTo.trim()} loading={activeAction === "testPreview"} onClick={() => act("testPreview", async () => {
           const preview = await api<{to: string[]; subject: string; body: string; from_email: string; approval_token: string}>("/api/gmail/test/preview", json({to: [testTo.trim()]}));
           setTestPreview({...preview, request_key: crypto.randomUUID()}); setTestSubmitted(false); setTestResult(undefined);
@@ -126,9 +125,6 @@ export default function GmailSettings() {
         <p>主题：{testPreview?.subject}</p><p style={{whiteSpace:"pre-wrap"}}>{testPreview?.body}</p>
       </Modal>
     </div>
-    <details><summary>高级：导入已有 Desktop／Web 授权</summary>
-      <p>仅迁移已有授权时使用。客户端与 Token 必须配套，服务器先验证再替换；失败保留原连接。</p>
-      <Space direction="vertical"><label>原 OAuth 客户端 JSON <input disabled={busy} type="file" accept=".json" onChange={(e) => setCredentials(e.target.files?.[0] ?? null)} /></label><label>对应 Token JSON <input disabled={busy} type="file" accept=".json" onChange={(e) => setToken(e.target.files?.[0] ?? null)} /></label><Button disabled={blocked("import")} loading={activeAction === "import"} onClick={() => act("import", () => files(true))}>验证并导入已有授权</Button></Space>
-    </details>
+
   </Card>;
 }

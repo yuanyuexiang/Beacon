@@ -15,6 +15,7 @@ async def main():
     check_started, release_check = asyncio.Event(), asyncio.Event()
     hold_check = False
     fail_check = False
+    social_started, release_social = asyncio.Event(), asyncio.Event()
     async def route(r):
         req = r.request
         path = urlsplit(req.url).path
@@ -23,6 +24,15 @@ async def main():
             writes.append((path, req.post_data_json))
         if path == "/api/auth/me":
             data = {"id": "admin", "username": "admin", "role": "admin", "must_change_password": False}
+        elif path == "/api/outreach/status":
+            data = {"configured": True, "app": {"configured": True, "app_id": "mock", "webhook_configured": False}}
+        elif path == "/api/outreach/accounts":
+            data = [{"id": identity, "label": identity, "platform": "facebook", "sender_id": identity, "auth_mode": "facebook_login", "connected": True, "sending_enabled": False, "queue_enabled": False, "daily_limit": 1, "capabilities": []} for identity in ("account-one", "account-two")]
+        elif path == "/api/outreach/accounts/account-one/check":
+            social_started.set()
+            await release_social.wait()
+        elif path == "/api/outreach/accounts/account-two/check":
+            data = {"connected": True}
         elif path == "/api/gmail/status":
             data = state
         elif path == "/api/gmail/configure":
@@ -55,12 +65,21 @@ async def main():
         page = await browser.new_page(viewport={"width": 1440, "height": 1000})
         await page.route("**/api/**", route)
         await page.goto("http://localhost:3000/settings")
+        gmail_card = page.locator(".ant-card").filter(has=page.get_by_text("Gmail 邮箱连接", exact=True)).first
         await expect(page.get_by_role("button", name=re.compile(r"连接 Gmail$"))).to_be_disabled()
         await expect(page.get_by_text(state["redirect_uri"], exact=True)).to_be_visible()
         await page.get_by_label("Web OAuth 客户端 JSON", exact=True).set_input_files({
             "name": "client.json", "mimeType": "application/json",
             "buffer": json.dumps({"web": {"client_id": "test", "client_secret": "mock", "redirect_uris": [state["redirect_uri"]]}}).encode()})
         await page.get_by_role("button", name="保存 Web 客户端", exact=True).click()
+        await expect(page.get_by_role("button", name=re.compile(r"连接 Gmail$"))).to_be_enabled()
+        await page.get_by_text("管理员首次配置／更换 Web 客户端", exact=True).click()
+        await expect(page.get_by_label("Web OAuth 客户端 JSON", exact=True)).to_have_value("")
+        await expect(page.get_by_role("button", name="保存 Web 客户端", exact=True, include_hidden=True)).to_be_disabled()
+        await expect(page.get_by_text("高级：导入已有 Desktop／Web 授权", exact=True)).to_have_count(0)
+        await page.get_by_label("滚动 24 小时限额", exact=True).fill("9")
+        await page.get_by_role("button", name="刷新状态", exact=True).first.click()
+        await expect(page.get_by_label("滚动 24 小时限额", exact=True)).to_have_value("9")
         await expect(page.get_by_role("button", name=re.compile(r"连接 Gmail$"))).to_be_enabled()
         await page.get_by_role("button", name=re.compile(r"连接 Gmail$")).click()
         await expect(page.get_by_text("Gmail 已连接。发送已暂停，请核对邮箱后再开启。", exact=True)).to_be_visible()
@@ -76,15 +95,15 @@ async def main():
         assert sum(path == "/api/gmail/test/send" for path, _ in writes) == 1
         hold_check = True
         before_check = len(writes)
-        await page.get_by_role("button", name=re.compile(r"检查连接$")).click()
+        await gmail_card.get_by_role("button", name=re.compile(r"检查连接$")).click()
         await asyncio.wait_for(check_started.wait(), timeout=5)
         card = page.locator(".ant-card").filter(has=page.get_by_text("Gmail 邮箱连接", exact=True)).first
         await expect(card.locator("button.ant-btn-loading")).to_have_count(1)
-        await expect(page.get_by_role("button", name=re.compile(r"检查连接$"))).to_have_class(re.compile("ant-btn-loading"))
+        await expect(gmail_card.get_by_role("button", name=re.compile(r"检查连接$"))).to_have_class(re.compile("ant-btn-loading"))
         for button in ("重新连接 Gmail", "刷新状态", "断开并暂停发送", "保存发送设置"):
             await expect(page.get_by_role("button", name=button, exact=True)).to_be_disabled()
         assert len(writes) == before_check + 1 and writes[-1][0] == "/api/gmail/check"
-        await page.get_by_role("button", name=re.compile(r"检查连接$")).evaluate("button => { button.click(); button.click(); }")
+        await gmail_card.get_by_role("button", name=re.compile(r"检查连接$")).evaluate("button => { button.click(); button.click(); }")
         assert len(writes) == before_check + 1, "重复点击不得重复请求"
         Path("data/devchecks").mkdir(parents=True, exist_ok=True)
         await card.screenshot(path="data/devchecks/gmail-single-button-loading.png")
@@ -92,7 +111,7 @@ async def main():
         await expect(card.locator("button.ant-btn-loading")).to_have_count(0)
         await expect(page.get_by_role("button", name="刷新状态", exact=True)).to_be_enabled()
         hold_check, fail_check = False, True
-        await page.get_by_role("button", name="检查连接", exact=True).click()
+        await gmail_card.get_by_role("button", name="检查连接", exact=True).click()
         await expect(page.get_by_text("模拟连接失败", exact=True)).to_be_visible()
         await expect(card.locator("button.ant-btn-loading")).to_have_count(0)
         await expect(page.get_by_role("button", name="刷新状态", exact=True)).to_be_enabled()
@@ -107,8 +126,21 @@ async def main():
         Path("data/devchecks").mkdir(parents=True, exist_ok=True)
         await page.screenshot(path="data/devchecks/gmail-web-oauth.png", full_page=True)
         await page.locator(".ant-card").filter(has=page.get_by_text("Gmail 邮箱连接", exact=True)).first.screenshot(path="data/devchecks/gmail-web-oauth-card.png")
-        assert len(writes) == 7 and not any(path.endswith("/send") and "/test/" not in path for path, _ in writes)
+        social = page.locator(".ant-card").filter(has=page.get_by_text("Facebook / Instagram 渠道", exact=True)).first
+        row_one = social.get_by_role("row").filter(has_text="account-one")
+        row_two = social.get_by_role("row").filter(has_text="account-two")
+        await row_one.get_by_role("button", name="检查连接", exact=True).click()
+        await asyncio.wait_for(social_started.wait(), timeout=5)
+        await expect(social.locator("button.ant-btn-loading")).to_have_count(1)
+        await expect(row_one.get_by_role("button", name=re.compile(r"断\s*开"))).to_be_disabled()
+        await expect(row_two.get_by_role("button", name="检查连接", exact=True)).to_be_enabled()
+        await row_two.get_by_role("button", name="检查连接", exact=True).click()
+        await expect(row_two.get_by_role("button", name="检查连接", exact=True)).to_be_enabled()
+        assert sum(path == "/api/outreach/accounts/account-one/check" for path, _ in writes) == 1
+        release_social.set()
+        await expect(social.locator("button.ant-btn-loading")).to_have_count(0)
+        assert len(writes) == 9 and not any(path.endswith("/send") and "/test/" not in path for path, _ in writes)
         await browser.close()
-        print("Gmail web UI passed: OAuth, test mail preview/confirmation, isolated button loading, duplicate prevention, failure recovery, invalid_grant; no external requests")
+        print("Settings UI passed: Web-only onboarding, file reset, unsaved policy preserved, OAuth/test mail, isolated Gmail loading, per-account social locks, failure recovery; no external requests")
 
 asyncio.run(main())
