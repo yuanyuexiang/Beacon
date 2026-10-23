@@ -345,3 +345,7 @@ OAuth 会话用新增私有 SQLite 表 oauth_sessions_v2，旧表结构保持兼
 ### 2026-10-22 发布语义澄清
 
 用户所说“本地验证后再发布”是本地测试通过后自行提交并推送 main，GitHub Actions 随后自动检查、构建与部署，无二次审批。PR 只检查，手动 workflow_dispatch 仍以 deploy=true 显式部署。此次仅修改本地工作流及文档，不代用户提交或推送。
+
+### 2026-10-23 OAuth 回调以环境配置与 Google 登记为准
+
+下载 JSON 的 redirect_uris 是历史快照，不代表 Google 控制台当前登记。不得据此阻止保存 Web 客户端或发起授权；授权及换码仍只使用服务器 GMAIL_REDIRECT_URI，Google 校验精确匹配。保留官方端点、Web 类型、state/浏览器绑定和 PKCE 校验，不接受浏览器传入回调。

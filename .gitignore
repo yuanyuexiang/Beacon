@@ -44,3 +44,6 @@ docs/餐饮销售线索智能分析与管理系统开发合同-正式版.pdf
 # Gmail service secrets are provisioned locally, never committed.
 infra/secrets/
 services/gmail/.venv/
+
+# Google OAuth client downloads contain private credentials.
+client_secret*.json

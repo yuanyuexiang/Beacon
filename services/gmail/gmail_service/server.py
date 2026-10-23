@@ -162,10 +162,8 @@ def verify_connection() -> dict:
 def configure_web(credentials: dict) -> dict:
     validate_config(credentials)
     if not credentials.get("web"):
-        raise HTTPException(400, "网页连接需要 Web application 客户端；Desktop 请在高级导入中使用")
-    redirect = status()["redirect_uri"]
-    if redirect not in credentials["web"].get("redirect_uris", []):
-        raise HTTPException(400, "请在 Google 客户端登记完整回调地址：" + redirect)
+        raise HTTPException(400, "网页连接需要 Web application 客户端，请上传 Web 类型 JSON")
+    # 下载的 JSON 仅是历史快照；回调登记由 Google 授权服务器最终校验。
     with LOCK:
         core._private_write(core.token_path().parent / "pending-credentials.json", json.dumps(credentials))
         with db() as conn:
@@ -179,10 +177,9 @@ def begin_auth(binding: str = "", purpose: str = "send") -> dict:
     credentials = json.loads(path.read_text()) if path.exists() else {}
     config = validate_config(credentials)
     if "web" not in credentials:
-        raise HTTPException(400, "请先配置 Web application 客户端；Desktop 令牌仍可通过高级入口导入")
+        raise HTTPException(400, "请先配置 Web application 客户端")
     redirect = status()["redirect_uri"]
-    if redirect not in config.get("redirect_uris", []):
-        raise HTTPException(400, "回调地址未登记：" + redirect)
+    # 只使用服务器部署配置，不从上传 JSON 或浏览器参数选择回调地址。
     state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(48)
     scopes = [core.GMAIL_SEND_SCOPE, *core.GMAIL_IDENTITY_SCOPES]
     if purpose == "replies":

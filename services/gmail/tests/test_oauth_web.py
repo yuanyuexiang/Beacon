@@ -25,7 +25,7 @@ def start(client, purpose="send", binding="browser-a"):
     return parse_qs(urlsplit(response.json()["url"]).query)
 
 
-def test_configuration_preserves_active_connection_and_rejects_wrong_redirect(setup):
+def test_configuration_preserves_active_connection_and_uses_server_redirect(setup):
     setup.post("/auth/import", headers=AUTH, json={"credentials": CREDENTIALS, "token": TOKEN})
     before = core.token_path().read_bytes()
     setup.put("/policy", headers=AUTH, json={"sending_enabled": True})
@@ -35,8 +35,11 @@ def test_configuration_preserves_active_connection_and_rejects_wrong_redirect(se
     assert core.GMAIL_METADATA_SCOPE not in query["scope"][0]
     assert core.GMAIL_SEND_SCOPE in query["scope"][0]
     assert query["code_challenge_method"] == ["S256"]
-    bad = {"web": {**CREDENTIALS["installed"], "redirect_uris": ["https://wrong.example/callback"]}}
-    assert setup.post("/auth/configure", headers=AUTH, json={"credentials": bad}).status_code == 400
+    stale = {"web": {**CREDENTIALS["installed"], "redirect_uris": ["https://wrong.example/callback"]}}
+    assert setup.post("/auth/configure", headers=AUTH, json={"credentials": stale}).status_code == 200
+    result = setup.post("/auth/start", headers=AUTH, json={"binding": "qa"})
+    assert result.status_code == 200
+    assert parse_qs(urlsplit(result.json()["url"]).query)["redirect_uri"] == [REDIRECT]
     assert core.token_path().read_bytes() == before
 
 
@@ -186,3 +189,17 @@ def test_identity_retries_transient_network_without_reauthorization(monkeypatch)
     monkeypatch.setattr(core.time, "sleep", lambda seconds: None)
     assert oauth.identity("mock", {"openid", "email"})["email"] == "qa@example.com"
     assert len(calls) == 3
+
+
+def test_missing_json_redirect_snapshot_does_not_block_cloud_auth(setup, monkeypatch):
+    cloud = "https://beacon.ai-onestep.com/api/gmail/oauth/callback"
+    monkeypatch.setenv("GMAIL_REDIRECT_URI", cloud)
+    assert (
+        setup.post("/auth/configure", headers=AUTH, json={"credentials": {"web": CREDENTIALS["installed"]}}).status_code
+        == 200
+    )
+    response = setup.post(
+        "/auth/start", headers=AUTH, json={"binding": "qa", "redirect_uri": "https://attacker.example/"}
+    )
+    assert response.status_code == 200
+    assert parse_qs(urlsplit(response.json()["url"]).query)["redirect_uri"] == [cloud]

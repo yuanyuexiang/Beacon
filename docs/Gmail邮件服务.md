@@ -13,7 +13,7 @@
 日常连接不需要终端或上传 Token：管理员进入“设置 → Gmail 邮箱连接”，首次配置 Web OAuth，之后直接点击“连接 Gmail／重新连接 Gmail”。
 
 1. 在 Google 项目启用 Gmail API，创建 **Web application** OAuth 客户端。Google 项目若处于 External／Testing，添加登录账号为测试用户；这类项目的 Gmail 刷新授权通常七天到期，长期使用前应检查发布与验证要求。
-2. 将页面显示的完整回调地址登记到该客户端，再下载 JSON。开发默认 `http://localhost:3000/api/gmail/oauth/callback`；云端 `https://beacon.ai-onestep.com/api/gmail/oauth/callback`。开发／云端建议用不同客户端。本地由浏览器访问 localhost，不需要公网或终端回调；访问域名必须与回调一致。
+2. 将页面显示的完整回调地址登记到该客户端，上传对应 Web 客户端 JSON。JSON 内的 redirect_uris 是下载时的快照，控制台后续新增回调无需重新下载；Beacon 始终使用服务器配置的当前回调，由 Google 最终校验登记。开发默认 `http://localhost:3000/api/gmail/oauth/callback`；云端 `https://beacon.ai-onestep.com/api/gmail/oauth/callback`。开发／云端建议用不同客户端。本地由浏览器访问 localhost，不需要公网或终端回调；访问域名必须与回调一致。
 3. 在“管理员首次配置／更换 Web 客户端”上传 JSON 并保存。仅保存候选配置，不删除原 Token，也不替换当前邮箱。
 4. 点击“连接 Gmail”，在正常 Chrome／Safari 中选账号并同意发送和身份权限。回到工作台显示邮箱与授权状态，发送和队列仍暂停。
 5. 需要回复同步时再点击“开启／重新授权回复同步”，申请 `gmail.metadata` 邮件头权限。旧 `gmail.readonly` 授权兼容；两者都是 Google 受限权限，metadata 不代表免验证。
