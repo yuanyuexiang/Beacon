@@ -49,7 +49,7 @@ def ai(monkeypatch):
 def test_existing_website_works_without_google_and_keeps_mixed_operation(client, db, monkeypatch, ai):
     batch, lead = setup_lead(client, db)
     monkeypatch.setattr(get_settings(), "google_places_api_key", None)
-    task = workflows.start(db, batch, workflows.WorkflowIn(), "tester")
+    task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
     task.step = task.steps.index("google")
     task.results = [{} for _ in range(task.step)]
     result = places_enrichment.advance(db, batch, task)
@@ -218,7 +218,7 @@ def test_google_budget_does_not_stop_existing_website_ai(client, db, monkeypatch
             raise google.PlacesError("quota", 429)
 
     monkeypatch.setattr(google_places, "_client", lambda *a, **k: Capped())
-    task = workflows.start(db, batch, workflows.WorkflowIn(), "tester")
+    task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
     task.params = {**task.params, "policy": {**task.params["policy"], "google_mode": "all"}}
     task.step = task.steps.index("google")
     task.results = [{} for _ in range(task.step)]
