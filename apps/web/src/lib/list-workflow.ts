@@ -2,16 +2,17 @@ import { api } from "./api";
 export type ListWorkflow = {
   id: string; batch_id: string; kind: "create" | "enrich" | "append";
   status: "pending" | "running" | "failed" | "completed" | "cancelled";
-  step: number; steps: string[]; params: { authority_name?: string; sample_n?: number | null; business_type_ids?: number[] };
+  step: number; steps: string[]; params: { phase?: "sync" | "review"; authority_name?: string; sample_n?: number | null; business_type_ids?: number[] };
   results: Record<string, unknown>[]; error: string | null;
 };
 export const workflowBlocksActions = (task: ListWorkflow | null) => !!task && ["pending", "running"].includes(task.status);
 export const workflowUnfinished = (task: ListWorkflow | null) => !!task && !["completed", "cancelled"].includes(task.status);
-export const WORKFLOW_TITLES: Record<string, string> = { pool: "从门店池选入商户", fsa: "获取商户", overture: "补充官网与电话", google: "官网 AI 核验与 Google 补充", screen: "客户筛选策略", contacts: "查找联系方式" };
+export const WORKFLOW_TITLES: Record<string, string> = { pool: "从门店池选入商户", fsa: "获取商户", overture: "补充官网与电话", google_sync: "Google 来源资料同步（待核验）", google: "官网 AI 核验", screen: "客户筛选策略", contacts: "查找联系方式" };
 export function workflowSummary(stage: string, result?: Record<string, unknown>): string | undefined {
   if (!result) return undefined;
   if (stage === "fsa" || stage === "pool") return `名录 ${result.fetched} 家，已有 ${result.already_in_list ?? 0} 家，剩余可选 ${result.pool} 家，本次选入 ${result.selected} 家（新增 ${result.created}，关联已有 ${result.linked}）`;
-  if (stage === "overture") return `匹配 ${result.matched}/${result.leads}，补官网 ${result.website_set}，有电话 ${result.phone_found}`;
+  if (stage === "overture") return result.note ? String(result.note) : `匹配 ${result.matched}/${result.leads}，补官网 ${result.website_set}，有电话 ${result.phone_found}`;
+  if (stage === "google_sync") return `本轮补充 ${result.synced ?? 0} 家，待重试 ${result.retry ?? 0} 家，剩余 ${result.remaining ?? 0} 家${result.note ? `；${result.note}` : ""}；AI 核验可稍后进行`;
   if (stage === "google") return `官网已核验 ${result.verified ?? 0}，信息不足 ${result.insufficient ?? 0}，待重试 ${result.retry ?? result.failed ?? 0}，AI 不可用 ${result.ai_unavailable ?? 0}，冲突待核对 ${result.conflict ?? result.review ?? 0}${result.note ? `；${result.note}` : ""}`;
   if (stage === "screen") return "按保存的策略预筛，人工确认保留；待复核继续查找联系方式";
   const t = result.totals as Record<string, number> | undefined;

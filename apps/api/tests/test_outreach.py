@@ -287,3 +287,48 @@ def test_queue_rechecks_operator_permission_before_submission(client, db, setup,
     row = db.get(OutreachDelivery, uuid.UUID(delivery["id"]))
     assert row.status == "blocked" and "发送权限" in row.last_error
     assert not any(path == "/send" for _, path, _ in calls)
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_meta_oauth_bound_browser_and_preserves_connection(client, db, setup, monkeypatch, success):
+    _, a, _, _, _ = setup
+    bindings = []
+
+    def call(method, path, body=None):
+        if path.endswith("/connect"):
+            bindings.append(body["binding"])
+            return {"url": "https://www.facebook.com/dialog/oauth?state=test"}
+        assert path == "/oauth/callback"
+        assert body["binding"] == bindings[0]
+        if not success:
+            raise provider.ProviderError("OAuth failed")
+        return {
+            "account_id": str(a.id),
+            "verified": True,
+            "version": "new",
+            "sending_enabled": False,
+            "capabilities": ["text_reply"],
+        }
+
+    monkeypatch.setattr(provider, "call", call)
+    response = client.post(f"/api/outreach/accounts/{a.id}/connect", json={})
+    assert response.status_code == 200
+    assert "HttpOnly" in response.headers["set-cookie"]
+    db.refresh(a)
+    assert a.connected and a.sending_enabled and a.queue_enabled
+    response = client.get("/api/outreach/oauth/callback?state=test&code=test", follow_redirects=False)
+    assert response.headers["location"] == "/settings?meta=" + ("connected" if success else "failed")
+    assert "no-store" in response.headers["cache-control"]
+    db.refresh(a)
+    assert a.connected
+    assert a.sending_enabled is (not success)
+    assert a.queue_enabled is (not success)
+
+
+def test_meta_callback_without_browser_cookie_never_calls_provider(client, monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("provider must not be called")
+
+    monkeypatch.setattr(provider, "call", unexpected)
+    response = client.get("/api/outreach/oauth/callback?state=test&code=test", follow_redirects=False)
+    assert response.headers["location"] == "/settings?meta=failed"

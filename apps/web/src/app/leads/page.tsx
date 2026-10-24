@@ -84,6 +84,7 @@ function LeadsInner() {
   const [workflow, setWorkflow] = useState<ListWorkflow | null>(null);
   const [workflowLoading, setWorkflowLoading] = useState(true);
   const [workflowLoadError, setWorkflowLoadError] = useState(false);
+  const [enrichPhase, setEnrichPhase] = useState<"sync" | "review">("sync");
   const [mode, setMode] = useState<"enrich" | "append" | "progress">("enrich");
   const activeKey = useRef(batchKey);
   activeKey.current = batchKey;
@@ -144,6 +145,7 @@ function LeadsInner() {
         next = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow/${next.id}/advance`, { method: "POST" });
         if (!alive.current || activeKey.current !== key) break;
         setWorkflow(next);
+        if (next.step === 1) await loadLeads(key);
       } while (next.status === "pending");
     } catch (e) {
       err(e as Error);
@@ -157,7 +159,7 @@ function LeadsInner() {
     const key = batchKey;
     setCreating(true);
     try {
-      const task = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow`, json({ kind, ...(kind === "append" ? { authority_id: appendAuthority?.id, authority_name: currentBatch?.region, business_type_ids: values?.business_type_ids || [1], sample_n: null, exclude_awaiting: values?.exclude_awaiting ?? false } : {}) }));
+      const task = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow`, json({ kind, phase: kind === "enrich" ? enrichPhase : "sync", ...(kind === "enrich" && enrichPhase === "review" && selectedRows.length ? { lead_ids: leads.filter(l => selectedRows.includes(l.id)).map(l => l.id) } : {}), ...(kind === "append" ? { authority_id: appendAuthority?.id, authority_name: currentBatch?.region, business_type_ids: values?.business_type_ids || [1], sample_n: null, exclude_awaiting: values?.exclude_awaiting ?? false } : {}) }));
       await executeWorkflow(key, task);
     } catch (e) { err(e as Error); } finally { setCreating(false); }
   };
@@ -247,7 +249,7 @@ function LeadsInner() {
         extra={<>
           <Select style={{ width: 260 }} value={batchKey} disabled={creating || !!busy} onChange={(key) => { setListPage(1); setBatchKey(key); }} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
           <Button type="primary" aria-label="建立名单" icon={<CloudDownloadOutlined />} disabled={!mounted || locked} onClick={() => { setCsvFile(null); setCreateMethod("auto"); generatedName.current = ""; setNewOpen(true); loadAuthorities(); }}>建立名单</Button>
-          <Button type="primary" disabled={!canWrite || !leads.length || creating || !!busy} onClick={() => { setPrepareLeadIds(null); setPrepareOpen(true); }}>准备触达</Button>
+          <Button type="primary" disabled={!canWrite || !leads.length || !!busy} onClick={() => { setPrepareLeadIds(null); setPrepareOpen(true); }}>准备触达</Button>
           <Link href={taskLink({ batch: batchKey, returnTo })}>查看沟通进展</Link>
           <Button danger disabled={!batchKey || locked} onClick={openDelete}>删除批次</Button>
           <Button disabled={!batchKey || locked || !leads.length} onClick={() => { setMode("enrich"); setBuildOpen(true); }}>完善名单</Button>
@@ -362,7 +364,7 @@ function LeadsInner() {
             { title: "失败原因", render: (_, j) => <><div>{contactFailureLabel(j.contact_result?.page_errors?.map((p) => p.error).join("；") || j.error || "")}</div><details><summary>原始记录</summary>{j.contact_result?.page_errors?.length ? j.contact_result.page_errors.map((p, i) => <p key={i} style={{ overflowWrap: "anywhere" }}>{p.url}<br />{p.error}</p>) : <p>{j.error}；历史任务未保存逐页错误时，需重试确认。</p>}</details></> },
           ]} /> }]} />}
           {workflow.error && <Alert type="warning" showIcon message="部分数据未补齐，不影响名单使用" description={workflow.error.replace(/^ValueError:\s*/, "")} style={{ margin: "16px 0" }} />}
-          {workflow.status === "completed" ? <Alert type="success" showIcon message="处理完成" description="请核对门店类型与联系方式，渠道准入仍需逐条确认。" style={{ marginTop: 16 }} /> : workflow.status === "cancelled" ? <Alert type="info" message="任务已结束，已有结果保留" /> : <>
+          {workflow.status === "completed" ? <Alert type="success" showIcon message="处理完成" description={workflow.params.phase === "sync" ? "名单可以使用。未完成的来源查询可再次同步；AI 核验与联系方式查找可在完善名单中单独启动。" : "请核对门店类型与联系方式，渠道准入仍需逐条确认。"} style={{ marginTop: 16 }} /> : workflow.status === "cancelled" ? <Alert type="info" message="任务已结束，已有结果保留" /> : <>
             <p style={{ color: "#6b7280" }}>{workflow.status === "failed" ? "本次补充已停止。关闭面板即可继续操作名单；重试只处理未完成项。" : "关闭面板后本页会继续执行。刷新或离开页面后，可从保存的步骤继续；已完成步骤不重做。"}</p>
             <Space>
               <Button type="primary" loading={creating} disabled={!canWrite || creating || !!busy} onClick={() => executeWorkflow(batchKey!, workflow)}>{workflow.status === "failed" ? "重试未完成步骤" : "继续任务"}</Button>
@@ -370,11 +372,13 @@ function LeadsInner() {
             </Space>
           </>}
         </> : <p>正在读取任务进度…</p> : mode === "enrich" ? <>
-          <Alert showIcon type="info" message={`完善名单内现有 ${leads.length} 家门店`} description="Overture 补充后按设置使用 Google 核验官网，再运行筛选策略与联系方式查找。保留人工官网及人工判断，旧官网可追溯。" style={{ marginBottom: 16 }} />
-          <Steps direction="vertical" size="small" items={[{ title: "补充官网与电话" }, { title: "Google Places 按需补充" }, { title: "客户筛选策略" }, { title: "查找联系方式" }]} />
-          <Button type="primary" block disabled={locked} loading={creating} style={{ marginTop: 16 }} onClick={() => startWorkflow("enrich")}>开始完善名单</Button>
+          <Alert showIcon type="info" message={`完善名单内现有 ${leads.length} 家门店`} description="先同步来源资料，名单即可使用；AI 核验、筛选和联系方式查找可稍后单独运行。保留人工官网及人工判断。" style={{ marginBottom: 16 }} />
+          <Radio.Group value={enrichPhase} onChange={e => setEnrichPhase(e.target.value)} style={{ marginBottom: 16 }} options={[{ value: "sync", label: "同步来源资料" }, { value: "review", label: "AI 核验与完善" }]} />
+          {enrichPhase === "review" && <p>核验范围：{selectedRows.length ? `已勾选 ${selectedRows.length} 家` : `名单全部 ${leads.length} 家`}。已完成的来源查询可复用。</p>}
+          <Steps direction="vertical" size="small" items={enrichPhase === "sync" ? [{ title: "Overture 补充官网与电话" }, { title: "Google 来源资料同步（待核验）" }] : [{ title: "AI 核验官网与经营类型" }, { title: "客户筛选策略" }, { title: "查找联系方式" }]} />
+          <Button type="primary" block disabled={locked} loading={creating} style={{ marginTop: 16 }} onClick={() => startWorkflow("enrich")}>{enrichPhase === "sync" ? "开始同步资料" : "开始 AI 核验与完善"}</Button>
         </> : <>
-          <Alert showIcon type="info" message={`追加到 ${currentBatch?.region || "未设置地区"}`} description="从门店池选入所选类型的全部剩余商户，自动排除本名单已有成员。其他地区请建立新名单。追加后自动补全官网与联系方式。" style={{ marginBottom: 16 }} />
+          <Alert showIcon type="info" message={`追加到 ${currentBatch?.region || "未设置地区"}`} description="从门店池选入所选类型的全部剩余商户，自动排除已有成员。追加后同步来源资料；AI 核验与联系方式查找可稍后进行。" style={{ marginBottom: 16 }} />
           {authFailed && <Alert type="warning" message="门店池暂不可用" action={<Button size="small" onClick={loadAuthorities}>重试加载</Button>} style={{ marginBottom: 16 }} />}
           {!authFailed && authorities.length > 0 && !appendAuthority && <Alert type="warning" message="该地区尚未同步到门店池，请先前往门店池同步，或追加 CSV" style={{ marginBottom: 16 }} />}
           <Form name="append-list" form={fsaForm} layout="vertical" initialValues={{ business_type_ids: [1], exclude_awaiting: false }} onFinish={(v) => startWorkflow("append", v)}>

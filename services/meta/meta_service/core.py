@@ -58,6 +58,10 @@ class Core:
             if "claimed" not in columns:
                 db.execute("ALTER TABLE requests ADD COLUMN claimed REAL")
             db.execute("CREATE TABLE IF NOT EXISTS states (key TEXT PRIMARY KEY, account TEXT, expires REAL)")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(states)")}
+            for name in ("candidate", "binding", "base_version"):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE states ADD COLUMN {name} TEXT")
         self.db_path.chmod(0o600)
         secret = self.root / "approval-secret"
         if not secret.exists():
@@ -181,22 +185,26 @@ class Core:
         except (httpx.HTTPError, json.JSONDecodeError, KeyError):
             raise MetaError("平台连接失败；发送结果需对账确认") from None
 
+    def verify_identity(self, a: dict) -> dict:
+        fields = "user_id,username" if a["auth_mode"] == "instagram_login" else "id,name"
+        result = self.graph(a, "GET", "me?fields=" + fields)
+        actual = str(result.get("user_id") or result.get("id") or "")
+        # Facebook Login Instagram uses a Page token, validate its linked professional account.
+        if a["platform"] == "instagram" and a["auth_mode"] == "facebook_login":
+            result = self.graph(a, "GET", "me?fields=instagram_business_account{id,username}")
+            ig = result.get("instagram_business_account") or {}
+            actual, result = str(ig.get("id") or ""), ig
+        if actual != a["sender_id"]:
+            raise MetaError("Token 所属发送账号与配置不一致")
+        return result
+
     @serialized
     def check(self, key: str) -> dict:
         a = self.read(key)
         if not a.get("token"):
             raise MetaError("账号尚未授权")
         try:
-            fields = "user_id,username" if a["auth_mode"] == "instagram_login" else "id,name"
-            result = self.graph(a, "GET", "me?fields=" + fields)
-            actual = str(result.get("user_id") or result.get("id") or "")
-            # Facebook Login Instagram uses a Page token, validate its linked professional account.
-            if a["platform"] == "instagram" and a["auth_mode"] == "facebook_login":
-                result = self.graph(a, "GET", "me?fields=instagram_business_account{id,username}")
-                ig = result.get("instagram_business_account") or {}
-                actual, result = str(ig.get("id") or ""), ig
-            if actual != a["sender_id"]:
-                raise MetaError("Token 所属发送账号与配置不一致")
+            result = self.verify_identity(a)
         except MetaError:
             a.update(verified=False, sending_enabled=False, version=secrets.token_hex(16))
             self.write(key, a)
@@ -352,7 +360,7 @@ class Core:
             raise MetaError("Webhook 格式无效") from None
 
     @serialized
-    def oauth_start(self, key: str, account: dict) -> dict:
+    def oauth_start(self, key: str, account: dict, binding: str) -> dict:
         app = self.read("app")
         if not app.get("app_secret"):
             raise MetaError("请先配置 Meta 应用")
@@ -361,11 +369,17 @@ class Core:
         identifier(account["sender_id"])
         if account["platform"] == "instagram" and not account.get("page_id"):
             raise MetaError("Instagram Facebook Login 需填写关联 Page ID")
-        self.write(key, {**account, "verified": False, "sending_enabled": False, "version": secrets.token_hex(16)})
+        if not binding:
+            raise MetaError("授权会话缺失")
+        old = self.read(key)
         state = secrets.token_urlsafe(32)
         with self.db() as db:
             db.execute("DELETE FROM states WHERE account=?", (key,))
-            db.execute("INSERT INTO states VALUES (?,?,?)", (state, key, time.time() + 600))
+            db.execute("DELETE FROM states WHERE expires<?", (time.time(),))
+            db.execute(
+                "INSERT INTO states (key,account,expires,candidate,binding,base_version) VALUES (?,?,?,?,?,?)",
+                (state, key, time.time() + 600, json.dumps(account), binding, old.get("version")),
+            )
         scopes = "pages_show_list,pages_messaging,pages_manage_metadata"
         if account["platform"] == "instagram":
             scopes = "pages_show_list,pages_manage_metadata,instagram_basic,instagram_manage_messages"
@@ -385,16 +399,27 @@ class Core:
         }
 
     @serialized
-    def oauth_finish(self, state: str, code: str) -> dict:
+    def oauth_finish(self, state: str, code: str, binding: str) -> dict:
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT account,expires FROM states WHERE key=?", (state,)).fetchone()
+            row = db.execute(
+                "SELECT account,expires,candidate,binding,base_version FROM states WHERE key=?", (state,)
+            ).fetchone()
+            if row and (not binding or not row[3] or not hmac.compare_digest(row[3], binding)):
+                raise MetaError("授权会话不匹配")
             db.execute("DELETE FROM states WHERE key=?", (state,))
         if not row or row[1] <= time.time():
             raise MetaError("OAuth 状态已过期或已使用")
         key = row[0]
         app = self.read("app")
-        a = self.read(key)
+        if self.read(key).get("version") != row[4]:
+            raise MetaError("账号已变化，请重新授权")
+        a = {
+            **json.loads(row[2]),
+            "sending_enabled": False,
+            "verified": False,
+            "daily_limit": self.read(key).get("daily_limit", 20),
+        }
         try:
             with httpx.Client(timeout=30, trust_env=True) as client:
                 response = client.post(
@@ -413,7 +438,9 @@ class Core:
             page = a["sender_id"] if a["platform"] == "facebook" else a["page_id"]
             result = self.graph(user, "GET", identifier(page) + "?fields=id,access_token")
             a.update(token=result["access_token"], version=secrets.token_hex(16))
+            identity = self.verify_identity(a)
+            a.update(verified=True, name=identity.get("name") or identity.get("username"))
             self.write(key, a)
-            return {"account_id": key, **self.check(key)}
+            return {"account_id": key, **self.account_status(key)}
         except (httpx.HTTPError, KeyError, ValueError):
             raise MetaError("OAuth 授权未完成，请重新连接并检查应用权限") from None

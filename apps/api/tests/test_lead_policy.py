@@ -55,7 +55,7 @@ def test_legacy_automatic_exclusion_can_be_recomputed(client, db):
 
 def test_workflow_freezes_policy_and_google_skips_when_unconfigured(client, db):
     batch, lead = setup_lead(client, db)
-    task = workflows.start(db, batch, workflows.WorkflowIn(), "tester")
+    task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
     saved = policy.current(db)
     original = task.params["policy"]
     policy.save_policy(saved.model_copy(update={"cafe_action": "exclude"}), db, db.scalar(select(Operator)))
@@ -97,7 +97,7 @@ def test_workflow_does_not_limit_calls_but_keeps_minute_protection(client, db):
 def test_google_chunk_saves_only_ids_and_budget_does_not_block(client, db, monkeypatch):
     batch, lead = setup_lead(client, db)
     monkeypatch.setattr(get_settings(), "google_places_api_key", "test")
-    task = workflows.start(db, batch, workflows.WorkflowIn(), "tester")
+    task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
     task.step = task.steps.index("google")
     task.results = [{}]
     db.commit()
@@ -200,7 +200,7 @@ def test_google_chunk_resume_does_not_repeat_completed_leads(client, db, monkeyp
     batch, lead = setup_lead(client, db)
     upload(client, "policy", "fhrsid,name\n2,Other Cafe\n3,Third Cafe\n")
     monkeypatch.setattr(get_settings(), "google_places_api_key", "test")
-    task = workflows.start(db, batch, workflows.WorkflowIn(), "tester")
+    task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
     task.step = task.steps.index("google")
     task.results = [{}]
     db.commit()
@@ -235,7 +235,7 @@ def test_verified_operating_type_takes_priority_over_name_keywords(client, db):
 def test_old_exhausted_workflow_can_continue_without_new_task(client, db, monkeypatch):
     batch, lead = setup_lead(client, db)
     monkeypatch.setattr(get_settings(), "google_places_api_key", "test")
-    task = workflows.start(db, batch, workflows.WorkflowIn(), "tester")
+    task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
     task.step = task.steps.index("google")
     note = "本次任务 Google 调用预算已用完，剩余门店可另开补充任务"
     lead.raw = {
@@ -250,7 +250,7 @@ def test_old_exhausted_workflow_can_continue_without_new_task(client, db, monkey
         }
     }
     task.params = {**task.params, "policy": {**task.params["policy"], "google_request_limit": 20}}
-    task.results = [{}, {"processed": [str(lead.id)], "google_exhausted": True, "note": note}]
+    task.results = [{"processed": [str(lead.id)], "google_exhausted": True, "note": note}]
     db.commit()
     calls = []
 

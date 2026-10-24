@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.models import Operator
 from app.integrations import google_places as google
-from app.modules.leads import google_places, policy, service, website_review
+from app.modules.leads import google_places, policy, service, source_sync, website_review
 from app.modules.leads.models import Batch, Lead
 
 if TYPE_CHECKING:
@@ -58,21 +58,36 @@ def review_one(
 ) -> str:
     configured = get_settings().llm_provider == "deepseek" and bool(get_settings().deepseek_api_key)
     google_enabled = selected.google_mode != "off" and bool(get_settings().google_places_api_key)
-    lookup = google_enabled and (force or needed(lead, selected))
+    cached = source_sync.fresh(lead, selected.stale_days)
+    lookup = google_enabled and not cached and (force or needed(lead, selected))
     if (
         not force
+        and not cached
         and not lookup
         and (google_enabled or (configured and lead.website))
         and not website_review.needed(lead, selected.stale_days)
     ):
         return ((lead.raw or {}).get("places_enrichment") or {}).get("status", "insufficient")
-    candidate_ids: list[str] = []
-    google_status = "not_queried"
+    candidate_ids: list[str] = (
+        [c["place_id"] for c in ((lead.raw or {}).get("source_sync") or {}).get("candidates", [])] if cached else []
+    )
+    google_status = "completed" if cached else "not_queried"
     error_status = None
     website_retry = False
     reason = "没有可靠的官网候选"
     status = "insufficient"
     original = website_review.snapshot(lead)
+    if cached and configured:
+        for candidate in ((lead.raw or {}).get("source_sync") or {}).get("candidates", []):
+            if not candidate.get("website"):
+                continue
+            status = website_review.review(db, lead, candidate["website"], operator, candidate["place_id"])
+            if status == "changed":
+                return status
+            reason = ((lead.raw or {}).get("website_research") or {}).get("reason", "")
+            if status == "verified":
+                return _save_status(lead, status, reason, [candidate["place_id"]], google_status="completed")
+            db.commit()
     if lookup:
         client = google_places._client(db, operator, lead.id, workflow_id=workflow_id)
         linked = google_places._link(lead)
@@ -151,6 +166,17 @@ def _save_status(
     error_status: int | None = None,
     website_retry: bool = False,
 ) -> str:
+    cached = (lead.raw or {}).get("source_sync")
+    if (
+        status == "verified"
+        and cached
+        and (google_places._link(lead) or {}).get("place_id") in {c["place_id"] for c in cached.get("candidates", [])}
+    ):
+        # AI 新建关联会更新 revision；同一批已核验候选不因此立即触发重复查询。
+        lead.raw = {
+            **(lead.raw or {}),
+            "source_sync": {**cached, "fingerprint": google_places._fingerprint(lead), "review_status": "verified"},
+        }
     lead.raw = {
         **(lead.raw or {}),
         "places_enrichment": {
@@ -201,8 +227,16 @@ def advance(db: Session, batch: Batch, task: "Workflow") -> dict:
         lead
         for lead in service.list_leads(db, batch.id, None, None, 0)
         if str(lead.id) not in state["processed"]
+        and (task.params.get("lead_ids") is None or str(lead.id) in task.params["lead_ids"])
         and (
-            (configured and website_review.needed(lead, selected.stale_days))
+            (
+                configured
+                and (
+                    website_review.needed(lead, selected.stale_days)
+                    or ((lead.raw or {}).get("source_sync") or {}).get("fetched_at", "")
+                    > ((lead.raw or {}).get("places_enrichment") or {}).get("checked_at", "")
+                )
+            )
             or (google_enabled and needed(lead, selected))
         )
     ]

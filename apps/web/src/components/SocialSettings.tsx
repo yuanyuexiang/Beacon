@@ -26,8 +26,8 @@ export default function SocialSettings() {
   }, []);
   useEffect(() => { appForm.setFieldsValue({ redirect_uri: window.location.origin + "/api/outreach/oauth/callback" }); refresh().catch((e) => message.error(e.message));
     const result = new URLSearchParams(window.location.search).get("meta");
-    if (result === "connected") message.success("Meta 账号已连接，发送默认暂停");
-    if (result === "failed") message.error("Meta 授权未完成，请核对应用权限与回调地址");
+    if (result === "connected") message.success("Meta 账号身份已核验，发送已暂停；消息权限与订阅仍需联调");
+    if (result === "failed") message.error("Meta 授权未完成，原连接已保留；请从当前管理员会话重试并核对应用权限与回调地址");
   }, [refresh, appForm]);
   const act = async (key: string, work: () => Promise<void>) => {
     const scope = scopeOf(key);
@@ -42,6 +42,8 @@ export default function SocialSettings() {
   return <Card title="Facebook / Instagram 渠道" style={{ marginBottom: 16 }}>
     {!status?.configured && <Alert type="warning" message={status?.message || "正在检查服务连接"} style={{ marginBottom: 12 }} />}
     <Typography.Paragraph>支持本方主页或专业账号的普通文字回复。餐厅公开主页保留在线索中；API 回复需要对方先发消息，再在任务页面关联会话。发送与队列默认暂停。</Typography.Paragraph>
+    {!status?.app?.configured && <Alert type="info" message="等待客户提供 Meta 应用与本方主页信息。可先添加账号；配置应用后再授权。" style={{ marginBottom: 12 }} />}
+    <Typography.Paragraph>身份核验仅确认 Token 对应账号；消息权限、Webhook 订阅与真实收发尚需分别验收。</Typography.Paragraph>
     <Typography.Paragraph>应用：{status?.app?.configured ? `已配置 ${status.app.app_id}` : "待配置"} · Webhook：{status?.app?.webhook_configured ? "已配置验证凭据，仍需在 Meta 控制台订阅" : "待配置"}</Typography.Paragraph>
     <details style={{ marginBottom: 16 }}><summary>配置 Meta 应用</summary>
       <Form disabled={blocked("app")} form={appForm} layout="vertical" initialValues={{ version: "v25.0", redirect_uri: "http://localhost:3000/api/outreach/oauth/callback" }} onFinish={(values) => act("app:save", async () => { await api("/api/outreach/app", json(values, "PUT")); appForm.resetFields(["app_secret", "verify_token"]); message.success("应用配置已保存；凭据不会回显"); })} style={{ maxWidth: 600 }}>
@@ -56,10 +58,10 @@ export default function SocialSettings() {
     </details>
     <Table<ChannelAccount> size="small" rowKey="id" dataSource={accounts} pagination={false} columns={[
       { title: "账号", render: (_, a) => <>{a.label}<br /><Typography.Text type="secondary">{channelLabel(a.platform)} · {a.sender_id}</Typography.Text></> },
-      { title: "状态", render: (_, a) => <Space wrap><Tag color={a.connected ? "green" : "default"}>{a.connected ? "连接已检查" : "待授权 / 检查"}</Tag><Tag>{a.sending_enabled ? "允许发送" : "发送暂停"}</Tag><Tag>{a.queue_enabled ? "队列运行" : "队列暂停"}</Tag></Space> },
+      { title: "状态", render: (_, a) => <Space wrap><Tag color={a.connected ? "green" : "default"}>{a.connected ? "身份已核验" : "待授权 / 检查"}</Tag><Tag>{a.sending_enabled ? "允许发送" : "发送暂停"}</Tag><Tag>{a.queue_enabled ? "队列运行" : "队列暂停"}</Tag></Space> },
       { title: "操作", render: (_, a) => <Space wrap>
         <Button size="small" disabled={blocked(a.id)} onClick={() => { setTokenAccount(a); setToken(""); }}>导入 Token</Button>
-        {a.auth_mode === "facebook_login" && <Button size="small" loading={loading(`${a.id}:connect`)} disabled={blocked(a.id)} onClick={() => act(`${a.id}:connect`, async () => { const r = await api<{ url: string }>(`/api/outreach/accounts/${a.id}/connect`, json({})); window.location.assign(r.url); })}>浏览器授权</Button>}
+        {a.auth_mode === "facebook_login" && <Button size="small" loading={loading(`${a.id}:connect`)} disabled={blocked(a.id) || !status?.app?.configured} onClick={() => act(`${a.id}:connect`, async () => { const r = await api<{ url: string }>(`/api/outreach/accounts/${a.id}/connect`, json({})); window.location.assign(r.url); })}>浏览器授权</Button>}
         <Button size="small" loading={loading(`${a.id}:check`)} disabled={blocked(a.id)} onClick={() => act(`${a.id}:check`, async () => { await api(`/api/outreach/accounts/${a.id}/check`, json({})); message.success("身份检查通过；真实消息权限仍需账号联调"); })}>检查连接</Button>
         <Button size="small" disabled={blocked(a.id)} onClick={() => { setEditing(a); policyForm.setFieldsValue(a); }}>发送设置</Button>
         <Button size="small" danger loading={loading(`${a.id}:disconnect`)} disabled={blocked(a.id)} onClick={() => act(`${a.id}:disconnect`, async () => { await api(`/api/outreach/accounts/${a.id}/disconnect`, json({})); })}>断开</Button>

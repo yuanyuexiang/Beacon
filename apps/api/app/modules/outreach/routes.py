@@ -1,10 +1,12 @@
 import base64
+import hashlib
+import secrets
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 from sqlalchemy import select, text
@@ -13,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core import audit
 from app.core.auth import current_operator
+from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.models import Operator
 from app.modules.outreach import client, service
@@ -197,15 +200,33 @@ def disconnect(aid: uuid.UUID, db: Session = Depends(get_db), op: Operator = Dep
 
 
 @router.post("/accounts/{aid}/connect")
-def connect(aid: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
+def connect(
+    aid: uuid.UUID, response: Response, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+):
     with operation(db):
         a = account(db, aid)
+        nonce = secrets.token_urlsafe(32)
         result = client.call(
             "POST",
             f"/accounts/{a.id}/connect",
-            {"platform": a.platform, "auth_mode": a.auth_mode, "sender_id": a.sender_id, "page_id": a.page_id},
+            {
+                "platform": a.platform,
+                "auth_mode": a.auth_mode,
+                "sender_id": a.sender_id,
+                "page_id": a.page_id,
+                "binding": hashlib.sha256(f"{op.id}:{op.session_version}:{nonce}".encode()).hexdigest(),
+            },
         )
-        a.connected, a.sending_enabled, a.queue_enabled = False, False, False
+        response.set_cookie(
+            "beacon_meta_oauth",
+            nonce,
+            max_age=600,
+            httponly=True,
+            samesite="lax",
+            secure=get_settings().cookie_secure,
+            path="/api/outreach",
+        )
+        response.headers["Cache-Control"] = "no-store"
         audit.record(db, op, "start_channel_oauth", "channel_account", a.id)
         db.commit()
         return result
@@ -282,19 +303,35 @@ def reconcile(did: uuid.UUID, db: Session = Depends(get_db)):
 
 @public_router.get("/oauth/callback")
 def callback(request: Request, db: Session = Depends(get_db)):
+    outcome = "failed"
     try:
+        op = current_operator(request, db)
+        nonce = request.cookies.get("beacon_meta_oauth")
+        if op.role != "admin" or not nonce:
+            raise HTTPException(403, "授权会话不匹配")
         result = client.call(
             "POST",
             "/oauth/callback",
-            {"state": request.query_params.get("state", ""), "code": request.query_params.get("code", "")},
+            {
+                "state": request.query_params.get("state", ""),
+                "code": request.query_params.get("code", ""),
+                "binding": hashlib.sha256(f"{op.id}:{op.session_version}:{nonce}".encode()).hexdigest(),
+            },
         )
         a = account(db, uuid.UUID(result["account_id"]))
         service.sync_account(a, result)
+        a.queue_enabled = False
         db.commit()
-        return RedirectResponse("/settings?meta=connected", status_code=303)
+        outcome = "connected"
     except (client.ProviderError, ValueError, KeyError, HTTPException):
         db.rollback()
-        return RedirectResponse("/settings?meta=failed", status_code=303)
+    response = RedirectResponse(
+        "/settings?meta=" + outcome,
+        status_code=303,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+    response.delete_cookie("beacon_meta_oauth", path="/api/outreach")
+    return response
 
 
 @public_router.get("/webhook")

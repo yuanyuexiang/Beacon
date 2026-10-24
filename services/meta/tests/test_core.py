@@ -158,15 +158,15 @@ def test_http_auth_and_invalid_input_never_echo_credentials(tmp_path, monkeypatc
 def test_oauth_state_expires_and_is_single_use(setup):
     c, key, _ = setup
     data = {"platform": "facebook", "auth_mode": "facebook_login", "sender_id": "1234"}
-    result = c.oauth_start(key, data)
+    result = c.oauth_start(key, data, "b" * 64)
     assert "www.facebook.com/v25.0/dialog/oauth" in result["url"]
     with c.db() as db:
         state = db.execute("SELECT key FROM states").fetchone()[0]
         db.execute("UPDATE states SET expires=0")
     with pytest.raises(MetaError, match="过期"):
-        c.oauth_finish(state, "code")
+        c.oauth_finish(state, "code", "b" * 64)
     with pytest.raises(MetaError, match="使用"):
-        c.oauth_finish(state, "code")
+        c.oauth_finish(state, "code", "b" * 64)
 
 
 def test_service_limits_count_each_request_and_manual_unknown_resolution(setup, monkeypatch):
@@ -261,3 +261,55 @@ def test_manual_unknown_resolution_is_durable_and_never_resends(setup, monkeypat
     }
     assert c.manual_reconcile(p["request_key"], verified)["message_id"] == "verified.id"
     assert c.send(p["approval_token"])["message_id"] == "verified.id"
+
+
+@pytest.mark.parametrize("failure", ["exchange", "identity", "success"])
+def test_oauth_candidate_preserves_live_connection(setup, monkeypatch, failure):
+    c, key, _ = setup
+    c.policy(key, True, 37)
+    old = c.read(key)
+    data = {"platform": "facebook", "auth_mode": "facebook_login", "sender_id": "1234"}
+    c.oauth_start(key, data, "b" * 64)
+    assert c.read(key) == old
+    with c.db() as db:
+        state = db.execute("SELECT key FROM states").fetchone()[0]
+    with pytest.raises(MetaError, match="会话不匹配"):
+        c.oauth_finish(state, "code", "x" * 64)
+    assert c.read(key) == old
+    monkeypatch.setattr(
+        httpx.Client,
+        "post",
+        lambda *a, **kw: httpx.Response(400 if failure == "exchange" else 200, json={"access_token": "candidate-user"}),
+    )
+    monkeypatch.setattr(
+        c,
+        "graph",
+        lambda a, method, path: (
+            {"access_token": "candidate-page"}
+            if "access_token" in path
+            else {"id": "wrong" if failure == "identity" else "1234", "name": "Page"}
+        ),
+    )
+    if failure == "success":
+        c.oauth_finish(state, "code", "b" * 64)
+        assert c.read(key)["token"] == "candidate-page"
+        assert c.read(key)["daily_limit"] == 37
+        assert c.read(key)["verified"] and not c.read(key)["sending_enabled"]
+        assert c.read(key)["version"] != old["version"]
+    else:
+        with pytest.raises(MetaError):
+            c.oauth_finish(state, "code", "b" * 64)
+        assert c.read(key) == old
+    with pytest.raises(MetaError, match="使用"):
+        c.oauth_finish(state, "code", "b" * 64)
+
+
+def test_disconnect_invalidates_pending_oauth(setup):
+    c, key, _ = setup
+    c.oauth_start(key, {"platform": "facebook", "auth_mode": "facebook_login", "sender_id": "1234"}, "b" * 64)
+    with c.db() as db:
+        state = db.execute("SELECT key FROM states").fetchone()[0]
+    c.disconnect(key)
+    with pytest.raises(MetaError, match="账号已变化"):
+        c.oauth_finish(state, "code", "b" * 64)
+    assert not c.read(key)["token"]

@@ -81,7 +81,12 @@ class Webhook(BaseModel):
     signature: str = Field(max_length=128)
 
 
+class Connect(AccountConfig):
+    binding: str = Field(min_length=64, max_length=64, repr=False)
+
+
 class Callback(BaseModel):
+    binding: str = Field(min_length=64, max_length=64, repr=False)
     state: str = Field(max_length=256)
     code: str = Field(max_length=4096, repr=False)
 
@@ -132,13 +137,13 @@ def disconnect(key: uuid.UUID):
 
 
 @app.post("/accounts/{key}/connect", dependencies=[Depends(authorized)])
-def connect(key: uuid.UUID, body: AccountConfig):
-    return core().oauth_start(str(key), body.model_dump(exclude={"token"}))
+def connect(key: uuid.UUID, body: Connect):
+    return core().oauth_start(str(key), body.model_dump(exclude={"token", "binding"}), body.binding)
 
 
 @app.post("/oauth/callback", dependencies=[Depends(authorized)])
 def callback(body: Callback):
-    return core().oauth_finish(body.state, body.code)
+    return core().oauth_finish(body.state, body.code, body.binding)
 
 
 @app.post("/preview", dependencies=[Depends(authorized)])

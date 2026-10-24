@@ -388,13 +388,21 @@ INSTITUTION_WORDS = re.compile(
 PUB_WORDS = re.compile(r"\b(pub|tavern|arms|inn)\b", re.I)
 
 
-def auto_screen(db: Session, batch: Batch, only_unchecked: bool = True, policy_data: dict | None = None) -> dict:
+def auto_screen(
+    db: Session,
+    batch: Batch,
+    only_unchecked: bool = True,
+    policy_data: dict | None = None,
+    lead_ids: list[str] | None = None,
+) -> dict:
     from app.modules.leads import policy
 
     selected = policy.Policy.model_validate(policy_data) if policy_data else policy.current(db)
     counts: dict[str, int] = {}
     preserved = 0
     for lead in list_leads(db, batch.id, None, None, 0):
+        if lead_ids is not None and str(lead.id) not in lead_ids:
+            continue
         raw = dict(lead.raw or {})
         previous = raw.get("screening_auto")
         # 只重算仍与上次自动结果相同的记录；历史人工判断和手动修改保留。

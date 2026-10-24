@@ -50,6 +50,7 @@ class LeadOut(BaseModel):
     operating_type: dict | None = None
     website_research: dict | None = None
     google_enrichment: dict | None = None
+    source_sync: dict | None = None
     verified_websites: list[dict] = Field(default_factory=list)
     website_history: list[dict] = Field(default_factory=list)
 
@@ -65,6 +66,7 @@ class LeadOut(BaseModel):
                 operating_type=raw.get("operating_type"),
                 website_research=raw.get("website_research"),
                 google_enrichment=raw.get("places_enrichment"),
+                source_sync=raw.get("source_sync"),
                 verified_websites=raw.get("verified_websites", []),
                 website_history=raw.get("website_history", []),
             )

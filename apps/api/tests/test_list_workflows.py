@@ -58,6 +58,11 @@ def test_create_and_resume_persist_params_skip_successful_fsa(setup, db, monkeyp
     response = _new(client)
     assert response.status_code == 201
     task = response.json()["workflow"]
+    # Legacy in-flight tasks retain their original stages and failure/retry semantics.
+    saved_task = db.get(workflows.Workflow, uuid.UUID(task["id"]))
+    saved_task.steps = ["pool", "overture", "google", "screen", "contacts"]
+    saved_task.params = {k: v for k, v in saved_task.params.items() if k != "phase"}
+    db.commit()
     seed = task["params"]["seed"]
     assert seed is None
     assert task["params"]["selection"] == "ordered"
@@ -97,7 +102,7 @@ def test_enrich_never_fetches_fsa_and_append_selects_new_members(setup, db, monk
     while append["status"] != "completed":
         append = _advance(client, append)
     enrich = client.post("/api/batches/new/workflow", json={"kind": "enrich"}).json()
-    assert enrich["steps"] == ["overture", "google", "screen", "contacts"]
+    assert enrich["steps"] == ["overture", "google_sync"]
     assert "google_request_limit" not in enrich["params"]["policy"]
     monkeypatch.setattr(fsa, "fetch_establishments", lambda *a, **k: pytest.fail("完善不应获取名录"))
     while enrich["status"] != "completed":
@@ -161,7 +166,10 @@ def test_atomic_pool_checkpoint_rolls_back_members_on_crash(setup, db, monkeypat
 def test_contact_failure_reuses_run_and_successful_jobs(setup, db, monkeypatch):
     client = setup
     task = _new(client).json()["workflow"]
-    for _ in range(4):
+    while task["status"] != "completed":
+        task = _advance(client, task)
+    task = client.post("/api/batches/new/workflow", json={"kind": "enrich", "phase": "review"}).json()
+    for _ in range(2):
         task = _advance(client, task)
     # 给门店设置官网，三条 job 中一条首次失败。
     leads = db.scalars(select(Lead)).all()
@@ -177,10 +185,10 @@ def test_contact_failure_reuses_run_and_successful_jobs(setup, db, monkeypatch):
 
     monkeypatch.setattr(runs, "_collect_contacts", collect)
     failed = _advance(client, task)
-    assert failed["status"] == "failed" and failed["results"][4]["totals"]["failed"] == 1
-    run_id = failed["results"][4]["run_id"]
+    assert failed["status"] == "failed" and failed["results"][2]["totals"]["failed"] == 1
+    run_id = failed["results"][2]["run_id"]
     finished = _advance(client, failed)
-    assert finished["status"] == "completed" and finished["results"][4]["run_id"] == run_id
+    assert finished["status"] == "completed" and finished["results"][2]["run_id"] == run_id
     assert sorted(attempts.values()) == [1, 1, 2]
     assert len(db.scalars(select(runs.BatchRun)).all()) == 1
 
@@ -226,7 +234,10 @@ def test_wrong_region_cross_batch_and_invalid_create_leave_no_batch(setup, db):
 def test_crashed_contact_job_recovers_without_waiting_30_minutes(setup, db, monkeypatch):
     client = setup
     task = _new(client).json()["workflow"]
-    for _ in range(4):
+    while task["status"] != "completed":
+        task = _advance(client, task)
+    task = client.post("/api/batches/new/workflow", json={"kind": "enrich", "phase": "review"}).json()
+    for _ in range(2):
         task = _advance(client, task)
     workflow = db.get(workflows.Workflow, uuid.UUID(task["id"]))
     batch = db.get(Batch, workflow.batch_id)
@@ -365,6 +376,9 @@ def test_failed_workflow_allows_operations_and_new_task_archives_failure(setup, 
     client = setup
     task = _new(client).json()["workflow"]
     task = _advance(client, task)
+    legacy = db.get(workflows.Workflow, uuid.UUID(task["id"]))
+    legacy.params = {k: v for k, v in legacy.params.items() if k != "phase"}
+    db.commit()
     monkeypatch.setattr(service, "enrich_overture", lambda *a, **k: (_ for _ in ()).throw(ValueError("offline")))
     failed = _advance(client, task)
     assert failed["status"] == "failed"
@@ -410,7 +424,10 @@ def test_cancel_during_execution_cannot_be_overwritten(setup, db, monkeypatch, f
 def test_contact_cancel_stops_next_job_and_keeps_finished_job(setup, db, monkeypatch):
     client = setup
     task = _new(client).json()["workflow"]
-    for _ in range(4):
+    while task["status"] != "completed":
+        task = _advance(client, task)
+    task = client.post("/api/batches/new/workflow", json={"kind": "enrich", "phase": "review"}).json()
+    for _ in range(2):
         task = _advance(client, task)
     for lead in db.scalars(select(Lead)).all():
         lead.website = "https://example.test"

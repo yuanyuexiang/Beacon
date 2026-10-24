@@ -33,9 +33,9 @@ def make_task(key, body):
         "kind": body["kind"],
         "status": "pending",
         "step": 0,
-        "steps": (["pool"] if body["kind"] != "enrich" else [])
-        + ["overture", "google", "screen", "contacts"],
-        "params": {**body, "seed": None} if body["kind"] != "enrich" else {},
+        "steps": (["google", "screen", "contacts"] if body.get("phase") == "review"
+                  else (["pool"] if body["kind"] != "enrich" else []) + ["overture", "google_sync"]),
+        "params": {**body, "seed": None},
         "results": [],
         "error": None,
     }
@@ -146,6 +146,8 @@ async def handle(route):
                         "website_set": 2,
                         "phone_found": 1,
                     }
+                elif stage == "google_sync":
+                    r = {"synced": 2, "retry": 1, "remaining": 1, "done": True, "note": "Google quota; list available"}
                 elif stage == "google":
                     r = {"verified": 1, "review": 1, "failed": 0, "done": True}
                 elif stage == "screen":
@@ -240,7 +242,7 @@ async def main():
         await page.get_by_role("button", name="完善名单", exact=True).click()
         before = len(advances)
         hold = True
-        await page.get_by_role("button", name="开始完善名单", exact=True).click()
+        await page.get_by_role("button", name="开始同步资料", exact=True).click()
         await expect(
             page.get_by_role("dialog").get_by_role(
                 "button", name=re.compile("继续任务")
@@ -261,10 +263,16 @@ async def main():
         await page.get_by_text("处理完成", exact=True).wait_for()
         assert [s for _, _, s in advances[before:]] == [
             "overture",
-            "google",
-            "screen",
-            "contacts",
+            "google_sync",
         ]
+        await page.locator(".ant-drawer-close").click()
+        await page.get_by_role("button", name="完善名单", exact=True).click()
+        await page.get_by_role("radio", name="AI 核验与完善", exact=True).check()
+        await page.screenshot(path="data/devchecks/list-review-phase.png", full_page=True)
+        before_review = len(advances)
+        await page.get_by_role("button", name="开始 AI 核验与完善", exact=True).click()
+        await page.get_by_text("处理完成", exact=True).wait_for()
+        assert [stage for _, _, stage in advances[before_review:]] == ["google", "screen", "contacts"]
         await page.locator(".ant-drawer-close").click()
         await page.get_by_role("button", name="追加商户", exact=True).click()
         await expect(

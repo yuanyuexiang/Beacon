@@ -43,6 +43,8 @@ class Workflow(UUIDPk, Timestamped, Base):
 
 class WorkflowIn(BaseModel):
     kind: Literal["create", "enrich", "append"] = "enrich"
+    phase: Literal["sync", "review"] = "sync"
+    lead_ids: list[uuid.UUID] | None = Field(default=None, min_length=1, max_length=5000)
     authority_id: int | None = Field(default=None, gt=0)
     authority_name: str | None = None
     business_type_ids: list[Literal[1, 7843, 7844]] = Field(default=[1], min_length=1, max_length=3)
@@ -131,11 +133,21 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
         params["seed"] = None
         params["selection"] = "ordered"
         params["source"] = "directory"
+    if body.lead_ids is not None:
+        members = {x.id for x in service.list_leads(db, batch.id, None, None, 0)}
+        if body.kind != "enrich" or body.phase != "review" or not set(body.lead_ids) <= members:
+            raise HTTPException(422, "Selected stores must belong to this review list")
+        params["lead_ids"] = [str(x) for x in dict.fromkeys(body.lead_ids)]
+    params["phase"] = body.phase if body.kind == "enrich" else "sync"
     params["policy"] = policy.current(db).model_dump()
     task = Workflow(
         batch_id=batch.id,
         kind=body.kind,
-        steps=(["pool"] if body.kind != "enrich" else []) + ["overture", "google", "screen", "contacts"],
+        steps=(
+            ["google", "screen", "contacts"]
+            if params["phase"] == "review"
+            else (["pool"] if body.kind != "enrich" else []) + ["overture", "google_sync"]
+        ),
         params=params,
         results=[],
         started_by=by,
@@ -202,7 +214,22 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
                 commit=False,
             )
         elif stage == "overture":
-            result = service.enrich_overture(db, batch)
+            try:
+                result = service.enrich_overture(db, batch)
+            except Exception:
+                if task.params.get("phase") != "sync":
+                    raise
+                db.rollback()
+                result = {"note": "Overture 补充未完成，已有资料保留；继续 Google 补充，可稍后再次同步"}
+        elif stage == "google_sync":
+            from app.modules.leads import source_sync
+
+            result = source_sync.advance(db, batch, task)
+            if not result["done"]:
+                task.results = task.results[: task.step] + [result]
+                task.status = "pending"
+                save_progress(db, task)
+                return task
         elif stage == "google":
             from app.modules.leads import places_enrichment
 
@@ -213,7 +240,9 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
                 save_progress(db, task)
                 return task
         elif stage == "screen":
-            result = service.auto_screen(db, batch, policy_data=task.params.get("policy"))
+            result = service.auto_screen(
+                db, batch, policy_data=task.params.get("policy"), lead_ids=task.params.get("lead_ids")
+            )
         else:
             if task.contact_run_id is None:
                 run = runs.BatchRun(
@@ -235,7 +264,7 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
                 if job.status == runs.JobStatus.running or (retry and job.status == runs.JobStatus.failed):
                     job.status, job.error = runs.JobStatus.pending, None
             save_progress(db, task)
-            runs.plan_jobs(db, run, batch)
+            runs.plan_jobs(db, run, batch, lead_ids=task.params.get("lead_ids"))
             runs.execute(db, run, max_jobs=20, should_stop=lambda: cancelled(db, task.id))
             result = {"totals": run.totals, "run_id": str(run.id)}
             if (run.totals or {}).get("pending"):

@@ -95,13 +95,15 @@ def _needs_contact_scan(lead: Lead | None) -> bool:
     )
 
 
-def plan_jobs(db: Session, run: BatchRun, batch: Batch) -> int:
+def plan_jobs(db: Session, run: BatchRun, batch: Batch, lead_ids: list[str] | None = None) -> int:
     """按批次成员规划 job；已有相同 (lead, step, target) 的不重复创建。返回新增数。"""
     existing = {
         (j.lead_id, j.step, j.target_id) for j in db.scalars(select(BatchJob).where(BatchJob.run_id == run.id)).all()
     }
     added = 0
     for m in db.scalars(select(BatchLead).where(BatchLead.batch_id == batch.id)).all():
+        if lead_ids is not None and str(m.lead_id) not in lead_ids:
+            continue
         if "contacts" in run.steps and _needs_contact_scan(db.get(Lead, m.lead_id)):
             ckey = (m.lead_id, "contacts", None)
             if ckey not in existing:
