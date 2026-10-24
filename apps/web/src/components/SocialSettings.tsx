@@ -1,14 +1,19 @@
 "use client";
 import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography, message } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSettingsDraft, useSettingsStatus } from "./SettingsState";
 import { api, json } from "@/lib/api";
 import { ChannelAccount } from "@/lib/outreach";
 import { channelLabel } from "@/lib/format";
 
 type Status = { configured: boolean; message?: string; app?: { configured: boolean; app_id?: string; version: string; redirect_uri?: string; webhook_configured: boolean } };
 export default function SocialSettings() {
+  const [drafts, setDrafts] = useState<Record<string, boolean>>({});
+  const dirty = (key: string, value: boolean) => setDrafts(old => ({ ...old, [key]: value }));
+  useSettingsDraft("meta", Object.values(drafts).some(Boolean));
   const [status, setStatus] = useState<Status>();
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
+  useSettingsStatus("meta", !status ? "未检查" : !status.configured ? "服务不可用" : !status.app?.configured ? "未配置" : accounts.some(a => a.connected) ? "身份已核验" : "待授权");
   const [active, setActive] = useState<Record<string, string>>({});
   const locks = useRef(new Set<string>());
   const scopeOf = (key: string) => key.split(":")[0];
@@ -46,7 +51,7 @@ export default function SocialSettings() {
     <Typography.Paragraph>身份核验仅确认 Token 对应账号；消息权限、Webhook 订阅与真实收发尚需分别验收。</Typography.Paragraph>
     <Typography.Paragraph>应用：{status?.app?.configured ? `已配置 ${status.app.app_id}` : "待配置"} · Webhook：{status?.app?.webhook_configured ? "已配置验证凭据，仍需在 Meta 控制台订阅" : "待配置"}</Typography.Paragraph>
     <details style={{ marginBottom: 16 }}><summary>配置 Meta 应用</summary>
-      <Form disabled={blocked("app")} form={appForm} layout="vertical" initialValues={{ version: "v25.0", redirect_uri: "http://localhost:3000/api/outreach/oauth/callback" }} onFinish={(values) => act("app:save", async () => { await api("/api/outreach/app", json(values, "PUT")); appForm.resetFields(["app_secret", "verify_token"]); message.success("应用配置已保存；凭据不会回显"); })} style={{ maxWidth: 600 }}>
+      <Form onValuesChange={() => dirty("app", true)} disabled={blocked("app")} form={appForm} layout="vertical" initialValues={{ version: "v25.0", redirect_uri: "http://localhost:3000/api/outreach/oauth/callback" }} onFinish={(values) => act("app:save", async () => { await api("/api/outreach/app", json(values, "PUT")); appForm.resetFields(["app_secret", "verify_token"]); dirty("app", false); message.success("应用配置已保存；凭据不会回显"); })} style={{ maxWidth: 600 }}>
         <Form.Item name="app_id" label="App ID" rules={[{ required: true }]}><Input autoComplete="off" /></Form.Item>
         <Form.Item name="app_secret" label="App Secret" rules={[{ required: true }]}><Input.Password autoComplete="new-password" /></Form.Item>
         <Form.Item name="verify_token" label="Webhook Verify Token（自设至少 16 字符）" rules={[{ required: true, min: 16 }]}><Input.Password autoComplete="new-password" /></Form.Item>
@@ -60,7 +65,7 @@ export default function SocialSettings() {
       { title: "账号", render: (_, a) => <>{a.label}<br /><Typography.Text type="secondary">{channelLabel(a.platform)} · {a.sender_id}</Typography.Text></> },
       { title: "状态", render: (_, a) => <Space wrap><Tag color={a.connected ? "green" : "default"}>{a.connected ? "身份已核验" : "待授权 / 检查"}</Tag><Tag>{a.sending_enabled ? "允许发送" : "发送暂停"}</Tag><Tag>{a.queue_enabled ? "队列运行" : "队列暂停"}</Tag></Space> },
       { title: "操作", render: (_, a) => <Space wrap>
-        <Button size="small" disabled={blocked(a.id)} onClick={() => { setTokenAccount(a); setToken(""); }}>导入 Token</Button>
+        <Button size="small" disabled={blocked(a.id)} onClick={() => { setTokenAccount(a); setToken(""); dirty("token", false); }}>导入 Token</Button>
         {a.auth_mode === "facebook_login" && <Button size="small" loading={loading(`${a.id}:connect`)} disabled={blocked(a.id) || !status?.app?.configured} onClick={() => act(`${a.id}:connect`, async () => { const r = await api<{ url: string }>(`/api/outreach/accounts/${a.id}/connect`, json({})); window.location.assign(r.url); })}>浏览器授权</Button>}
         <Button size="small" loading={loading(`${a.id}:check`)} disabled={blocked(a.id)} onClick={() => act(`${a.id}:check`, async () => { await api(`/api/outreach/accounts/${a.id}/check`, json({})); message.success("身份检查通过；真实消息权限仍需账号联调"); })}>检查连接</Button>
         <Button size="small" disabled={blocked(a.id)} onClick={() => { setEditing(a); policyForm.setFieldsValue(a); }}>发送设置</Button>
@@ -68,7 +73,7 @@ export default function SocialSettings() {
       </Space> },
     ]} />
     <details style={{ marginTop: 16 }}><summary>添加发送账号（可以暂不授权）</summary>
-      <Form disabled={blocked("create")} form={accountForm} layout="vertical" initialValues={{ platform: "facebook", auth_mode: "facebook_login" }} style={{ maxWidth: 600 }} onFinish={(v) => act("create:account", async () => { await api("/api/outreach/accounts", json(v)); accountForm.resetFields(); message.success("账号已建立，可稍后补齐授权"); })}>
+      <Form onValuesChange={() => dirty("create", true)} disabled={blocked("create")} form={accountForm} layout="vertical" initialValues={{ platform: "facebook", auth_mode: "facebook_login" }} style={{ maxWidth: 600 }} onFinish={(v) => act("create:account", async () => { await api("/api/outreach/accounts", json(v)); accountForm.resetFields(); dirty("create", false); message.success("账号已建立，可稍后补齐授权"); })}>
         <Form.Item name="label" label="账号名称" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="platform" label="渠道"><Select options={[{ value: "facebook", label: "Facebook" }, { value: "instagram", label: "Instagram" }]} /></Form.Item>
         <Form.Item name="auth_mode" label="认证路线"><Select options={[{ value: "facebook_login", label: "Facebook Login（FB 或关联 Page 的 INS）" }, { value: "instagram_login", label: "Instagram Login（INS Token 导入）" }]} /></Form.Item>
@@ -77,12 +82,12 @@ export default function SocialSettings() {
         <Button htmlType="submit" loading={loading("create:account")} disabled={blocked("create")}>添加账号</Button>
       </Form>
     </details>
-    <Modal title={`导入 ${tokenAccount?.label || ""} 的 Access Token`} open={!!tokenAccount} onCancel={() => { if (tokenAccount && blocked(tokenAccount.id)) return; setTokenAccount(undefined); setToken(""); }} onOk={() => act(`${tokenAccount!.id}:token`, async () => { await api(`/api/outreach/accounts/${tokenAccount!.id}/credentials`, json({ token }, "PUT")); setToken(""); setTokenAccount(current => current?.id === tokenAccount!.id ? undefined : current); message.success("授权已保存，请检查连接"); })} confirmLoading={!!tokenAccount && loading(`${tokenAccount.id}:token`)} okButtonProps={{ disabled: !token.trim() || (!!tokenAccount && blocked(tokenAccount.id)) }}>
+    <Modal title={`导入 ${tokenAccount?.label || ""} 的 Access Token`} open={!!tokenAccount} onCancel={() => { if (tokenAccount && blocked(tokenAccount.id)) return; setTokenAccount(undefined); setToken(""); dirty("token", false); }} onOk={() => act(`${tokenAccount!.id}:token`, async () => { await api(`/api/outreach/accounts/${tokenAccount!.id}/credentials`, json({ token }, "PUT")); setToken(""); dirty("token", false); setTokenAccount(current => current?.id === tokenAccount!.id ? undefined : current); message.success("授权已保存，请检查连接"); })} confirmLoading={!!tokenAccount && loading(`${tokenAccount.id}:token`)} okButtonProps={{ disabled: !token.trim() || (!!tokenAccount && blocked(tokenAccount.id)) }}>
       <Typography.Paragraph>Facebook 使用 Page Token；INS Facebook Login 使用关联 Page Token；INS Instagram Login 使用该专业账号的 Token。导入会暂停发送并使旧预览失效。</Typography.Paragraph>
-      <Input.Password disabled={!!tokenAccount && blocked(tokenAccount.id)} value={token} onChange={(e) => setToken(e.target.value)} autoComplete="new-password" />
+      <Input.Password disabled={!!tokenAccount && blocked(tokenAccount.id)} value={token} onChange={(e) => { setToken(e.target.value); dirty("token", !!e.target.value); }} autoComplete="new-password" />
     </Modal>
-    <Modal title={`发送设置 ${editing?.label || ""}`} open={!!editing} onCancel={() => { if (!editing || !blocked(editing.id)) setEditing(undefined); }} onOk={() => policyForm.submit()} confirmLoading={!!editing && loading(`${editing.id}:policy`)} okButtonProps={{disabled: !!editing && blocked(editing.id)}}>
-      <Form disabled={!!editing && blocked(editing.id)} form={policyForm} layout="vertical" onFinish={(v) => act(`${editing!.id}:policy`, async () => { await api(`/api/outreach/accounts/${editing!.id}/policy`, json(v, "PUT")); setEditing(current => current?.id === editing!.id ? undefined : current); })}>
+    <Modal title={`发送设置 ${editing?.label || ""}`} open={!!editing} onCancel={() => { if (editing && blocked(editing.id)) return; setEditing(undefined); dirty("policy", false); }} onOk={() => policyForm.submit()} confirmLoading={!!editing && loading(`${editing.id}:policy`)} okButtonProps={{disabled: !!editing && blocked(editing.id)}}>
+      <Form onValuesChange={() => dirty("policy", true)} disabled={!!editing && blocked(editing.id)} form={policyForm} layout="vertical" onFinish={(v) => act(`${editing!.id}:policy`, async () => { await api(`/api/outreach/accounts/${editing!.id}/policy`, json(v, "PUT")); dirty("policy", false); setEditing(current => current?.id === editing!.id ? undefined : current); })}>
         <Form.Item name="sending_enabled" label="允许发送" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="queue_enabled" label="运行批量队列" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="daily_limit" label="滚动 24 小时尝试限额" rules={[{ required: true }]}><InputNumber min={1} max={100000} precision={0} /></Form.Item>

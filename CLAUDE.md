@@ -120,3 +120,5 @@ D72 AI 触达消息：管理员在设置维护真实服务资料；单家／批�
 D73（2026-10-22）：网页 Gmail OAuth，设置页 Web 客户端向导／分次发送与邮件头权限、候选凭据验证后替换、浏览器和管理员会话绑定及 PKCE。导入为高级兼容，成功连接暂停发送且未执行预览过期，未知发送记录保留。专项服务 `cd services/gmail && uv run pytest -q`，API tests/test_gmail_oauth.py，模拟界面 scripts/verify_gmail_oauth_ui.py。无 PG 迁移，仅本地验证，未真实授权／发送／发布。见 docs/Gmail邮件服务.md。
 
 用户头像（2026-10-24）：个人账号上传／更换／恢复默认，缩略图存 PostgreSQL，迁移 `d174a0010001`。专项 `cd apps/api && uv run pytest tests/test_avatars.py tests/test_users.py tests/test_auth.py -q`；模拟 UI `uv run --project apps/api --extra maps-worker python scripts/verify_avatar_ui.py`，不修改真实用户。
+
+设置三栏（2026-10-24）：分类按需加载、内存草稿保护、授权返回定位；模拟回归 `uv run --project apps/api --extra maps-worker python scripts/verify_settings_navigation_ui.py`，不写真实配置或发送消息。

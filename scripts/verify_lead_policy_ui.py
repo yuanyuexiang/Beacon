@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -48,14 +49,17 @@ async def main():
         page = await browser.new_page(viewport={"width": 1440, "height": 1100})
         page.on("pageerror", lambda e: errors.append(str(e)))
         await page.route("**/api/**", handle)
-        await page.goto("http://localhost:3000/settings")
-        card = page.locator(".ant-card").filter(has=page.get_by_text("客户筛选与数据补充策略", exact=True))
+        await page.goto("http://localhost:3000/settings?section=screen")
+        card = page.locator(".ant-card").filter(has=page.get_by_text("客户筛选与准入", exact=True))
         await expect(card.get_by_role("button", name="保存策略")).to_be_enabled()
         await expect(card).to_contain_text("咖啡馆／面包店／Deli")
         await expect(card).to_contain_text("Google 优先：首次、过期或异常时查询")
-        await expect(card).to_contain_text("即使 Overture 已有官网")
+        await page.get_by_role("navigation", name="设置分类").get_by_role("button", name="数据补充 来源查询与结果复用", exact=True).click()
+        card = page.locator(".ant-card").filter(has=page.get_by_text("数据补充", exact=True))
         await expect(card.get_by_label("每个任务最多 API 尝试次数")).to_have_count(0)
-        await card.get_by_label("核验有效天数").fill("30")
+        await card.get_by_label("来源数据复用天数").fill("30")
+        await page.get_by_role("navigation", name="设置分类").get_by_role("button", name=re.compile("客户筛选与准入")).click()
+        card = page.locator(".ant-card").filter(has=page.get_by_text("客户筛选与准入", exact=True))
         await (
             card.locator(".ant-form-item")
             .filter(has=page.get_by_text("咖啡馆／面包店／Deli", exact=True))
@@ -67,9 +71,10 @@ async def main():
         await page.get_by_text("策略已保存，新任务生效", exact=True).wait_for()
         assert "google_request_limit" not in writes[-1] and writes[-1]["stale_days"] == 30
         assert writes[-1]["cafe_action"] == "review"
+        await page.get_by_role("navigation", name="设置分类").get_by_role("button", name=re.compile("数据补充")).click()
         await page.reload()
         await expect(page.get_by_label("每个任务最多 API 尝试次数")).to_have_count(0)
-        await expect(page.get_by_label("核验有效天数")).to_have_value("30")
+        await expect(page.get_by_label("来源数据复用天数")).to_have_value("30")
         await expect(page.get_by_role("button", name="保存策略", exact=True)).to_be_enabled()
         await page.screenshot(path="data/devchecks/lead-policy-settings.png", full_page=True)
         assert not errors, errors

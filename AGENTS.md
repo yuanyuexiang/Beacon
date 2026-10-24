@@ -141,3 +141,5 @@ D72 AI 触达消息：设置页管理员维护公司与服务资料，真实 Dee
 D73（2026-10-22）：Gmail 网页授权为主入口，分开发送与回复 metadata 权限，管理员／浏览器绑定＋PKCE、失败保留原连接，成功暂停发送并过期旧预览。测试 `cd services/gmail && uv run pytest -q`、`cd apps/api && uv run pytest tests/test_gmail.py tests/test_gmail_oauth.py tests/test_auth.py -q`；模拟界面 `uv run --project apps/api --extra maps-worker python scripts/verify_gmail_oauth_ui.py`。无 PostgreSQL 迁移，仅本地更新，真实 Google 授权和发送需另行验收，未发布。
 
 用户头像（2026-10-24）：个人账号上传／更换／恢复默认，缩略图存 PostgreSQL，迁移 `d174a0010001`。专项 `cd apps/api && uv run pytest tests/test_avatars.py tests/test_users.py tests/test_auth.py -q`；模拟 UI `uv run --project apps/api --extra maps-worker python scripts/verify_avatar_ui.py`，不修改真实用户。
+
+设置三栏（2026-10-24）：分类按需加载、内存草稿保护、授权返回定位；模拟回归 `uv run --project apps/api --extra maps-worker python scripts/verify_settings_navigation_ui.py`，不写真实配置或发送消息。

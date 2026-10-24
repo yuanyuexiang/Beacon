@@ -19,10 +19,10 @@ const NAV_GROUPS = [
       { key: "/tasks", label: "触达任务与回复", icon: <MessageOutlined /> },
     ],
   },
-  { key: "system", label: "系统", items: [{ key: "/settings", label: "设置与说明", icon: <SettingOutlined /> }, { key: "/users", label: "用户管理", icon: <SafetyCertificateOutlined /> }] },
+  { key: "system", label: "系统", items: [{ key: "/settings", label: "设置", icon: <SettingOutlined /> }, { key: "/users", label: "用户管理", icon: <SafetyCertificateOutlined /> }] },
 ];
 
-const TITLES: Record<string, string> = { "/": "仪表盘", "/leads": "批次与线索", "/directory": "门店池", "/tasks": "触达任务与回复", "/settings": "设置与说明", "/users": "用户管理", "/account": "个人账号" };
+const TITLES: Record<string, string> = { "/": "仪表盘", "/leads": "批次与线索", "/directory": "门店池", "/tasks": "触达任务与回复", "/settings": "设置", "/users": "用户管理", "/account": "个人账号" };
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -84,7 +84,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </button>
             <Breadcrumb items={crumbs} />
           </div>
-          <Dropdown menu={{ items: [{ key: "account", label: <Link href="/account">个人账号与密码</Link> }, ...(me?.role === "admin" ? [{ key: "settings", label: <Link href="/settings">设置与说明</Link> }, { key: "users", label: <Link href="/users">用户管理</Link> }] : []), { type: "divider" }, { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => api("/api/auth/logout", { method: "POST" }).then(() => router.replace("/login")) }] }}>
+          <Dropdown menu={{ items: [{ key: "account", label: <Link href="/account">个人账号与密码</Link> }, ...(me?.role === "admin" ? [{ key: "settings", label: <Link href="/settings">设置</Link> }, { key: "users", label: <Link href="/users">用户管理</Link> }] : []), { type: "divider" }, { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => api("/api/auth/logout", { method: "POST" }).then(() => router.replace("/login")) }] }}>
             <Space style={{ cursor: "pointer" }}>
               <UserAvatar user={me} />
               <Typography.Text>{me ? me.display_name || me.username : "…"}</Typography.Text>{me && <Typography.Text type="secondary">{ROLE_LABELS[me.role]}</Typography.Text>}

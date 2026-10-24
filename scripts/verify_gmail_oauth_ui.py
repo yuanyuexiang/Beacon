@@ -64,7 +64,8 @@ async def main():
         browser = await p.chromium.launch(channel="chrome", headless=True)
         page = await browser.new_page(viewport={"width": 1440, "height": 1000})
         await page.route("**/api/**", route)
-        await page.goto("http://localhost:3000/settings")
+        page.on("dialog", lambda d: d.accept())
+        await page.goto("http://localhost:3000/settings?section=gmail")
         gmail_card = page.locator(".ant-card").filter(has=page.get_by_text("Gmail 邮箱连接", exact=True)).first
         await expect(page.get_by_role("button", name=re.compile(r"连接 Gmail$"))).to_be_disabled()
         await expect(page.get_by_text(state["redirect_uri"], exact=True)).to_be_visible()
@@ -126,6 +127,7 @@ async def main():
         Path("data/devchecks").mkdir(parents=True, exist_ok=True)
         await page.screenshot(path="data/devchecks/gmail-web-oauth.png", full_page=True)
         await page.locator(".ant-card").filter(has=page.get_by_text("Gmail 邮箱连接", exact=True)).first.screenshot(path="data/devchecks/gmail-web-oauth-card.png")
+        await page.get_by_role("navigation", name="设置分类").get_by_role("button", name=re.compile("Facebook")).click()
         social = page.locator(".ant-card").filter(has=page.get_by_text("Facebook / Instagram 渠道", exact=True)).first
         row_one = social.get_by_role("row").filter(has_text="account-one")
         row_two = social.get_by_role("row").filter(has_text="account-two")

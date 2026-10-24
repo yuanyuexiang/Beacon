@@ -1,6 +1,7 @@
 "use client";
 import { Alert, Button, Card, Form, Input, InputNumber, Modal, Space, Switch, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSettingsDraft, useSettingsStatus } from "./SettingsState";
 import { api, json } from "@/lib/api";
 
 type Action = "connect" | "replies" | "check" | "refresh" | "disconnect" | "configure" | "policy" | "testPreview" | "testSend";
@@ -30,6 +31,9 @@ export default function GmailSettings() {
   const [webCredentials, setWebCredentials] = useState<File | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const policyDirty = useRef(false);
+  const [policyChanged, setPolicyChanged] = useState(false);
+  useSettingsDraft("gmail", policyChanged || !!webCredentials);
+  useSettingsStatus("gmail", !status ? "未检查" : !status.configured ? "服务不可用" : status.connected ? "已连接" : status.token_present ? "需检查授权" : !status.oauth_configured && status.client_type !== "web" ? "未配置" : "待连接");
   const [activeAction, setActiveAction] = useState<Action | null>(null);
   const inFlight = useRef(false);
   const busy = activeAction !== null;
@@ -85,19 +89,6 @@ export default function GmailSettings() {
       <Button danger disabled={blocked("disconnect") || !status?.token_present} loading={activeAction === "disconnect"} onClick={() => act("disconnect", async () => { await api("/api/gmail/disconnect", json({})); await refresh(); })}>断开并暂停发送</Button>
     </Space>
     {status?.configured && (!web || status?.pending_configuration) && <Alert type="info" showIcon message={status?.client_type === "desktop" ? (status.token_present ? "当前配置为 Desktop 客户端；已有令牌需检查有效性。网页连接请先配置 Web 客户端。" : "当前只有 Desktop 客户端配置，没有邮箱授权令牌。请先展开下方配置，保存 Web 客户端 JSON，再点击连接 Gmail。") : status?.pending_configuration ? "新客户端等待授权验证，原邮箱连接尚未替换" : "首次由管理员配置 Web OAuth，之后直接点击连接，无需终端或 Token 文件"} style={{ marginBottom: 12 }} />}
-    <details open={!!status?.configured && !web}><summary>管理员首次配置／更换 Web 客户端</summary>
-      <Typography.Paragraph>在 Google 项目中启用 Gmail API，创建 Web application 客户端，登记以下回调地址后下载 JSON。测试中的项目还需添加登录账号为测试用户。本地与云端建议使用不同客户端。</Typography.Paragraph>
-      <Typography.Paragraph copyable={!!status?.redirect_uri} code>{status?.redirect_uri || "等待服务返回当前环境回调地址"}</Typography.Paragraph>
-      <Typography.Paragraph type="secondary">当前回调必须登记在 Google 客户端的重定向 URI 中。本操作先保存候选配置，授权验证成功后才替换原连接。</Typography.Paragraph>
-      <Space wrap><label>Web OAuth 客户端 JSON <input ref={fileInput} disabled={activeAction === "configure"} type="file" accept=".json" onChange={(e) => setWebCredentials(e.target.files?.[0] ?? null)} /></label><Button disabled={blocked("configure") || !status?.redirect_uri || !webCredentials} loading={activeAction === "configure"} onClick={() => act("configure", files)}>保存 Web 客户端</Button></Space>
-    </details>
-    <Form form={form} layout="inline" onValuesChange={() => { policyDirty.current = true; }} initialValues={{ sending_enabled: false, queue_enabled: false, daily_limit: 0 }} onFinish={(values) => act("policy", async () => { await api("/api/gmail/policy", json(values, "PUT")); policyDirty.current = false; await refresh(); setNotice("发送设置已保存。"); })} style={{ margin: "20px 0 12px", rowGap: 8 }}>
-      <Form.Item name="sending_enabled" label="允许发送" valuePropName="checked"><Switch disabled={activeAction === "policy" || !status?.connected || !status?.send_authorized} /></Form.Item>
-      <Form.Item name="queue_enabled" label="运行批量队列" valuePropName="checked"><Switch disabled={activeAction === "policy" || !status?.connected || !status?.send_authorized} /></Form.Item>
-      <Form.Item name="daily_limit" label="滚动 24 小时限额"><InputNumber disabled={activeAction === "policy"} min={0} max={100000} precision={0} /></Form.Item>
-      <Button htmlType="submit" loading={activeAction === "policy"} disabled={blocked("policy") || !status?.policy}>保存发送设置</Button>
-    </Form>
-    <Typography.Paragraph type="secondary">连接成功不会自动发送。首次建议限额 1、批量队列关闭；逐封预览并确认后执行。0 表示不设本地限额。</Typography.Paragraph>
     <div style={{ marginTop: 20, marginBottom: 16 }}>
       <Typography.Title level={5}>发送测试邮件</Typography.Title>
       <Typography.Paragraph type="secondary">输入你自己的邮箱，预览确认后发送一封固定测试邮件。不会开启客户发送或批量队列；仍受发送限额约束。</Typography.Paragraph>
@@ -125,6 +116,20 @@ export default function GmailSettings() {
         <p>主题：{testPreview?.subject}</p><p style={{whiteSpace:"pre-wrap"}}>{testPreview?.body}</p>
       </Modal>
     </div>
+        <Form form={form} layout="inline" onValuesChange={() => { policyDirty.current = true; setPolicyChanged(true); }} initialValues={{ sending_enabled: false, queue_enabled: false, daily_limit: 0 }} onFinish={(values) => act("policy", async () => { await api("/api/gmail/policy", json(values, "PUT")); policyDirty.current = false; setPolicyChanged(false); await refresh(); setNotice("发送设置已保存。"); })} style={{ margin: "20px 0 12px", rowGap: 8 }}>
+      <Form.Item name="sending_enabled" label="允许发送" valuePropName="checked"><Switch disabled={activeAction === "policy" || !status?.connected || !status?.send_authorized} /></Form.Item>
+      <Form.Item name="queue_enabled" label="运行批量队列" valuePropName="checked"><Switch disabled={activeAction === "policy" || !status?.connected || !status?.send_authorized} /></Form.Item>
+      <Form.Item name="daily_limit" label="滚动 24 小时限额"><InputNumber disabled={activeAction === "policy"} min={0} max={100000} precision={0} /></Form.Item>
+      <Button htmlType="submit" loading={activeAction === "policy"} disabled={blocked("policy") || !status?.policy}>保存发送设置</Button>
+    </Form>
+    <Typography.Paragraph type="secondary">连接成功不会自动发送。首次建议限额 1、批量队列关闭；逐封预览并确认后执行。0 表示不设本地限额。</Typography.Paragraph>
+
+    <details open={!!status?.configured && !web}><summary>管理员首次配置／更换 Web 客户端</summary>
+      <Typography.Paragraph>在 Google 项目中启用 Gmail API，创建 Web application 客户端，登记以下回调地址后下载 JSON。测试中的项目还需添加登录账号为测试用户。本地与云端建议使用不同客户端。</Typography.Paragraph>
+      <Typography.Paragraph copyable={!!status?.redirect_uri} code>{status?.redirect_uri || "等待服务返回当前环境回调地址"}</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">当前回调必须登记在 Google 客户端的重定向 URI 中。本操作先保存候选配置，授权验证成功后才替换原连接。</Typography.Paragraph>
+      <Space wrap><label>Web OAuth 客户端 JSON <input ref={fileInput} disabled={activeAction === "configure"} type="file" accept=".json" onChange={(e) => setWebCredentials(e.target.files?.[0] ?? null)} /></label><Button disabled={blocked("configure") || !status?.redirect_uri || !webCredentials} loading={activeAction === "configure"} onClick={() => act("configure", files)}>保存 Web 客户端</Button></Space>
+    </details>
 
   </Card>;
 }
