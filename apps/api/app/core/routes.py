@@ -35,6 +35,7 @@ class MeOut(BaseModel):
     id: uuid.UUID
     username: str
     display_name: str | None
+    avatar_url: str | None
     role: str
     must_change_password: bool
 

@@ -107,7 +107,13 @@ def current_operator(request: Request, db: Session = Depends(get_db)) -> Operato
 
 def enforce_permissions(request: Request, op: Operator) -> None:
     path = request.url.path.rstrip("/")
-    personal = path in {"/api/auth/me", "/api/auth/logout", "/api/auth/profile", "/api/auth/password"}
+    personal = path in {
+        "/api/auth/me",
+        "/api/auth/logout",
+        "/api/auth/profile",
+        "/api/auth/password",
+        "/api/auth/avatar",
+    }
     if op.must_change_password and path not in {"/api/auth/me", "/api/auth/logout", "/api/auth/password"}:
         raise HTTPException(403, "请先修改初始密码", headers={"X-Beacon-Action": "change-password"})
     if personal:

@@ -23,6 +23,7 @@ class UserOut(BaseModel):
     id: uuid.UUID
     username: str
     display_name: str | None
+    avatar_url: str | None
     role: Role
     is_active: bool
     must_change_password: bool

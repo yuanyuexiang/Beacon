@@ -1,4 +1,5 @@
 "use client";
+import { UserIdentity } from "@/components/UserAvatar";
 import Button from "@/components/AccessButton";
 import { Alert, Card, Checkbox, Col, DatePicker, Drawer, Empty, Form, Input, Modal, Row, Select, Space, Table, Tabs, Tag, Timeline, Typography } from "antd";
 import Link from "next/link";
@@ -96,7 +97,7 @@ function TasksInner() {
           <Tabs activeKey={tab} onChange={(value) => navigate({ tab: value })} items={[
             { key: "tasks", label: "待办任务", children: <>
               {!tasks.length ? <Empty description="当前筛选下没有任务，可查看客户会话和发送记录。" /> : tasks.map((t) => <Card key={t.id} size="small" style={{ marginBottom: 12, borderColor: selectedTask?.id === t.id ? "#cf010e" : undefined }} title={<Space wrap><span>{channelLabel(t.channel)}</span><Tag>{label(t.status)}</Tag><Typography.Text type="secondary">{t.execution_mode === "manual" ? "人工执行" : t.execution_mode === "gmail" ? "Gmail 接口" : "已授权社媒会话"}</Typography.Text></Space>}>
-                <Typography.Paragraph type="secondary">负责人：{t.assigned_to || "未分配"}{t.follow_up_at ? ` · 跟进提醒：${new Date(t.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
+                <Typography.Paragraph type="secondary">负责人：{<UserIdentity username={t.assigned_to} />}{t.follow_up_at ? ` · 跟进提醒：${new Date(t.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
                 {t.status_reason && <Alert type="warning" message={t.status_reason} style={{ marginBottom: 12 }} />}
                 {inflight(t) && <Alert type="info" message="已有接口发送记录，请先核对排队、发送或未知结果，避免人工重复发送。" style={{ marginBottom: 12 }} />}
                 <Space wrap>

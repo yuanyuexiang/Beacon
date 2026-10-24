@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.core.auth import bootstrap_operator, current_operator
+from app.core.avatars import router as avatars_router
 from app.core.config import get_settings
 from app.core.db import get_engine, get_sessionmaker
 from app.core.routes import router as core_router
@@ -106,6 +107,7 @@ from app.modules.outreach.routes import router as outreach_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
 protected.include_router(users_router)
+protected.include_router(avatars_router)
 protected.include_router(outreach_router)
 protected.include_router(gmail_router)
 from app.modules.leads.policy import router as policy_router  # noqa: E402

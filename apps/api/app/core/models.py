@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, LargeBinary, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,6 +16,13 @@ class Operator(UUIDPk, Timestamped, Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(80))
+    avatar_data: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
+    avatar_version: Mapped[str | None] = mapped_column(String(32))
+
+    @property
+    def avatar_url(self) -> str | None:
+        return f"/api/avatars/{self.username}?v={self.avatar_version}" if self.avatar_version else None
+
     role: Mapped[str] = mapped_column(String(16), default="member", server_default="member", nullable=False)
     session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)

@@ -1,6 +1,7 @@
 "use client";
+import { UserAvatar } from "@/components/UserAvatar";
 import { DashboardOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
-import { Alert, Avatar, Breadcrumb, Dropdown, Layout, Menu, Space, Tooltip, Typography } from "antd";
+import { Alert, Breadcrumb, Dropdown, Layout, Menu, Space, Tooltip, Typography } from "antd";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -85,7 +86,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </div>
           <Dropdown menu={{ items: [{ key: "account", label: <Link href="/account">个人账号与密码</Link> }, ...(me?.role === "admin" ? [{ key: "settings", label: <Link href="/settings">设置与说明</Link> }, { key: "users", label: <Link href="/users">用户管理</Link> }] : []), { type: "divider" }, { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => api("/api/auth/logout", { method: "POST" }).then(() => router.replace("/login")) }] }}>
             <Space style={{ cursor: "pointer" }}>
-              <Avatar size="small" style={{ background: "#cf010e" }}>{(me?.display_name || me?.username || "?").slice(0, 1).toUpperCase()}</Avatar>
+              <UserAvatar user={me} />
               <Typography.Text>{me ? me.display_name || me.username : "…"}</Typography.Text>{me && <Typography.Text type="secondary">{ROLE_LABELS[me.role]}</Typography.Text>}
             </Space>
           </Dropdown>

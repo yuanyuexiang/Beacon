@@ -118,3 +118,5 @@ D72 AI 触达消息：管理员在设置维护真实服务资料；单家／批�
 2026-10-20 用户已明确授权云发布：D68～D72 等本地功能现已上线，提交 d14c3d1、迁移 d170a0010001，Actions 39415861487 成功；此前“仅本地”描述属于实施时状态。后续新增修改仍须本地验收并经用户确认后发布。
 
 D73（2026-10-22）：网页 Gmail OAuth，设置页 Web 客户端向导／分次发送与邮件头权限、候选凭据验证后替换、浏览器和管理员会话绑定及 PKCE。导入为高级兼容，成功连接暂停发送且未执行预览过期，未知发送记录保留。专项服务 `cd services/gmail && uv run pytest -q`，API tests/test_gmail_oauth.py，模拟界面 scripts/verify_gmail_oauth_ui.py。无 PG 迁移，仅本地验证，未真实授权／发送／发布。见 docs/Gmail邮件服务.md。
+
+用户头像（2026-10-24）：个人账号上传／更换／恢复默认，缩略图存 PostgreSQL，迁移 `d174a0010001`。专项 `cd apps/api && uv run pytest tests/test_avatars.py tests/test_users.py tests/test_auth.py -q`；模拟 UI `uv run --project apps/api --extra maps-worker python scripts/verify_avatar_ui.py`，不修改真实用户。

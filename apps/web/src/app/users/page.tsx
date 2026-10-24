@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, json } from "@/lib/api";
 import { Operator, ROLE_LABELS, useOperator } from "@/lib/auth";
+import { UserAvatar } from "@/components/UserAvatar";
 import { HeroBand } from "@/components/ui";
 type User = Operator & { is_active: boolean; created_at: string };
 const roles = Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }));
@@ -31,7 +32,7 @@ export default function UsersPage() {
     <Alert type="info" showIcon message="初始／临时密码须由你安全交给用户，首次登录强制修改。停用、重置密码或调整角色会使该用户旧会话失效；至少保留一位有效管理员。" style={{ marginBottom: 16 }} />
     <Card extra={<Button onClick={() => void load()} disabled={busy}>刷新用户</Button>}>
       <Table<User> rowKey="id" dataSource={users} scroll={{ x: 850 }} columns={[
-        { title: "登录名", dataIndex: "username", render: (v, u) => <>{v}{u.id === me.id && <Tag style={{ marginLeft: 8 }}>当前账号</Tag>}</> },
+        { title: "登录名", dataIndex: "username", render: (v, u) => <Space><UserAvatar user={u} />{v}{u.id === me.id && <Tag style={{ marginLeft: 8 }}>当前账号</Tag>}</Space> },
         { title: "显示名称", dataIndex: "display_name", render: (v) => v || "—" },
         { title: "角色", dataIndex: "role", render: (v: keyof typeof ROLE_LABELS) => ROLE_LABELS[v] },
         { title: "状态", render: (_, u) => <><Tag color={u.is_active ? "green" : "default"}>{u.is_active ? "正常" : "已停用"}</Tag>{u.must_change_password && <Tag color="gold">待修改初始密码</Tag>}</> },
