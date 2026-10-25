@@ -245,6 +245,12 @@ def execute(lead_id: uuid.UUID, run_id: str, operator_id: uuid.UUID) -> None:
             op = db.get(Operator, operator_id)
             if op is None:
                 raise ValueError("操作者不存在")
+            if not op.is_active or op.role not in {"admin", "director", "member"}:
+                raise Changed("操作者权限已失效")
+            if op.role == "member":
+                from app.core.access import set_scope
+
+                set_scope(db, op.username)
             lead = checkpoint(db, lead_id, run, "获取官网候选")
             options = [lead.website] if lead.website else []
             link = google_places._link(lead)
@@ -338,6 +344,11 @@ def execute(lead_id: uuid.UUID, run_id: str, operator_id: uuid.UUID) -> None:
                 raise Changed("采用前官网或门店已改变")
             before = {"website": lead.website, "website_source": lead.website_source}
             if lead.website != selected:
+                from app.modules.leads import website_review
+
+                if website_review.manual(lead):
+                    finish(db, lead_id, run, "needs_review", "发现不同官网候选，已保留人工官网；请在研究结果核对差异")
+                    return
                 lead.website, lead.website_source = selected, "AI 证据核对 + 程序校验"
                 raw = dict(lead.raw or {})
                 raw.pop("contacts_scan", None)
@@ -490,7 +501,15 @@ def import_asset(db: Session, lead_id: uuid.UUID, run: dict, report: dict, resul
     engine = (
         "model" if result.kind == "image" or (result.kind == "pdf" and len(text_of(result).strip()) < 50) else "rules"
     )
-    a, created = service.run_analysis(db, asset, engine=engine)
+    previous = service.latest_analysis(db, asset.id)
+    if (
+        previous
+        and previous.input_sha256 == asset.sha256
+        and previous.status in {AnalysisStatus.succeeded, AnalysisStatus.needs_review}
+    ):
+        a, created = previous, False
+    else:
+        a, created = service.run_analysis(db, asset, engine=engine)
     if created and engine != "rules" and (a.measurements or {}).get("usage"):
         run["usage"].append({**(a.measurements or {})["usage"], "visual": True, "kind": "menu_analysis"})
     if created and a.status != AnalysisStatus.failed:

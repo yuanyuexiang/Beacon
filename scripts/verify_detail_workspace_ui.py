@@ -110,6 +110,8 @@ async def handle(route):
             )
             return
         data = {"assets": assets, "analyses": {"asset1": analyses} if assets else {}}
+    elif path.endswith("/enrichment"):
+        data = {"items": [], "task": None}
     elif path.endswith("/sales-brief"):
         data = {"result": None, "stale": False}
     elif path.endswith("/eligibility"):
@@ -323,7 +325,7 @@ async def main():
         await page.get_by_text("为什么这样写 · 生成依据", exact=True).click()
         await expect(page.get_by_text("结合门店与真实服务，询问菜单负责人", exact=True)).to_be_visible()
         fail_ai = True
-        await page.get_by_role("button", name="AI 重新起草消息", exact=True).click()
+        await page.get_by_role("button", name=re.compile("AI 重新起草消息")).click()
         await expect(page.get_by_text("AI 起草暂不可用，已有消息未修改", exact=True)).to_be_visible()
         await expect(page.get_by_label("文案内容", exact=True)).to_have_value(re.compile("Could you share your menu"))
         fail_ai = False

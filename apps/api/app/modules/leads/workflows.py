@@ -69,7 +69,7 @@ class WorkflowOut(BaseModel):
 def latest(db: Session, batch: Batch) -> Workflow | None:
     return db.scalar(
         select(Workflow)
-        .where(Workflow.batch_id == batch.id)
+        .where(Workflow.batch_id == batch.id, Workflow.kind != "single")
         .order_by(Workflow.created_at.desc(), Workflow.id.desc())
         .limit(1)
     )
@@ -91,7 +91,20 @@ def lock(db: Session, batch: Batch):
             connection.commit()
 
 
+def ensure_no_single(db: Session, batch: Batch) -> None:
+    from app.modules.leads.models import BatchLead
+
+    members = select(BatchLead.lead_id).where(BatchLead.batch_id == batch.id)
+    singles = db.scalars(
+        select(Workflow).where(Workflow.kind == "single", Workflow.status.in_(["pending", "running"]))
+    ).all()
+    identities = {str(x) for x in db.scalars(members)}
+    if any(identities.intersection(t.params.get("lead_ids", [])) for t in singles):
+        raise HTTPException(409, "名单中的门店正在单家完善，请完成或结束该任务后再开始批量处理")
+
+
 def ensure_idle(db: Session, batch: Batch) -> None:
+    ensure_no_single(db, batch)
     task = latest(db, batch)
     if task and task.status in {"pending", "running"}:
         raise HTTPException(409, "名单有未完成任务，请先继续任务，或结束任务后再操作")

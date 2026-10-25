@@ -1,4 +1,5 @@
 "use client";
+import LeadEnrichment from "@/components/LeadEnrichment";
 import SalesAssistance from "@/components/SalesAssistance";
 import { UserIdentity } from "@/components/UserAvatar";
 import LeadAssignment, { AssignmentHistory } from "@/components/LeadAssignment";
@@ -163,6 +164,7 @@ export default function LeadDetail() {
         <div className="lead-header-top"><Link href={back}>← 返回名单</Link><Space size={8}><Tag>{PROGRESS[progress] || "未准备"}</Tag><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /></Space></div>
         <div className="lead-header-main"><div className="lead-identity"><h1>{lead.name}</h1><Typography.Text type="secondary">{lead.address || "地址未登记"}{lead.postcode ? ` · ${lead.postcode}` : ""}</Typography.Text><div className="lead-owner">负责人：{<UserIdentity username={lead.assigned_to} />}<Popover trigger="click" placement="bottomLeft" content={<Space direction="vertical"><LeadAssignment leadIds={[id]} onChanged={() => void reload()} /><AssignmentHistory leadId={id} /></Space>}><Button readOnlySafe size="small" type="text">管理 ···</Button></Popover></div></div><Button readOnlySafe={action.target !== "prepare"} type="primary" onClick={nextStep}>{action.text}</Button></div>
       </header>
+      <LeadEnrichment key={`enrichment-${id}`} leadId={id} dataRevision={`${lead.website}:${assets.map((a) => `${a.id}:${a.sha256}:${a.fetch_status}`).join()}:${Object.values(analyses).flat().map((a) => `${a.id}:${a.status}:${a.review_state}`).join()}:${eligs.map((e) => e.id).join()}`} onChanged={() => void reload()} onMenus={() => setTab("menus")} />
       {Object.keys(sectionErrors).length > 0 && <Alert type="warning" showIcon message="部分资料未能加载，已读取的结果仍可使用" description={Object.entries(sectionErrors).map(([name, error]) => <div key={name}>{name}：{error}</div>)} action={<Button readOnlySafe onClick={() => void reload()}>重试加载</Button>} style={{ marginBottom: 16 }} />}
       {actionError && <Alert type="error" showIcon message={actionError} style={{ marginBottom: 16 }} />}
       <Tabs className="lead-workspace-tabs" activeKey={tab} onChange={setTab} items={[

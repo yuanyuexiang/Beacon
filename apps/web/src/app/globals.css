@@ -389,3 +389,13 @@
 @media (max-width: 600px) { .settings-detail .ant-card-body { padding: 16px; } .settings-detail input { max-width: 100%; } .settings-detail .ant-space { max-width: 100%; } }
 .settings-detail .ant-alert-info { background: #f6f8fa; border-color: #dfe5eb; }
 .settings-detail .ant-alert-info .ant-alert-icon { color: #64748b; }
+
+/* 单家持续完善：紧凑概览，详细操作按需展开。 */
+.lead-enrichment-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 22px; margin: 16px 0; background: #fff; border: 1px solid #e9e2d9; border-radius: 14px; }
+.lead-enrichment-bar strong { margin-right: 14px; }
+.lead-enrichment-summary { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 8px; font-size: 13px; }
+.lead-enrichment-summary .needs-data { color: #876337; }
+.lead-enrichment-summary .has-data { color: #597263; }
+.lead-enrichment-item-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.lead-enrichment-item { padding: 20px 0 !important; }
+@media (max-width: 760px) { .lead-enrichment-bar { align-items: flex-start; flex-direction: column; padding: 16px; } }

@@ -321,3 +321,16 @@ def test_undated_offer_cannot_bypass_review_by_model_category(client, db, setup,
     assert result["status"] == "needs_review"
     assert result["menus"][0]["judgment"]["category"] == "offer"
     assert not list(db.scalars(select(MenuAsset)))
+
+
+def test_research_preserves_manual_website_when_different_candidate_found(client, db, setup):
+    lid, _ = setup
+    lead = db.get(Lead, uuid.UUID(lid))
+    lead.website_source = "人工确认"
+    db.commit()
+    result = run(client, lid)
+    db.expire_all()
+    assert lead.website == "https://old.example"
+    assert result["status"] == "needs_review"
+    assert "人工官网" in result["message"]
+    assert not list(db.scalars(select(MenuAsset)))

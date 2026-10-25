@@ -5,11 +5,25 @@ import json
 import os
 import time
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict
 from urllib.parse import urlsplit
 
 from app.core.config import get_settings
 from app.integrations import fetcher
+
+BYPASS = ContextVar("page_cache_bypass", default=False)
+
+
+@contextmanager
+def fresh_read(enabled: bool = True):
+    token = BYPASS.set(enabled)
+    try:
+        yield
+    finally:
+        BYPASS.reset(token)
+
 
 TTL = 3600
 MAX_ENTRIES = 500
@@ -21,7 +35,7 @@ def fetch(url: str, **kwargs) -> fetcher.FetchResult:
     if parsed.username or parsed.password:
         raise fetcher.FetchBlocked("不接受含凭证的 URL")
     # 测试 transport 不读写真实缓存；仅复用公开网页无查询参数请求。
-    if kwargs.get("transport") is not None or parsed.query:
+    if BYPASS.get() or kwargs.get("transport") is not None or parsed.query:
         return fetcher.fetch(url, **kwargs)
     fetcher.check_url(url, resolve=kwargs.get("resolve_check", True))
     directory = settings.data_dir / "page-cache"

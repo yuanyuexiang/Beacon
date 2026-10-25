@@ -266,9 +266,15 @@ def sync_fsa(
 # ---------- 补全：Overture ----------
 
 
-def batch_bbox(db: Session, batch: Batch, margin: float = 0.01) -> tuple[float, float, float, float] | None:
+def batch_bbox(
+    db: Session, batch: Batch, margin: float = 0.01, lead_ids: list[str] | None = None
+) -> tuple[float, float, float, float] | None:
     leads = list_leads(db, batch.id, None, None, 0)
-    pts = [(lead.lng, lead.lat) for lead in leads if lead.lat is not None and lead.lng is not None]
+    pts = [
+        (lead.lng, lead.lat)
+        for lead in leads
+        if lead.lat is not None and lead.lng is not None and (lead_ids is None or str(lead.id) in lead_ids)
+    ]
     if not pts:
         return None
     lons, lats = [p[0] for p in pts], [p[1] for p in pts]
@@ -276,7 +282,13 @@ def batch_bbox(db: Session, batch: Batch, margin: float = 0.01) -> tuple[float, 
 
 
 def enrich_overture(
-    db: Session, batch: Batch, max_m: float = 200, min_sim: float = 0.5, overwrite: bool = False, places=None
+    db: Session,
+    batch: Batch,
+    max_m: float = 200,
+    min_sim: float = 0.5,
+    overwrite: bool = False,
+    places=None,
+    lead_ids: list[str] | None = None,
 ) -> dict:
     """用 Overture Places 为批次内门店补官网/电话/社交。
     只填空缺（overwrite=False）；来源写入 website_source 与 raw.overture。"""
@@ -285,13 +297,15 @@ def enrich_overture(
     from app.core.config import get_settings
     from app.integrations import overture
 
-    bbox = batch_bbox(db, batch)
+    bbox = batch_bbox(db, batch, lead_ids=lead_ids)
     if bbox is None:
         return {"leads": 0, "matched": 0, "website_set": 0, "note": "批次内没有坐标"}
     if places is None:
         path = overture.ensure_places(bbox, get_settings().data_dir)
         places = overture.load_places(path)
     leads = list_leads(db, batch.id, None, None, 0)
+    if lead_ids is not None:
+        leads = [lead for lead in leads if str(lead.id) in lead_ids]
     matched = website_set = phone_set = 0
     now = datetime.now(UTC).isoformat(timespec="seconds")
     for lead in leads:

@@ -71,9 +71,10 @@ def resume_workflow(
 ):
     batch = service.get_batch_by_key(db, batch_key)
     task = db.get(workflows.Workflow, task_id)
-    if batch is None or task is None or task.batch_id != batch.id:
+    if batch is None or task is None or task.batch_id != batch.id or task.kind == "single":
         raise HTTPException(404, "任务不存在")
     with workflows.lock(db, batch):
+        workflows.ensure_no_single(db, batch)
         db.refresh(task)
         if task.status in {"completed", "cancelled"}:
             return task
@@ -93,9 +94,10 @@ def advance_workflow(
 ):
     batch = service.get_batch_by_key(db, batch_key)
     task = db.get(workflows.Workflow, task_id)
-    if batch is None or task is None or task.batch_id != batch.id:
+    if batch is None or task is None or task.batch_id != batch.id or task.kind == "single":
         raise HTTPException(404, "任务不存在")
     with workflows.lock(db, batch):
+        workflows.ensure_no_single(db, batch)
         result = workflows.advance(db, batch, task)
         audit.record(
             db, op, "advance_list_workflow", "list_workflow", task.id, after={"step": task.step, "status": task.status}
@@ -110,7 +112,7 @@ def cancel_workflow(
 ):
     batch = service.get_batch_by_key(db, batch_key)
     task = db.get(workflows.Workflow, task_id)
-    if batch is None or task is None or task.batch_id != batch.id:
+    if batch is None or task is None or task.batch_id != batch.id or task.kind == "single":
         raise HTTPException(404, "任务不存在")
     # 取消不能等待正在进行的外部网络请求所持有的名单锁。
     from sqlalchemy import update

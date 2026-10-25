@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_sessionmaker
 from app.core.models import Operator
 from app.modules.leads import workflows
-from app.modules.leads.models import Batch
+from app.modules.leads.models import Batch, Lead
 
 
 def tick(db: Session) -> bool:
@@ -33,10 +34,32 @@ def tick(db: Session) -> bool:
                 if task.status not in {"pending", "running"}:
                     continue
                 actor = db.scalar(select(Operator).where(Operator.username == task.started_by))
-                if not actor or not actor.is_active or actor.role not in {"admin", "director"}:
+                single = task.kind == "single"
+                lead = db.get(Lead, uuid.UUID(task.params["lead_ids"][0])) if single else None
+                member_allowed = bool(
+                    single and actor and lead and actor.role == "member" and lead.assigned_to == actor.username
+                )
+                if (
+                    not actor
+                    or not actor.is_active
+                    or actor.must_change_password
+                    or (single and lead is None)
+                    or (actor.role not in {"admin", "director"} and not member_allowed)
+                ):
                     task.status = "failed"
                     task.error = "发起人的管理权限已失效，请由管理员重新继续任务"
                     workflows.save_progress(db, task)
+                elif single:
+                    from app.modules.leads import enrichment
+
+                    if actor.role == "member":
+                        from app.core.access import set_scope
+
+                        set_scope(db, actor.username)
+                        scoped_task = db.get(workflows.Workflow, task.id)
+                        assert scoped_task is not None
+                        task = scoped_task
+                    enrichment.advance(db, batch, task, actor)
                 else:
                     workflows.advance(db, batch, task)
                 return True
