@@ -143,3 +143,5 @@ D73（2026-10-22）：Gmail 网页授权为主入口，分开发送与回复 met
 用户头像（2026-10-24）：个人账号上传／更换／恢复默认，缩略图存 PostgreSQL，迁移 `d174a0010001`。专项 `cd apps/api && uv run pytest tests/test_avatars.py tests/test_users.py tests/test_auth.py -q`；模拟 UI `uv run --project apps/api --extra maps-worker python scripts/verify_avatar_ui.py`，不修改真实用户。
 
 设置三栏（2026-10-24）：分类按需加载、内存草稿保护、授权返回定位；模拟回归 `uv run --project apps/api --extra maps-worker python scripts/verify_settings_navigation_ui.py`，不写真实配置或发送消息。
+
+2026-10-25 四轮优化：名单 `/resume` 持久化入队，API 生命周期后台线程推进，历史任务显式继续；HTML 缓存一小时／最多500项、AI调用记录；销售摘要、菜单提取质量、回复理解与跟进待确认文案。真实 Gmail 正文读取未开启。专项 `tests/test_workflow_worker.py tests/test_evidence_quality.py tests/test_sales_assistance.py`；模拟界面 `scripts/verify_sales_assistance_ui.py`、`scripts/verify_list_workflows_ui.py`。计划和边界见 `plan/system-optimization.md`。本地验证后由用户提交推送，不自动发送或发布。

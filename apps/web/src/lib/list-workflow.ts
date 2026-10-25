@@ -2,7 +2,7 @@ import { api } from "./api";
 export type ListWorkflow = {
   id: string; batch_id: string; kind: "create" | "enrich" | "append";
   status: "pending" | "running" | "failed" | "completed" | "cancelled";
-  step: number; steps: string[]; params: { phase?: "sync" | "review"; authority_name?: string; sample_n?: number | null; business_type_ids?: number[] };
+  step: number; steps: string[]; params: { background?: boolean; phase?: "sync" | "review"; authority_name?: string; sample_n?: number | null; business_type_ids?: number[] };
   results: Record<string, unknown>[]; error: string | null;
 };
 export const workflowBlocksActions = (task: ListWorkflow | null) => !!task && ["pending", "running"].includes(task.status);

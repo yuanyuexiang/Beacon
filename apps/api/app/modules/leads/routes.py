@@ -65,6 +65,28 @@ def start_workflow(
         return task
 
 
+@router.post("/batches/{batch_key}/workflow/{task_id}/resume", response_model=workflows.WorkflowOut)
+def resume_workflow(
+    batch_key: str, task_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
+):
+    batch = service.get_batch_by_key(db, batch_key)
+    task = db.get(workflows.Workflow, task_id)
+    if batch is None or task is None or task.batch_id != batch.id:
+        raise HTTPException(404, "任务不存在")
+    with workflows.lock(db, batch):
+        db.refresh(task)
+        if task.status in {"completed", "cancelled"}:
+            return task
+        # 失败状态保留到 advance，联系方式阶段才能只重试失败 job。
+        task.params = {**task.params, "background": True, "retry_requested": task.status == "failed"}
+        if task.status == "failed":
+            task.status = "pending"
+        task.started_by = op.username
+        audit.record(db, op, "resume_list_workflow", "list_workflow", task.id)
+        db.commit()
+        return task
+
+
 @router.post("/batches/{batch_key}/workflow/{task_id}/advance", response_model=workflows.WorkflowOut)
 def advance_workflow(
     batch_key: str, task_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)

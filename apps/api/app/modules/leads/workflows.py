@@ -180,7 +180,9 @@ def save_progress(db: Session, task: Workflow) -> None:
 def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
     if task.status in {"completed", "cancelled"}:
         return task
-    retry = task.status == "failed"
+    retry = task.status == "failed" or task.params.get("retry_requested", False)
+    if task.params.get("retry_requested"):
+        task.params = {**task.params, "retry_requested": False}
     task.status, task.error = "running", None
     save_progress(db, task)
     if task.status == "cancelled":

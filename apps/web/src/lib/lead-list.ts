@@ -19,3 +19,16 @@ export function leadNextAction(lead: { contact_count: number; communication_prog
   if (["missing", "failed"].includes(lead.list_summary?.menu_status || "")) return { text: "准备菜单询问", target: "prepare" };
   return { text: "选择渠道并准备文案", target: "prepare" };
 }
+
+/** 工作顺序，不是成交概率；停止触达的门店始终最后。 */
+export function leadPriority(lead: Parameters<typeof leadNextAction>[0]) {
+  const state = lead.communication_progress?.status;
+  if (state === "suppressed") return { rank: 9, reason: "已停止触达" };
+  if (state === "replied") return { rank: 0, reason: "客户已回复，优先处理" };
+  if (state === "pending") return { rank: 1, reason: "已有任务待确认执行" };
+  if (state === "paused") return { rank: 2, reason: "需处理暂停原因" };
+  if (state === "waiting_reply") return { rank: 6, reason: "等待回复，避免重复触达" };
+  if (lead.contact_count && lead.list_summary?.menu_status === "reviewed") return { rank: 3, reason: "联系方式与已核对菜单已具备" };
+  if (lead.contact_count) return { rank: 4, reason: "可继续准备文案" };
+  return { rank: 5, reason: "需先补充联系方式" };
+}

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { leadNextAction } from "../src/lib/lead-list";
+import { leadNextAction, leadPriority } from "../src/lib/lead-list";
 
 it("沟通状态优先于资料缺项，抑制和回复不能退回准备", () => {
   expect(leadNextAction({ contact_count: 0, communication_progress: { status: "suppressed" } })).toEqual({ text: "停止触达", target: "tasks" });
@@ -14,4 +14,9 @@ it("准备中按已选择的数据提示操作，不宣称可以发送", () => {
 it("没有菜单也能准备询问，已有分析指向核对", () => {
   expect(leadNextAction({ contact_count: 1, list_summary: { menu_status: "missing", channels: ["email"] } }).target).toBe("prepare");
   expect(leadNextAction({ contact_count: 1, list_summary: { menu_status: "needs_review", channels: [] } }).target).toBe("detail");
+});
+
+it("工作优先级先回复，拒收最后，不推断购买概率", () => {
+  expect(leadPriority({ contact_count: 0, communication_progress: { status: "replied" } }).rank).toBeLessThan(leadPriority({ contact_count: 1 }).rank);
+  expect(leadPriority({ contact_count: 10, communication_progress: { status: "suppressed" } }).rank).toBe(9);
 });

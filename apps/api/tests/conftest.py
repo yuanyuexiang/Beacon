@@ -19,6 +19,7 @@ TEST_URL = os.environ.get("BEACON_TEST_DATABASE_URL", "postgresql+psycopg://beac
 
 def pytest_configure() -> None:
     # 测试进程内固定配置：指向测试库与临时数据目录，避免读到开发 .env
+    os.environ["BEACON_WORKFLOW_WORKER_ENABLED"] = "false"
     os.environ["BEACON_DATABASE_URL"] = TEST_URL
     os.environ["BEACON_TEST_DATABASE_URL"] = TEST_URL
     os.environ.setdefault("BEACON_DATA_DIR", tempfile.mkdtemp(prefix="beacon-test-data-"))

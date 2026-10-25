@@ -1,6 +1,7 @@
 """FastAPI 入口。业务路由挂在 /api 下并要求登录；健康检查不要求登录。"""
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI, Request
@@ -38,7 +39,19 @@ async def lifespan(_: FastAPI):
     get_settings()
     with get_sessionmaker()() as db:
         bootstrap_operator(db)
-    yield
+    from app.modules.leads.worker import run
+
+    stop = threading.Event()
+    worker = None
+    if get_settings().workflow_worker_enabled:
+        worker = threading.Thread(target=run, args=(stop,), daemon=True, name="list-workflows")
+        worker.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        if worker:
+            worker.join(timeout=5)
 
 
 app = FastAPI(
@@ -127,6 +140,9 @@ protected.include_router(content_router)
 from app.modules.sales.workbench import router as communication_router  # noqa: E402
 
 protected.include_router(communication_router)
+from app.modules.sales.assistance import router as assistance_router  # noqa: E402
+
+protected.include_router(assistance_router)
 protected.include_router(sales_router)
 
 

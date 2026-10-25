@@ -8,7 +8,7 @@ import LeadAssignment from "@/components/LeadAssignment";
 import OutreachJourney from "@/components/OutreachJourney";
 import WebsiteReview, { ResearchLead } from "@/components/WebsiteReview";
 import PrepareOutreach from "@/components/PrepareOutreach";
-import { MENU_STATES, ListSummary, leadNextAction } from "@/lib/lead-list";
+import { MENU_STATES, ListSummary, leadNextAction, leadPriority } from "@/lib/lead-list";
 import { channelLabel } from "@/lib/format";
 import { PROGRESS, Progress, taskLink } from "@/lib/communication";
 import { useOperator } from "@/lib/auth";
@@ -109,11 +109,12 @@ function LeadsInner() {
   useEffect(() => { loadBatches(); }, [loadBatches]);
   useEffect(() => { loadLeads(batchKey); }, [batchKey, loadLeads]);
   useEffect(() => { router.replace(returnTo, { scroll: false }); }, [returnTo, router]);
+  const workflowRefresh = useRef("");
   const loadWorkflow = useCallback(async (key: string) => {
     const task = await api<ListWorkflow | null>(`/api/batches/${encodeURIComponent(key)}/workflow`);
-    if (activeKey.current === key) { setWorkflow(task); setWorkflowLoadError(false); }
+    if (activeKey.current === key) { setWorkflow(task); setWorkflowLoadError(false); const signature = task ? `${task.id}:${task.step}:${task.status}` : ""; if (signature !== workflowRefresh.current && task) { workflowRefresh.current = signature; loadLeads(key); } }
     return task;
-  }, []);
+  }, [loadLeads]);
   useEffect(() => {
     setWorkflow(null);
     setWorkflowLoadError(false);
@@ -141,13 +142,8 @@ function LeadsInner() {
     setBuildOpen(true);
     setWorkflow(task);
     try {
-      let next = task;
-      do {
-        next = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow/${next.id}/advance`, { method: "POST" });
-        if (!alive.current || activeKey.current !== key) break;
-        setWorkflow(next);
-        if (next.step === 1) await loadLeads(key);
-      } while (next.status === "pending");
+      const next = await api<ListWorkflow>(`/api/batches/${encodeURIComponent(key)}/workflow/${task.id}/resume`, { method: "POST" });
+      if (alive.current && activeKey.current === key) setWorkflow(next);
     } catch (e) {
       err(e as Error);
       await loadWorkflow(key).catch(() => {});
@@ -292,7 +288,7 @@ function LeadsInner() {
             { title: "门店", dataIndex: "name", width: 260, fixed: "left", render: (v, r) => <div><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link><div style={{ marginTop: 4, fontSize: 12, color: "#888" }}>{r.postcode || "邮编未登记"}{r.operating_type?.category && r.operating_type.category !== "unknown" && <Tag style={{ marginLeft: 8 }}>{({ restaurant: "餐厅", cafe: "咖啡馆", takeaway: "外卖店", pub: "Pub／酒吧", institution: "机构餐饮" } as Record<string, string>)[r.operating_type.category] || r.operating_type.category}</Tag>}{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</div></div>, sorter: (a, b) => a.name.localeCompare(b.name) },
             ...(["admin", "director"].includes(me?.role || "") ? [{ title: "负责人", width: 110, render: (_: unknown, r: Lead) => <UserIdentity username={r.assigned_to} /> }] : []),
             { title: "沟通进展", width: 120, render: (_, r) => <Tag color={r.communication_progress?.status === "suppressed" ? "red" : r.communication_progress?.status === "replied" ? "green" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag> },
-            { title: "下一步", width: 200, render: (_, r) => { const action = leadNextAction(r); return <Button type="link" size="small" disabled={!canWrite && action.target === "prepare"} onClick={() => { if (action.target === "tasks") router.push(taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })); else if (action.target === "prepare") { setPrepareLeadIds([r.id]); setPrepareOpen(true); } else router.push(`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}${action.target === "contacts" ? "#customer-contacts" : ""}`); }}>{action.text}</Button>; } },
+            { title: "下一步", width: 200, sorter: (a, b) => leadPriority(a).rank - leadPriority(b).rank, showSorterTooltip: { title: "按工作优先级排序：回复、待执行、待完善；不是成交概率" }, render: (_, r) => { const action = leadNextAction(r); return <Button type="link" size="small" disabled={!canWrite && action.target === "prepare"} onClick={() => { if (action.target === "tasks") router.push(taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })); else if (action.target === "prepare") { setPrepareLeadIds([r.id]); setPrepareOpen(true); } else router.push(`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}${action.target === "contacts" ? "#customer-contacts" : ""}`); }}>{action.text}</Button>; } },
             { title: "联系方式", width: 180, render: (_, r) => r.contact_count ? <div>{r.list_summary?.channels.map((c) => channelLabel(c)).join("／") || "已记录"}<div style={{ fontSize: 12, color: "#888" }}>{r.contact_count} 项 · 准入见详情</div></div> : <span className="beacon-muted">待补充</span> },
             { title: "菜单", width: 110, render: (_, r) => <Tag color={r.list_summary?.menu_status === "reviewed" ? "green" : undefined}>{MENU_STATES[r.list_summary?.menu_status || ""] || "待检查"}</Tag> },
             { title: "操作", width: 100, render: (_, r) => <Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`}>查看详情</Link> },
@@ -366,9 +362,9 @@ function LeadsInner() {
           ]} /> }]} />}
           {workflow.error && <Alert type="warning" showIcon message="部分数据未补齐，不影响名单使用" description={workflow.error.replace(/^ValueError:\s*/, "")} style={{ margin: "16px 0" }} />}
           {workflow.status === "completed" ? <Alert type="success" showIcon message="处理完成" description={workflow.params.phase === "sync" ? "名单可以使用。未完成的来源查询可再次同步；AI 核验与联系方式查找可在完善名单中单独启动。" : "请核对门店类型与联系方式，渠道准入仍需逐条确认。"} style={{ marginTop: 16 }} /> : workflow.status === "cancelled" ? <Alert type="info" message="任务已结束，已有结果保留" /> : <>
-            <p style={{ color: "#6b7280" }}>{workflow.status === "failed" ? "本次补充已停止。关闭面板即可继续操作名单；重试只处理未完成项。" : "关闭面板后本页会继续执行。刷新或离开页面后，可从保存的步骤继续；已完成步骤不重做。"}</p>
+            <p style={{ color: "#6b7280" }}>{workflow.status === "failed" ? "本次补充已停止。关闭面板即可继续操作名单；重试只处理未完成项。" : "任务由后台执行，关闭页面不影响处理。服务重启后从检查点恢复；已完成步骤不重做。"}</p>
             <Space>
-              <Button type="primary" loading={creating} disabled={!canWrite || creating || !!busy} onClick={() => executeWorkflow(batchKey!, workflow)}>{workflow.status === "failed" ? "重试未完成步骤" : "继续任务"}</Button>
+              <Button type="primary" loading={creating} disabled={!canWrite || creating || !!busy || (!!workflow.params.background && ["pending", "running"].includes(workflow.status))} onClick={() => executeWorkflow(batchKey!, workflow)}>{workflow.status === "failed" ? "重试未完成步骤" : "继续任务"}</Button>
               <Button disabled={!canWrite || cancelling} onClick={cancelWorkflow}>结束任务</Button>
             </Space>
           </>}

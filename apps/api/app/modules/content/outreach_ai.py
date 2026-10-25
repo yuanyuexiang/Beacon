@@ -89,37 +89,41 @@ def generate(task: dict) -> tuple[GeneratedMessage, str]:
     if get_settings().llm_provider != "deepseek":
         raise ProviderUnavailable("AI 起草需要已配置的真实 DeepSeek，未调用模板替代")
     provider = DeepSeekProvider()
-    try:
-        with httpx.Client(base_url=provider.base_url, timeout=90, transport=provider._transport) as client:
-            response = client.post(
-                "/chat/completions",
-                headers={"Authorization": f"Bearer {provider.key}"},
-                json={
-                    "model": provider.model,
-                    "thinking": {"type": "disabled"},
-                    "max_tokens": 2500,
-                    "response_format": {"type": "json_object"},
-                    "messages": [
-                        {"role": "system", "content": SYSTEM},
-                        {
-                            "role": "user",
-                            "content": json.dumps(
-                                {"data": task, "output_schema": GeneratedMessage.model_json_schema()},
-                                ensure_ascii=False,
-                            ),
-                        },
-                    ],
-                },
-            )
-        if response.status_code != 200:
-            raise ProviderUnavailable(f"AI 起草失败（HTTP {response.status_code}），已有消息未修改")
-        choice = response.json()["choices"][0]
-        if choice.get("finish_reason") != "stop":
-            raise ValueError("AI 输出不完整")
-        result = GeneratedMessage.model_validate_json(choice["message"]["content"])
-        return result, provider.model
-    except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
-        raise ProviderUnavailable("AI 起草暂不可用或输出不完整，已有消息未修改，请重试") from exc
+    from app.integrations.ai_observation import observe
+
+    with observe("outreach_message", provider.model, "outreach-1") as record:
+        try:
+            with httpx.Client(base_url=provider.base_url, timeout=90, transport=provider._transport) as client:
+                response = client.post(
+                    "/chat/completions",
+                    headers={"Authorization": f"Bearer {provider.key}"},
+                    json={
+                        "model": provider.model,
+                        "thinking": {"type": "disabled"},
+                        "max_tokens": 2500,
+                        "response_format": {"type": "json_object"},
+                        "messages": [
+                            {"role": "system", "content": SYSTEM},
+                            {
+                                "role": "user",
+                                "content": json.dumps(
+                                    {"data": task, "output_schema": GeneratedMessage.model_json_schema()},
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        ],
+                    },
+                )
+            if response.status_code != 200:
+                raise ProviderUnavailable(f"AI 起草失败（HTTP {response.status_code}），已有消息未修改")
+            record["usage"] = response.json().get("usage", {})
+            choice = response.json()["choices"][0]
+            if choice.get("finish_reason") != "stop":
+                raise ValueError("AI 输出不完整")
+            result = GeneratedMessage.model_validate_json(choice["message"]["content"])
+            return result, provider.model
+        except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+            raise ProviderUnavailable("AI 起草暂不可用或输出不完整，已有消息未修改，请重试") from exc
 
 
 def create(db: Session, lead: Lead, request: GenerateIn, by: str) -> ContentPiece:

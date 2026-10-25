@@ -100,74 +100,12 @@ async def handle(route):
             else:
                 tasks[key]["status"] = "cancelled"
                 result = tasks[key]
-        elif path.endswith("/advance"):
+        elif path.endswith("/resume"):
             t = tasks[key]
-            stage = t["steps"][t["step"]]
-            advances.append((key, t["id"], stage))
-            if hold:
-                t["status"] = "running"
-                await release.wait()
-            if stage == "overture" and fail_overture:
-                fail_overture = False
-                t.update(status="failed", error="模拟网络中断；已保存检查点")
-            else:
-                if stage == "pool":
-                    previous = len(leads[key])
-                    count = 3 if not previous else 2
-                    leads[key] += [
-                        {
-                            "id": str(i),
-                            "source_key": f"fsa:{i}",
-                            "name": f"Restaurant {i}",
-                            "postcode": "BN1",
-                            "website": None,
-                            "screening_class": "unchecked",
-                            "entity_status": "unknown",
-                            "contact_count": 0,
-                            "business_type_id": 1,
-                        }
-                        for i in range(previous, previous + count)
-                    ]
-                    for b in batches:
-                        if b["batch_key"] == key:
-                            b["candidate_count"] = len(leads[key])
-                    r = {
-                        "fetched": previous + count,
-                        "already_in_list": previous,
-                        "pool": count,
-                        "selected": count,
-                        "created": count,
-                        "linked": 0,
-                    }
-                elif stage == "overture":
-                    r = {
-                        "leads": len(leads[key]),
-                        "matched": 2,
-                        "website_set": 2,
-                        "phone_found": 1,
-                    }
-                elif stage == "google_sync":
-                    r = {"synced": 2, "retry": 1, "remaining": 1, "done": True, "note": "Google quota; list available"}
-                elif stage == "google":
-                    r = {"verified": 1, "review": 1, "failed": 0, "done": True}
-                elif stage == "screen":
-                    r = {"counts": {"unchecked": len(leads[key])}}
-                else:
-                    r = {
-                        "totals": {
-                            "succeeded": 2,
-                            "failed": 0,
-                            "pending": 0,
-                            "running": 0,
-                        }
-                    }
-                t["results"] = t["results"][: t["step"]] + [r]
-                t["step"] += 1
-                t.update(
-                    status="completed" if t["step"] == len(t["steps"]) else "pending",
-                    error=None,
-                )
+            t["params"]["background"] = True
+            t["status"] = "pending"
             result = copy.deepcopy(t)
+            asyncio.create_task(background(key))
         else:
             raise AssertionError(path)
     elif path == "/api/imports":
@@ -177,6 +115,80 @@ async def handle(route):
     await route.fulfill(
         status=status, content_type="application/json", body=json.dumps(result)
     )
+
+
+async def background(key):
+    global fail_overture
+    while tasks[key]["status"] in ("pending", "running"):
+        t = tasks[key]
+        stage = t["steps"][t["step"]]
+        advances.append((key, t["id"], stage))
+        if hold:
+            t["status"] = "running"
+            await release.wait()
+        if t["status"] == "cancelled":
+            return
+        if stage == "overture" and fail_overture:
+            fail_overture = False
+            t.update(status="failed", error="模拟网络中断；已保存检查点")
+        else:
+            if stage == "pool":
+                previous = len(leads[key])
+                count = 3 if not previous else 2
+                leads[key] += [
+                    {
+                        "id": str(i),
+                        "source_key": f"fsa:{i}",
+                        "name": f"Restaurant {i}",
+                        "postcode": "BN1",
+                        "website": None,
+                        "screening_class": "unchecked",
+                        "entity_status": "unknown",
+                        "contact_count": 0,
+                        "business_type_id": 1,
+                    }
+                    for i in range(previous, previous + count)
+                ]
+                for b in batches:
+                    if b["batch_key"] == key:
+                        b["candidate_count"] = len(leads[key])
+                r = {
+                    "fetched": previous + count,
+                    "already_in_list": previous,
+                    "pool": count,
+                    "selected": count,
+                    "created": count,
+                    "linked": 0,
+                }
+            elif stage == "overture":
+                r = {
+                    "leads": len(leads[key]),
+                    "matched": 2,
+                    "website_set": 2,
+                    "phone_found": 1,
+                }
+            elif stage == "google_sync":
+                r = {"synced": 2, "retry": 1, "remaining": 1, "done": True, "note": "Google quota; list available"}
+            elif stage == "google":
+                r = {"verified": 1, "review": 1, "failed": 0, "done": True}
+            elif stage == "screen":
+                r = {"counts": {"unchecked": len(leads[key])}}
+            else:
+                r = {
+                    "totals": {
+                        "succeeded": 2,
+                        "failed": 0,
+                        "pending": 0,
+                        "running": 0,
+                    }
+                }
+            t["results"] = t["results"][: t["step"]] + [r]
+            t["step"] += 1
+            t.update(
+                status="completed" if t["step"] == len(t["steps"]) else "pending",
+                error=None,
+            )
+        await asyncio.sleep(0.05)
 
 
 async def main():
@@ -257,7 +269,7 @@ async def main():
         await expect(
             page.get_by_role("button", name="删除批次", exact=True)
         ).to_be_disabled()
-        await expect(page.locator(".ant-select-disabled").first).to_be_visible()
+        # Switching lists no longer controls server execution.
         hold = False
         release.set()
         await page.get_by_text("处理完成", exact=True).wait_for()

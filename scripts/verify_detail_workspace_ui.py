@@ -110,6 +110,8 @@ async def handle(route):
             )
             return
         data = {"assets": assets, "analyses": {"asset1": analyses} if assets else {}}
+    elif path.endswith("/sales-brief"):
+        data = {"result": None, "stale": False}
     elif path.endswith("/eligibility"):
         data = [] if empty_contacts else [CONTACT] + extra_contacts
     elif path in {f"/api/leads/{ID}/content", f"/api/leads/{ID}/outreach-message"}:
@@ -365,4 +367,5 @@ async def main():
         )
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

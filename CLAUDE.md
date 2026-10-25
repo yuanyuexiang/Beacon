@@ -122,3 +122,5 @@ D73（2026-10-22）：网页 Gmail OAuth，设置页 Web 客户端向导／分�
 用户头像（2026-10-24）：个人账号上传／更换／恢复默认，缩略图存 PostgreSQL，迁移 `d174a0010001`。专项 `cd apps/api && uv run pytest tests/test_avatars.py tests/test_users.py tests/test_auth.py -q`；模拟 UI `uv run --project apps/api --extra maps-worker python scripts/verify_avatar_ui.py`，不修改真实用户。
 
 设置三栏（2026-10-24）：分类按需加载、内存草稿保护、授权返回定位；模拟回归 `uv run --project apps/api --extra maps-worker python scripts/verify_settings_navigation_ui.py`，不写真实配置或发送消息。
+
+2026-10-25 四轮优化参见 `plan/system-optimization.md`：名单开始后由 API 后台线程推进，浏览器只轮询，旧任务主动继续后入队。HTML 有界缓存、研究/消息 AI 调用记录、销售摘要与菜单质量、显式回复正文理解及待确认跟进草稿；未知和失败不伪装成功，Gmail 不读取未授权正文。专项与界面命令见 AGENTS.md。用户本地验收后自行提交部署。

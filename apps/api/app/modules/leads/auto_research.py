@@ -158,7 +158,9 @@ def fetch(url: str, document: bool = False):
     u = urlsplit(url)
     if u.username or u.password:
         raise ValueError("不接受含凭证的 URL")
-    return fetcher.fetch(
+    from app.integrations import page_cache
+
+    return (fetcher.fetch if document else page_cache.fetch)(
         url,
         max_bytes=s.max_asset_bytes if document else 2 * 1024 * 1024,
         timeout=min(s.fetch_timeout_seconds, 15),

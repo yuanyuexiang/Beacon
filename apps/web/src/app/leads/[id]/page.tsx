@@ -1,4 +1,5 @@
 "use client";
+import SalesAssistance from "@/components/SalesAssistance";
 import { UserIdentity } from "@/components/UserAvatar";
 import LeadAssignment, { AssignmentHistory } from "@/components/LeadAssignment";
 import { issueLabel, menuJourney } from "@/lib/menu-journey";
@@ -29,7 +30,7 @@ type Lead = { communication_progress?: Progress; list_summary?: ListSummary; con
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
 type Issue = { issue_code: string; fact: string; severity: string; confirmed: boolean | null; confirmed_by: string | null; note: string | null; deleted?: boolean; evidence: Record<string, unknown> };
-type Candidates = { pdf_links?: string[]; image_candidates?: { src: string; alt: string }[]; iframes?: string[] };
+type Candidates = { extraction_quality?: { warnings: string[]; item_numbers: number[]; note: string }; pdf_links?: string[]; image_candidates?: { src: string; alt: string }[]; iframes?: string[] };
 type Analysis = { id: string; version: number; parent_version: number | null; status: string; engine: string; engine_version: string | null; review_state: string | null; items: Item[] | null; issues: Issue[] | null; measurements: (Record<string, unknown> & Candidates) | null; error: string | null };
 type Elig = { auto_admission?: AutoAdmission | null; recommendation?: ContactAssessment | null; id: string; channel: string; contact_ref: string | null; contact_source: string | null; contact_usable: string; eligibility: string };
 type ContactCandidate = { assessment?: ContactAssessment; evidence?: { page_url: string; text: string }[]; kind: string; channel: string; value: string; sources: { type: string; ref: string }[]; personal: boolean; mobile: boolean; recorded: boolean; eligibility: string | null; suppressed: boolean };
@@ -165,7 +166,7 @@ export default function LeadDetail() {
       {Object.keys(sectionErrors).length > 0 && <Alert type="warning" showIcon message="部分资料未能加载，已读取的结果仍可使用" description={Object.entries(sectionErrors).map(([name, error]) => <div key={name}>{name}：{error}</div>)} action={<Button readOnlySafe onClick={() => void reload()}>重试加载</Button>} style={{ marginBottom: 16 }} />}
       {actionError && <Alert type="error" showIcon message={actionError} style={{ marginBottom: 16 }} />}
       <Tabs className="lead-workspace-tabs" activeKey={tab} onChange={setTab} items={[
-        { key: "sales", label: "销售准备", forceRender: true, children: <div className="lead-sales-grid"><Card id="customer-contacts" size="small" title={`联系方式${eligs.length ? ` · ${eligs.length}` : ""}`} extra={<Button size="small" onClick={() => { manualContactForm.resetFields(); setManualContactOpen(true); }}>手动添加</Button>}>
+        { key: "sales", label: "销售准备", forceRender: true, children: <div className="lead-sales-grid"><SalesAssistance key={id} leadId={id} onChanged={() => void reload()} /><Card id="customer-contacts" size="small" title={`联系方式${eligs.length ? ` · ${eligs.length}` : ""}`} extra={<Button size="small" onClick={() => { manualContactForm.resetFields(); setManualContactOpen(true); }}>手动添加</Button>}>
         {!eligs.length ? <div className="lead-contact-empty"><div className="lead-empty-icon">＠</div><Typography.Title level={5}>先找到合适的联系人</Typography.Title><Typography.Paragraph type="secondary">从官网查找邮箱、电话和社媒，也可以添加你已知的联系方式。</Typography.Paragraph><Button type="primary" loading={contactLoading} onClick={() => searchContacts()}>查找联系方式</Button>{!lead.website && <Button type="link" onClick={() => setTab("sources")}>补充官网</Button>}</div> : <>
           <div className="lead-contact-toolbar"><Button size="small" loading={contactLoading} onClick={() => searchContacts()}>查找联系方式</Button><Popover trigger="click" content={<Button loading={contactLoading} onClick={runAutoAdmission}>重新评估准入</Button>}><Button size="small" readOnlySafe>更多 ···</Button></Popover></div>
           {eligs.some((e) => e.recommendation?.recommendation === "recommended") && <Button readOnlySafe size="small" type="link" onClick={() => setContactFilter(!contactFilter)}>{contactFilter ? "仅看推荐" : `查看全部（${eligs.length}）`}</Button>}
@@ -254,6 +255,7 @@ export default function LeadDetail() {
                 </Form>
               ) : <Typography.Text type="secondary">已审核的版本不能再新增。</Typography.Text> },
             ]} /></Col></Row>
+            {!!an.measurements?.extraction_quality && <Alert style={{ marginBottom: 12 }} type="info" showIcon message="提取质量检查" description={<>{an.measurements.extraction_quality.warnings.map((warning, i) => <div key={i}>{warning}</div>)}{an.measurements.extraction_quality.item_numbers.length > 0 && <div>重点核对第 {an.measurements.extraction_quality.item_numbers.join("、")} 项</div>}<div>{an.measurements.extraction_quality.note}</div></>} />}
             <Collapse ghost size="small" items={[{ key: "analysis-details", label: `分析详情与历史版本（${analyses[a.id].length}）`, children: <><pre style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{JSON.stringify(an.measurements, null, 1)}</pre>{analyses[a.id].map((x) => <div key={x.id}>v{x.version} · {x.engine} · {label(x.status)} · {x.review_state === "reviewed" ? "事实已核对" : "未核对"}</div>)}</> }]} />
           </Card>
         );

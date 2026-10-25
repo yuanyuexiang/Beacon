@@ -112,6 +112,12 @@ def run_analysis(
         try:
             data = resolve_within(asset.storage_path).read_bytes()
             needs_model = asset.kind == AssetKind.image or (asset.kind == AssetKind.pdf and _pdf_has_no_text(data))
+            if not needs_model and get_settings().llm_provider == "deepseek":
+                probe = rules.analyze(asset.kind.value, data, asset.final_url or asset.source_url)
+                # 有文本却没有提取到条目才升级；菜单索引页仍交给链接发现，不误作菜单转录。
+                needs_model = not probe.items and not (
+                    probe.measurements.get("pdf_links") or probe.measurements.get("image_candidates")
+                )
         except Exception as exc:
             raise ValueError("菜单文件无法读取，请重新获取或上传有效文件") from exc
         if needs_model and get_provider().name == "fake":
@@ -166,6 +172,9 @@ def run_analysis(
             a.error = pr.notes
     except Exception as e:  # 解析异常：明确失败，不伪装成功
         a.status, a.error = AnalysisStatus.failed, f"{e.__class__.__name__}: {e}"
+    from app.modules.menus.quality import assess
+
+    a.measurements = {**(a.measurements or {}), "extraction_quality": assess(a.items or [])}
     db.commit()
     db.refresh(a)
     return a, True

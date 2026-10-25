@@ -13,7 +13,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.integrations import companies_house as ch
-from app.integrations import fetcher, website_entity
+from app.integrations import fetcher, page_cache, website_entity
 from app.modules.leads.models import Lead
 
 SOURCES = ["website_number", "website_name", "registered_postcode", "name_search"]  # 按可靠性排序
@@ -53,7 +53,7 @@ def site_fetch(transport: httpx.BaseTransport | None = None) -> Callable[[str], 
         for attempt in range(WEBSITE_ATTEMPTS):
             delay = 0.5 * (2**attempt)
             try:
-                result = fetcher.fetch(
+                result = page_cache.fetch(
                     url,
                     max_bytes=WEBSITE_MAX_BYTES,
                     timeout=min(WEBSITE_TIMEOUT, s.fetch_timeout_seconds),
