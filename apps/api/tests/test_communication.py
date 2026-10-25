@@ -200,3 +200,28 @@ def test_unsafe_manual_targets(channel, target):
 )
 def test_platform_targets(channel, target):
     assert manual_target(channel, target) == target
+
+
+def test_read_draft_rechecks_current_admission_without_creating_task(client, db):
+    from app.core.models import AuditLog
+    from app.modules.sales.models import ChannelEligibility, Eligibility
+    from tests.test_auth import make_operator
+    from tests.test_users import session
+
+    identity, _, _ = _ready(client, db)
+    e = _elig(client, identity, eligibility="unknown").json()
+    d = prepare(client, identity)["draft"]
+    assert d["blockers"]
+    before = len(list(db.scalars(select(AuditLog))))
+    endpoint = f"/api/communication/drafts/{d['id']}"
+    assert client.get(endpoint).json()["blockers"]
+    row = db.get(ChannelEligibility, uuid.UUID(e["id"]))
+    row.eligibility = Eligibility.allowed
+    db.commit()
+    assert client.get(endpoint).json()["blockers"] == []
+    assert len(list(db.scalars(select(AuditLog)))) == before
+    assert client.get(f"/api/tasks?lead_id={identity}").json() == []
+    other = make_operator(db, "unassigned-member")
+    other.role = "member"
+    db.commit()
+    assert session(other).get(endpoint).status_code == 404

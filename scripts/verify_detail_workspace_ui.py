@@ -98,6 +98,8 @@ async def handle(route):
         writes.append((method, path, body, url.query))
     if path == "/api/auth/me":
         data = {"id": "ui", "username": "ui", "role": role, "must_change_password": False}
+    elif path == "/api/outreach-identity":
+        data = {"sender_identity": "Alice\nExample Studio", "opt_out_text": "Please let me know if you would prefer not to hear from us again."}
     elif path == f"/api/leads/{ID}":
         if method == "PATCH":
             assert body.get("expected_website", website) == website
@@ -318,6 +320,13 @@ async def main():
 
         await page.get_by_text("发件身份与退出说明", exact=True).click()
         await page.get_by_label("发件身份", exact=True).fill("Test Company")
+        sender_box = await page.get_by_label("发件身份", exact=True).bounding_box()
+        optout_box = await page.get_by_label("退出说明", exact=True).bounding_box()
+        assert sender_box and optout_box and abs(sender_box["width"] - optout_box["width"]) < 2
+        assert sender_box["width"] > 500
+        await page.get_by_label("发件身份", exact=True).scroll_into_view_if_needed()
+        await page.wait_for_timeout(400)
+        await page.screenshot(path="data/devchecks/outreach-signature-layout.png")
         await page.get_by_text("发件身份与退出说明", exact=True).click()
         await page.get_by_role("button", name="AI 起草触达消息", exact=True).click()
         await expect(page.get_by_label("文案内容", exact=True)).to_have_value(re.compile("Could you share your menu"))

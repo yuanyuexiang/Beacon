@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, json } from "@/lib/api";
 import { ROLE_LABELS, useOperator } from "@/lib/auth";
 import { AvatarEditor } from "@/components/AvatarEditor";
+import PersonalOutreachIdentity from "@/components/PersonalOutreachIdentity";
 import { HeroBand } from "@/components/ui";
 
 export default function AccountPage() {
@@ -30,6 +31,7 @@ export default function AccountPage() {
         <Button type="primary" htmlType="submit" loading={pending === "profile"}>保存资料</Button>
       </Form>
     </Card>
+    {!me.must_change_password && <PersonalOutreachIdentity />}
     <Card title="修改密码">
       <Form form={passwordForm} layout="vertical" disabled={busy} onFinish={(v) => act("password", async () => { await api("/api/auth/password", json({ current_password: v.current_password, new_password: v.new_password })); passwordForm.resetFields(); await refresh(); setSuccess("密码已修改，其他登录会话已失效"); })} style={{ maxWidth: 440 }}>
         <Form.Item name="current_password" label={me.must_change_password ? "当前临时密码" : "当前密码"} rules={[{ required: true, message: "请输入当前密码" }]}><Input.Password autoComplete="current-password" /></Form.Item>

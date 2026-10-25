@@ -1,4 +1,5 @@
 "use client";
+import { useOutreachIdentity } from "@/lib/useOutreachIdentity";
 import { useEffect, useState } from "react";
 import { Alert, Card, Collapse, Input, Select, Space, Typography, message } from "antd";
 import Button from "@/components/AccessButton";
@@ -20,8 +21,7 @@ export default function SalesAssistance({ leadId, onChanged }: { leadId: string;
   const [reply, setReply] = useState<Reply>();
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [sender, setSender] = useState("");
-  const [optOut, setOptOut] = useState("Please let me know if you would prefer not to hear from us again.");
+  const { sender, setSender, optOut, setOptOut } = useOutreachIdentity();
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   useEffect(() => { let active = true; api<Brief>(`/api/leads/${leadId}/sales-brief`).then(r => { if (active) setBrief(r); }).catch(() => {}); return () => { active = false; }; }, [leadId]);
@@ -48,7 +48,7 @@ export default function SalesAssistance({ leadId, onChanged }: { leadId: string;
       <Select value={channel} onChange={setChannel} disabled={replyBusy} options={[{ value: "email", label: "邮件" }, { value: "facebook", label: "Facebook" }, { value: "instagram", label: "Instagram" }, { value: "linkedin", label: "LinkedIn" }, { value: "tiktok", label: "TikTok" }]} />
       <Input.TextArea value={body} onChange={e => { setBody(e.target.value); setReply(undefined); }} maxLength={12000} rows={4} disabled={replyBusy} placeholder="只粘贴本次客户回复，尽量去掉历史引用和签名" />
       <Button loading={replyBusy} disabled={body.trim().length < 5} onClick={understand}>记录回复并由 AI 分析</Button>
-      {reply && <><Alert type={reply.intent === "unsubscribe" || reply.intent === "reject" ? "warning" : "info"} message={intents[reply.intent]} description={reply.summary} /><Sources citations={reply.citations} /><Button loading={confirming} onClick={async () => { setConfirming(true); try { await api(`/api/leads/${leadId}/reply-confirm`, json({ event_id: reply.event_id })); setNotice("已确认意向并计入统计"); onChanged(); } catch (e) { setError((e as Error).message); } finally { setConfirming(false); } }}>确认意向并回填统计</Button>{reply.suggested_reply && <><Input.TextArea rows={4} value={reply.suggested_reply} readOnly /><Input aria-label="跟进发送身份" placeholder="发送身份／署名" value={sender} onChange={e => setSender(e.target.value)} /><Input aria-label="跟进退出说明" value={optOut} onChange={e => setOptOut(e.target.value)} /><Button loading={saving} disabled={!sender.trim() || !optOut.trim() || reply.intent === "unknown"} onClick={async () => { setSaving(true); try { await api(`/api/leads/${leadId}/reply-draft`, json({ event_id: reply.event_id, sender_identity: sender, opt_out_text: optOut })); setNotice("跟进草稿已保存，请在下方文案区核对并确认"); onChanged(); } catch (e) { setError((e as Error).message); } finally { setSaving(false); } }}>保存为待确认文案</Button><Button readOnlySafe onClick={() => navigator.clipboard.writeText(reply.suggested_reply).then(() => message.success("已复制，请粘贴到文案编辑区核对并确认")).catch(() => message.error("复制失败，请手动选择文字复制"))}>复制跟进建议</Button></>}</>}
+      {reply && <><Alert type={reply.intent === "unsubscribe" || reply.intent === "reject" ? "warning" : "info"} message={intents[reply.intent]} description={reply.summary} /><Sources citations={reply.citations} /><Button loading={confirming} onClick={async () => { setConfirming(true); try { await api(`/api/leads/${leadId}/reply-confirm`, json({ event_id: reply.event_id })); setNotice("已确认意向并计入统计"); onChanged(); } catch (e) { setError((e as Error).message); } finally { setConfirming(false); } }}>确认意向并回填统计</Button>{reply.suggested_reply && <><Input.TextArea rows={4} value={reply.suggested_reply} readOnly /><Input.TextArea rows={3} aria-label="跟进发送身份" placeholder="发送身份／署名" value={sender} onChange={e => setSender(e.target.value)} /><Input aria-label="跟进退出说明" value={optOut} onChange={e => setOptOut(e.target.value)} /><Button loading={saving} disabled={!sender.trim() || !optOut.trim() || reply.intent === "unknown"} onClick={async () => { setSaving(true); try { await api(`/api/leads/${leadId}/reply-draft`, json({ event_id: reply.event_id, sender_identity: sender, opt_out_text: optOut })); setNotice("跟进草稿已保存，请在下方文案区核对并确认"); onChanged(); } catch (e) { setError((e as Error).message); } finally { setSaving(false); } }}>保存为待确认文案</Button><Button readOnlySafe onClick={() => navigator.clipboard.writeText(reply.suggested_reply).then(() => message.success("已复制，请粘贴到文案编辑区核对并确认")).catch(() => message.error("复制失败，请手动选择文字复制"))}>复制跟进建议</Button></>}</>}
     </Space> }]} />
   </Card>;
 }

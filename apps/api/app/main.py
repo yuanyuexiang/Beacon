@@ -139,6 +139,9 @@ protected.include_router(website_search_router)
 protected.include_router(google_places_router)
 protected.include_router(menus_router)
 protected.include_router(maps_menu_router)
+from app.modules.content.profile_tools import router as profile_tools_router  # noqa: E402
+
+protected.include_router(profile_tools_router)
 protected.include_router(content_router)
 from app.modules.sales.workbench import router as communication_router  # noqa: E402
 

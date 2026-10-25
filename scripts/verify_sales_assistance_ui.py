@@ -43,6 +43,7 @@ async def main():
         await expect(page.get_by_role('button', name=re.compile('更新销售摘要'))).to_be_enabled()
         await expect(page.get_by_text('客户询问报价，需确认数量。', exact=True)).to_be_visible()
         await page.get_by_role('button', name='确认意向并回填统计', exact=True).click()
+        await expect(page.get_by_label('跟进发送身份', exact=True)).to_have_value('Alice\nExample Studio')
         await page.get_by_label('跟进发送身份', exact=True).fill('Example Company')
         await page.get_by_role('button', name='保存为待确认文案', exact=True).click()
         await expect(page.get_by_text('跟进草稿已保存，请在下方文案区核对并确认', exact=True)).to_be_visible()

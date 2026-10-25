@@ -574,6 +574,15 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
     return {"items": output}
 
 
+@router.get("/drafts/{draft_id}")
+def read_draft(draft_id: uuid.UUID, db: Session = Depends(get_db)):
+    d = db.get(Preparation, draft_id)
+    if not d:
+        raise HTTPException(404, "准备草稿不存在")
+    lead_or_404(db, d.lead_id)
+    return draft_public(db, d)
+
+
 @router.patch("/drafts/{draft_id}")
 def patch_draft(
     draft_id: uuid.UUID, body: DraftPatch, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
