@@ -190,6 +190,9 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
             )
         )
     )
+    email_records = {
+        d.task_id: d for d in db.scalars(select(EmailDelivery).where(EmailDelivery.task_id.in_([t.id for t in tasks])))
+    }
     conversation_ids = set(db.scalars(select(Conversation.lead_id).where(Conversation.lead_id.in_(identities))))
     for identity in identities:
         ts = [t for t in tasks if t.lead_id == identity]
@@ -204,6 +207,17 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
             state = "replied"
         elif active:
             state = "paused" if active.status == TaskStatus.paused else "pending"
+            if active.execution_mode == "gmail" and active.status != TaskStatus.paused:
+                delivery = email_records.get(active.id)
+                state = {
+                    "ready": "queued",
+                    "queued": "queued",
+                    "queued_paused": "paused",
+                    "sending": "sending",
+                    "failed": "send_failed",
+                    "blocked": "send_failed",
+                    "unknown": "send_unknown",
+                }.get(delivery.status if delivery else "", "awaiting_send")
         elif sent:
             state = "waiting_reply"
         elif ds:

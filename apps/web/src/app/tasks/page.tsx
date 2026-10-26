@@ -71,7 +71,7 @@ function TasksInner() {
   const act = async (work: () => Promise<void>) => { setBusy(true); setError(undefined); setSuccess(undefined); try { await work(); await refresh(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   const tasks = (context?.tasks || []).filter((t) => (!channel || t.channel === channel) && (!assigned || t.assigned_to === assigned) && (!group || t.preparation_group_id === group));
   const selectedTask = tasks.find((t) => t.id === sp.get("task")) || tasks.find((t) => ACTIVE.includes(t.status)) || tasks[0];
-  const inflight = (task: CommunicationTask) => activity.deliveries.some((d) => d.task_id === task.id && ["ready", "queued", "sending", "unknown", "sent"].includes(d.status));
+  const inflight = (task: CommunicationTask) => activity.deliveries.some((d) => d.task_id === task.id && ["ready", "queued", "queued_paused", "sending", "unknown", "sent"].includes(d.status));
   const openManual = async (task: CommunicationTask) => { const value = await api<ManualPreview>(`/api/communication/tasks/${task.id}/manual-open`, { method: "POST" }); setManual(value); sentForm.resetFields(); setConfirmed(false); navigate({ task: task.id }); };
   const rename = (id: string) => context?.lead.id === id ? context.lead.name : rows.find((r) => r.id === id)?.name || id;
   return <>
@@ -104,12 +104,17 @@ function TasksInner() {
                 <Typography.Paragraph type="secondary">负责人：{<UserIdentity username={t.assigned_to} />}{t.follow_up_at ? ` · 跟进提醒：${new Date(t.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
                 {t.status_reason && <Alert type="warning" message={t.status_reason} style={{ marginBottom: 12 }} />}
                 {inflight(t) && <Alert type="info" message="已有接口发送记录，请先核对排队、发送或未知结果，避免人工重复发送。" style={{ marginBottom: 12 }} />}
+                {t.execution_mode === "gmail" && (() => {
+                  const d = activity.deliveries.find(d => d.task_id === t.id && d.source === "gmail");
+                  const states: Record<string,string> = {preview:"待确认发送",expired:"需要重新预览确认",ready:"排队中",queued:"排队中",queued_paused:"已暂停",sending:"发送中",sent:"已发送",failed:"发送失败",blocked:"发送未完成",unknown:"发送结果待查询"};
+                  return <Alert style={{marginBottom:12}} type={d?.error ? "warning" : "info"} showIcon message={d ? states[d.status] || d.status : "待确认发送"} description={d?.error || (!d || ["preview","expired"].includes(d.status) ? "点击下方“预览发送／查看进度”，确认后发送。" : undefined)} />;
+                })()}
                 <Space wrap>
                   <Select aria-label={`任务执行方式-${t.id}`} style={{ width: 185 }} value={t.execution_mode} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={MODES.filter((m) => m.value === "manual" || (m.value === "gmail" && t.channel === "email") || (m.value === "social" && ["facebook", "instagram"].includes(t.channel)))} onChange={(execution_mode) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ execution_mode }, "PATCH")); })} />
                   <Select aria-label={`任务负责人-${t.id}`} allowClear placeholder="负责人" value={t.assigned_to || undefined} style={{ width: 145 }} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={owners.map((o) => ({ value: o.username, label: o.display_name || o.username }))} onChange={(assigned_to) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ assigned_to: assigned_to || null }, "PATCH")); })} />
                   <DatePicker showTime aria-label={`任务跟进提醒-${t.id}`} placeholder="提醒时间" value={t.follow_up_at ? dayjs(t.follow_up_at) : null} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} onChange={(v) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ follow_up_at: v?.toISOString() || null }, "PATCH")); })} />
                   {["pending", "opened"].includes(t.status) && t.execution_mode === "manual" && <Button disabled={busy || inflight(t)} onClick={() => act(() => openManual(t))}>开始人工执行</Button>}
-                  {t.execution_mode !== "manual" && <Button disabled={busy} onClick={() => { setApiTask(t); navigate({ task: t.id }); }}>查看接口预览与记录</Button>}
+                  {t.execution_mode !== "manual" && <Button disabled={busy} onClick={() => { setApiTask(t); navigate({ task: t.id }); }}>预览发送／查看进度</Button>}
                   {t.status === "paused" && <Button disabled={busy || inflight(t)} onClick={() => act(async () => { await api(`/api/tasks/${t.id}/resume`, json({ reason: "负责人查看回复后明确继续" })); setSuccess("已重新复核并恢复任务，尚未发送"); })}>核对后恢复</Button>}
                   {ACTIVE.includes(t.status) && <Button danger disabled={busy || inflight(t)} onClick={() => act(async () => { await api(`/api/tasks/${t.id}/cancel`, json({ reason: "负责人结束本次触达" })); })}>结束任务</Button>}
                 </Space>

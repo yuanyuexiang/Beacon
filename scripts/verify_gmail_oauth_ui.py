@@ -78,12 +78,14 @@ async def main():
         await expect(page.get_by_label("Web OAuth 客户端 JSON", exact=True)).to_have_value("")
         await expect(page.get_by_role("button", name="保存 Web 客户端", exact=True, include_hidden=True)).to_be_disabled()
         await expect(page.get_by_text("高级：导入已有 Desktop／Web 授权", exact=True)).to_have_count(0)
+        await page.get_by_text("高级设置 · 可选发送限额", exact=True).click()
+        await expect(page.get_by_label("允许发送", exact=True)).to_have_count(0)
         await page.get_by_label("滚动 24 小时限额", exact=True).fill("9")
         await page.get_by_role("button", name="刷新状态", exact=True).first.click()
         await expect(page.get_by_label("滚动 24 小时限额", exact=True)).to_have_value("9")
         await expect(page.get_by_role("button", name=re.compile(r"连接 Gmail$"))).to_be_enabled()
         await page.get_by_role("button", name=re.compile(r"连接 Gmail$")).click()
-        await expect(page.get_by_text("Gmail 已连接。发送已暂停，请核对邮箱后再开启。", exact=True)).to_be_visible()
+        await expect(page.get_by_text("Gmail 已连接，可预览并确认发送邮件。", exact=True)).to_be_visible()
         await expect(page.get_by_text("test@example.com", exact=True)).to_be_visible()
         await page.get_by_role("button", name=re.compile(r"开启／重新授权回复同步$")).click()
         await expect(page.get_by_text("已授权邮件头读取", exact=False)).to_be_visible()
@@ -94,6 +96,7 @@ async def main():
         await page.get_by_role("button", name="确认发送一封", exact=True).click()
         await expect(page.get_by_text("Gmail 已接受测试邮件，请检查收件箱或垃圾邮件。", exact=True)).to_be_visible()
         assert sum(path == "/api/gmail/test/send" for path, _ in writes) == 1
+        await page.get_by_text("高级设置 · 可选发送限额", exact=True).click()
         hold_check = True
         before_check = len(writes)
         await gmail_card.get_by_role("button", name=re.compile(r"检查连接$")).click()
@@ -101,7 +104,7 @@ async def main():
         card = page.locator(".ant-card").filter(has=page.get_by_text("Gmail 邮箱连接", exact=True)).first
         await expect(card.locator("button.ant-btn-loading")).to_have_count(1)
         await expect(gmail_card.get_by_role("button", name=re.compile(r"检查连接$"))).to_have_class(re.compile("ant-btn-loading"))
-        for button in ("重新连接 Gmail", "刷新状态", "断开并暂停发送", "保存发送设置"):
+        for button in ("重新连接 Gmail", "刷新状态", "断开并暂停发送", "保存限额"):
             await expect(page.get_by_role("button", name=button, exact=True)).to_be_disabled()
         assert len(writes) == before_check + 1 and writes[-1][0] == "/api/gmail/check"
         await gmail_card.get_by_role("button", name=re.compile(r"检查连接$")).evaluate("button => { button.click(); button.click(); }")

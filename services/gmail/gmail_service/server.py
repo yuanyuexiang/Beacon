@@ -108,6 +108,9 @@ def import_credentials(credentials: dict, token: dict | None) -> dict:
             directory / "connection.json",
             directory / "policy.json",
         ]
+        old_account = directory / "account.json"
+        old_email = json.loads(old_account.read_text()).get("email", "") if old_account.exists() else ""
+        account_changed = old_email.lower() != email.lower()
         previous = {p: p.read_bytes() if p.exists() else None for p in paths}
         try:
             core._private_write(core.credentials_path(), json.dumps(credentials))
@@ -115,7 +118,8 @@ def import_credentials(credentials: dict, token: dict | None) -> dict:
             core._private_write(directory / "account.json", json.dumps({"email": email}))
             core._private_write(directory / "connection.json", json.dumps({"connected": True}))
             set_policy({**policy(), "sending_enabled": False, "queue_enabled": False})
-            core._private_write(core.secret_path(), secrets.token_hex(32))
+            if account_changed or not core.secret_path().exists():
+                core._private_write(core.secret_path(), secrets.token_hex(32))
         except OSError:
             for path, content in previous.items():
                 if content is None:
@@ -126,7 +130,7 @@ def import_credentials(credentials: dict, token: dict | None) -> dict:
         (directory / "pending-credentials.json").unlink(missing_ok=True)
         with db() as conn:
             conn.execute("DELETE FROM oauth_sessions_v2")
-    return status()
+    return {**status(), "account_changed": account_changed}
 
 
 def safe_error(error: Exception) -> str:
@@ -280,8 +284,6 @@ def send(payload: dict, approval_token: str, key: str, *, test: bool = False) ->
     fingerprint = core._verify(normalized, approval_token)
     with LOCK, db() as conn:
         settings = policy()
-        if not test and not settings["sending_enabled"]:
-            raise HTTPException(409, "邮件发送已暂停")
         if len(normalized["to"]) != 1 or normalized["cc"] or normalized["bcc"]:
             raise HTTPException(400, "每个发送请求只允许一个客户邮箱")
         os.environ["GMAIL_DAILY_SEND_LIMIT"] = str(settings["daily_limit"])

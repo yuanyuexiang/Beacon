@@ -250,7 +250,7 @@ def check_gmail_in_flight(db: Session, t: ManualTask) -> None:
         raise SalesError("已有社媒消息排队、发送中或结果待确认；请在社媒记录中处理")
 
     row = db.scalar(select(EmailDelivery).where(EmailDelivery.task_id == t.id))
-    if row and row.status in {"ready", "queued", "sending", "unknown", "sent"}:
+    if row and row.status in {"ready", "queued", "queued_paused", "sending", "unknown", "sent"}:
         raise SalesError("已有 Gmail 邮件排队、发送中或结果待确认；请在邮件记录中处理")
 
 

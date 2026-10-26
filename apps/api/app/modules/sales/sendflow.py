@@ -80,12 +80,9 @@ def snapshot(db: Session, d: Preparation) -> dict:
     if d.execution_mode == "gmail":
         try:
             status = gmail_client.call("GET", "/auth/status")
-            policy = gmail_client.call("GET", "/policy")
             sender = status.get("email", "")
             if not status.get("connected") or not status.get("send_authorized") or not sender:
                 gaps.append("请先连接 Gmail 发件邮箱")
-            elif not policy.get("sending_enabled"):
-                gaps.append("Gmail 发送已暂停，请在设置中开启")
         except gmail_client.GmailServiceError:
             gaps.append("Gmail 服务暂不可用，请稍后重试")
     elif d.execution_mode == "social":

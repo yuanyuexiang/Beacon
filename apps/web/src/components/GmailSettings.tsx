@@ -1,5 +1,5 @@
 "use client";
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Space, Switch, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Modal, Space, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsDraft, useSettingsStatus } from "./SettingsState";
 import { api, json } from "@/lib/api";
@@ -48,7 +48,7 @@ export default function GmailSettings() {
   useEffect(() => {
     refresh().catch((e) => setError(e.message));
     const params = new URLSearchParams(window.location.search);
-    if (params.get("gmail") === "connected") setNotice("Gmail 已连接。发送已暂停，请核对邮箱后再开启。");
+    if (params.get("gmail") === "connected") setNotice("Gmail 已连接，可预览并确认发送邮件。");
     if (params.get("gmail") === "failed") setError(ERRORS[params.get("gmail_error") || "oauth_failed"] || ERRORS.oauth_failed);
   }, [refresh]);
   const act = async (action: Action, work: () => Promise<void>) => {
@@ -116,13 +116,14 @@ export default function GmailSettings() {
         <p>主题：{testPreview?.subject}</p><p style={{whiteSpace:"pre-wrap"}}>{testPreview?.body}</p>
       </Modal>
     </div>
-        <Form form={form} layout="inline" onValuesChange={() => { policyDirty.current = true; setPolicyChanged(true); }} initialValues={{ sending_enabled: false, queue_enabled: false, daily_limit: 0 }} onFinish={(values) => act("policy", async () => { await api("/api/gmail/policy", json(values, "PUT")); policyDirty.current = false; setPolicyChanged(false); await refresh(); setNotice("发送设置已保存。"); })} style={{ margin: "20px 0 12px", rowGap: 8 }}>
-      <Form.Item name="sending_enabled" label="允许发送" valuePropName="checked"><Switch disabled={activeAction === "policy" || !status?.connected || !status?.send_authorized} /></Form.Item>
-      <Form.Item name="queue_enabled" label="运行批量队列" valuePropName="checked"><Switch disabled={activeAction === "policy" || !status?.connected || !status?.send_authorized} /></Form.Item>
-      <Form.Item name="daily_limit" label="滚动 24 小时限额"><InputNumber disabled={activeAction === "policy"} min={0} max={100000} precision={0} /></Form.Item>
-      <Button htmlType="submit" loading={activeAction === "policy"} disabled={blocked("policy") || !status?.policy}>保存发送设置</Button>
-    </Form>
-    <Typography.Paragraph type="secondary">连接成功不会自动发送。首次建议限额 1、批量队列关闭；逐封预览并确认后执行。0 表示不设本地限额。</Typography.Paragraph>
+    <details style={{margin: "20px 0"}}><summary>高级设置 · 可选发送限额</summary>
+      <Form form={form} layout="inline" onValuesChange={() => { policyDirty.current = true; setPolicyChanged(true); }} initialValues={{ daily_limit: 0 }} onFinish={(values) => act("policy", async () => { await api("/api/gmail/policy", json({...status?.policy, daily_limit: values.daily_limit}, "PUT")); policyDirty.current = false; setPolicyChanged(false); await refresh(); setNotice("发送限额已保存。"); })} style={{ marginTop: 16, rowGap: 8 }}>
+        <Form.Item name="daily_limit" label="滚动 24 小时限额"><InputNumber disabled={activeAction === "policy"} min={0} max={100000} precision={0} /></Form.Item>
+        <Button htmlType="submit" loading={activeAction === "policy"} disabled={blocked("policy") || !status?.policy}>保存限额</Button>
+      </Form>
+      <Typography.Paragraph type="secondary">0 表示不设系统额外限额；Google 自身发送额度仍适用。已有自定义限额会保留。</Typography.Paragraph>
+    </details>
+    <Typography.Paragraph type="secondary">邮箱连接后，在门店或任务中预览并确认即可发送。批量发送可在发送记录中暂停或继续。</Typography.Paragraph>
 
     <details open={!!status?.configured && !web}><summary>管理员首次配置／更换 Web 客户端</summary>
       <Typography.Paragraph>在 Google 项目中启用 Gmail API，创建 Web application 客户端，登记以下回调地址后下载 JSON。测试中的项目还需添加登录账号为测试用户。本地与云端建议使用不同客户端。</Typography.Paragraph>

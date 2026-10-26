@@ -70,3 +70,22 @@ def test_settings_test_mail_forwarded_without_creating_customer_task(client, db,
     assert (
         client.post("/api/gmail/test/preview", json={"to": ["one@example.com", "two@example.com"]}).status_code == 422
     )
+
+
+def test_same_account_callback_preserves_previews(client, db, monkeypatch):
+    from app.modules.gmail import routes
+
+    login(client, db)
+    invalidations = []
+    monkeypatch.setattr(routes, "invalidate_previews", lambda db: invalidations.append(True))
+
+    def call(method, path, body=None):
+        if path == "/auth/start":
+            return {"url": "https://accounts.google.com/authorization-test"}
+        return {"connected": True, "account_changed": False}
+
+    monkeypatch.setattr(gmail_client, "call", call)
+    client.post("/api/gmail/connect", json={})
+    response = client.get("/api/gmail/oauth/callback?state=mock&code=private-code", follow_redirects=False)
+    assert response.headers["location"] == "/settings?gmail=connected"
+    assert not invalidations

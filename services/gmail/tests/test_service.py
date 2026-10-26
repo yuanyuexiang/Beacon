@@ -76,8 +76,7 @@ def test_import_rejects_non_google_endpoints_and_missing_refresh(setup):
 def test_default_paused_approval_binding_and_idempotency(setup, monkeypatch):
     token = setup.post("/preview", headers=AUTH, json=MAIL).json()["approval_token"]
     payload = {**MAIL, "approval_token": token, "request_key": "qa"}
-    assert setup.post("/send", headers=AUTH, json=payload).status_code == 409
-    setup.put("/policy", headers=AUTH, json={"sending_enabled": True})
+    # Explicit approved send does not require a second settings switch.
     count = []
 
     def fake_send(mail, approval):
@@ -231,3 +230,16 @@ def test_send_rejection_reason_retained_and_private_response_omitted(setup, monk
     assert "HTTP 403" in result["reason"] and "启用 Gmail API" in result["reason"]
     assert "private" not in str(result)
     assert setup.post("/test/send", headers=AUTH, json=body).json() == result
+
+
+def test_same_account_reconnect_keeps_preview_signature(setup, monkeypatch):
+    first = setup.post("/auth/import", headers=AUTH, json={"credentials": CREDENTIALS, "token": TOKEN})
+    assert first.status_code == 200
+    secret = core.secret_path().read_bytes()
+    again = setup.post("/auth/import", headers=AUTH, json={"credentials": CREDENTIALS, "token": TOKEN})
+    assert again.json()["account_changed"] is False
+    assert core.secret_path().read_bytes() == secret
+    monkeypatch.setattr(server.oauth, "validate_token", lambda *a: (TOKEN, "different@example.com"))
+    changed = setup.post("/auth/import", headers=AUTH, json={"credentials": CREDENTIALS, "token": TOKEN})
+    assert changed.json()["account_changed"] is True
+    assert core.secret_path().read_bytes() != secret

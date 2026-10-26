@@ -122,9 +122,6 @@ def recheck(db: Session, delivery: EmailDelivery) -> ManualTask:
 
 def approve(db: Session, ids: list[uuid.UUID], op: Operator, queued: bool, preview_keys: dict[str, str]) -> list[dict]:
     db.execute(text(f"select pg_advisory_xact_lock({LOCK_KEY})"))
-    policy = client.call("GET", "/policy")
-    if not policy["sending_enabled"]:
-        raise sales.SalesError("请先在设置中开启 Gmail 发送")
     rows = []
     for did in sorted(ids):
         delivery = db.scalar(select(EmailDelivery).where(EmailDelivery.id == did).with_for_update())
@@ -135,6 +132,7 @@ def approve(db: Session, ids: list[uuid.UUID], op: Operator, queued: bool, previ
         recheck(db, delivery)
         rows.append(delivery)
     for delivery in rows:
+        delivery.payload = {**delivery.payload, "_dispatch_v2": True}
         delivery.status = "queued" if queued else "ready"
         delivery.approved_by, delivery.approved_at = op.username, now()
         audit.record(
@@ -194,8 +192,9 @@ def send_one(db: Session, delivery_id: uuid.UUID) -> dict:
         result = public(delivery) if delivery else {"status": "not_found"}
         db.commit()
         return result
-    policy = client.call("GET", "/policy")
-    if not policy["sending_enabled"] or (delivery.status == "queued" and not policy["queue_enabled"]):
+    if not delivery.payload.get("_dispatch_v2"):
+        delivery.status = "queued_paused"
+        delivery.last_error = "历史暂停邮件；点击继续发送后执行"
         result = public(delivery)
         db.commit()
         return result
@@ -230,7 +229,11 @@ def send_one(db: Session, delivery_id: uuid.UUID) -> dict:
         result = client.call(
             "POST",
             "/send",
-            {**delivery.payload, "approval_token": delivery.approval_token, "request_key": delivery.request_key},
+            {
+                **{k: v for k, v in delivery.payload.items() if not k.startswith("_")},
+                "approval_token": delivery.approval_token,
+                "request_key": delivery.request_key,
+            },
         )
     except client.GmailServiceError:
         # 可能远端已经接收；不将网络错误当成未发送。

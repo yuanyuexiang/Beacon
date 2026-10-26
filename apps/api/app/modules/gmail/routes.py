@@ -50,7 +50,7 @@ class ImportIn(BaseModel):
 def invalidate_previews(db: Session) -> None:
     db.execute(
         update(EmailDelivery)
-        .where(EmailDelivery.status.in_(["preview", "ready", "queued"]))
+        .where(EmailDelivery.status.in_(["preview", "ready", "queued", "queued_paused"]))
         .values(
             status="expired",
             approved_by=None,
@@ -63,7 +63,7 @@ def invalidate_previews(db: Session) -> None:
 @router.post("/credentials")
 def credentials(body: ImportIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
     result = error_handler(lambda: client.call("POST", "/auth/import", body.model_dump()))
-    if body.token is not None:
+    if body.token is not None and result.get("account_changed", True):
         invalidate_previews(db)
     audit.record(
         db, op, "import_gmail_auth", "gmail_account", "default", after={"token_imported": body.token is not None}
@@ -121,7 +121,7 @@ def callback(request: Request, db: Session = Depends(get_db)):
         nonce = request.cookies.get("beacon_gmail_oauth")
         if op.role != "admin" or not nonce:
             raise HTTPException(403, "授权会话不匹配")
-        client.call(
+        connection = client.call(
             "POST",
             "/auth/callback",
             {
@@ -132,7 +132,8 @@ def callback(request: Request, db: Session = Depends(get_db)):
             },
         )
         result = "connected"
-        invalidate_previews(db)
+        if connection.get("account_changed", True):
+            invalidate_previews(db)
         audit.record(db, op, "connect_gmail", "gmail_account", "default")
         db.commit()
     except (client.GmailServiceError, HTTPException) as exc:
@@ -237,7 +238,7 @@ def approve(body: ApproveIn, db: Session = Depends(get_db), op: Operator = Depen
 @router.post("/deliveries/{delivery_id}/cancel")
 def cancel(delivery_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
     row = db.scalar(select(EmailDelivery).where(EmailDelivery.id == delivery_id).with_for_update())
-    if not row or row.status not in {"preview", "ready", "queued", "blocked", "expired"}:
+    if not row or row.status not in {"preview", "ready", "queued", "queued_paused", "blocked", "expired"}:
         raise HTTPException(409, "已开始发送或结果未知的邮件不能取消")
     row.status = "cancelled"
     row.approval_token = None
@@ -287,3 +288,34 @@ def test_send(body: TestSendIn, db: Session = Depends(get_db), op: Operator = De
     )
     db.commit()
     return result
+
+
+@router.post("/deliveries/{delivery_id}/pause")
+def pause_delivery(delivery_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
+    db.execute(text(f"select pg_advisory_xact_lock({service.LOCK_KEY})"))
+    row = db.scalar(select(EmailDelivery).where(EmailDelivery.id == delivery_id).with_for_update())
+    if not row or row.status not in {"ready", "queued"}:
+        raise HTTPException(409, "邮件已开始发送或不在队列中，请刷新状态")
+    row.status = "queued_paused"
+    audit.record(db, op, "pause_gmail_delivery", "email_delivery", row.id)
+    db.commit()
+    return service.public(row)
+
+
+@router.post("/deliveries/{delivery_id}/resume")
+def resume_delivery(delivery_id: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
+    db.execute(text(f"select pg_advisory_xact_lock({service.LOCK_KEY})"))
+    row = db.scalar(select(EmailDelivery).where(EmailDelivery.id == delivery_id).with_for_update())
+    if not row or row.status not in {"queued_paused", "queued", "ready"}:
+        raise HTTPException(409, "此邮件不能继续发送，请重新预览")
+    try:
+        service.recheck(db, row)
+    except SalesError as exc:
+        raise HTTPException(409, str(exc)) from None
+    row.payload = {**row.payload, "_dispatch_v2": True}
+    row.approved_by = op.username
+    row.status = "queued"
+    row.last_error = None
+    audit.record(db, op, "resume_gmail_delivery", "email_delivery", row.id)
+    db.commit()
+    return service.public(row)

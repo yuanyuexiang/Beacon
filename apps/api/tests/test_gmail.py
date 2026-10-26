@@ -101,7 +101,7 @@ def test_queue_paused_expiry_cancel_and_recipient_change(client, db, setup):
     task, calls, policy = setup
     delivery = preview(client, task)
     approve(client, delivery, queued=True)
-    policy["queue_enabled"] = False
+    assert client.post(f"/api/gmail/deliveries/{delivery['id']}/pause").status_code == 200
     service.tick(db)
     assert not any(path == "/send" for _, path, _ in calls)
     assert client.post(f"/api/gmail/deliveries/{delivery['id']}/cancel").status_code == 200
@@ -248,9 +248,7 @@ def test_batch_confirmation_is_atomic_and_queue_can_pause(client, db, setup):
     )
     assert response.status_code == 200
     policy["sending_enabled"] = False
-    service.tick(db)
-    assert not any(path == "/send" for _, path, _ in calls)
-    policy["sending_enabled"] = True
+    policy["queue_enabled"] = False
     service.tick(db)
     service.tick(db)
     assert sum(path == "/send" for _, path, _ in calls) == 2
@@ -313,4 +311,31 @@ def test_reconnect_expires_unsent_preview_and_preserves_task(client, db, setup, 
     rows = client.get("/api/gmail/deliveries").json()
     assert next(r for r in rows if r["id"] == delivery["id"])["status"] == "expired"
     assert db.get(ManualTask, uuid.UUID(task["id"])).status.value == "pending"
+    assert not any(path == "/send" for _, path, _ in calls)
+
+
+def test_explicit_pause_resume_and_legacy_switches(client, db, setup):
+    task, calls, policy = setup
+    policy.update(sending_enabled=False, queue_enabled=False)
+    delivery = preview(client, task)
+    assert approve(client, delivery, queued=True).status_code == 200
+    assert client.post(f"/api/gmail/deliveries/{delivery['id']}/pause").status_code == 200
+    service.tick(db)
+    assert not any(path == "/send" for _, path, _ in calls)
+    assert client.post(f"/api/gmail/deliveries/{delivery['id']}/resume").status_code == 200
+    service.tick(db)
+    assert sum(path == "/send" for _, path, _ in calls) == 1
+    assert client.post(f"/api/gmail/deliveries/{delivery['id']}/resume").status_code == 409
+
+
+def test_legacy_ready_does_not_send_on_upgrade(client, db, setup):
+    task, calls, policy = setup
+    delivery = preview(client, task)
+    approve(client, delivery)
+    row = db.get(EmailDelivery, uuid.UUID(delivery["id"]))
+    row.payload = {k: v for k, v in row.payload.items() if k != "_dispatch_v2"}
+    db.commit()
+    service.tick(db)
+    db.refresh(row)
+    assert row.status == "queued_paused"
     assert not any(path == "/send" for _, path, _ in calls)

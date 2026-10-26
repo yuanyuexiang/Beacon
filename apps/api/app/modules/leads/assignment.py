@@ -142,7 +142,7 @@ def transfer(db: Session, lead: Lead, target: str | None, by: Operator, reason: 
         raise HTTPException(409, "该门店有发送中或结果未知记录，完成对账后才能交接")
     before = lead.assigned_to
     for d in deliveries:
-        if d.status in {"preview", "ready", "queued", "blocked", "expired"}:
+        if d.status in {"preview", "ready", "queued", "queued_paused", "blocked", "expired"}:
             d.status, d.approval_token = "cancelled", None
     for t in tasks:
         if t.status in {TaskStatus.pending, TaskStatus.opened, TaskStatus.paused}:
