@@ -128,3 +128,5 @@ D73（2026-10-22）：网页 Gmail OAuth，设置页 Web 客户端向导／分�
 2026-10-25 单家持续完善：批量后的门店详情可继续补缺或按项重新更新，顶部紧凑概览与抽屉操作，后台队列恢复、复用批量进度、人工结果保护与单项失败分流。操作与验证命令见 AGENTS.md／操作手册。无迁移、不自动发送或发布。
 
 2026-10-25 英国客户服务资料：中文事实、确认过的英文品牌及署名，en-GB 首触达和跟进；AI 整理需采用后保存，示例只预览。个人英文署名位于个人账号，按当前用户隔离，复用到新消息。无迁移，验证命令见 AGENTS.md，操作见 docs/客户沟通工作台.md。
+
+2026-10-26 全渠道联系条件：将联系人事实、业务推荐、联系依据与 API 执行能力分开；新增明确加入／移出准备待办，缺项不阻止保存。详情、准备与沟通页共用结构化核对；客户请求回复绑定已确认内容 ID/hash，发送前复核依据／到期／抑制。AI 邮件规则 v3 支持有原文证明的职务邮箱，不以免费域名直接否决；人工记录保护。迁移 `d176a0010001`；专项 `tests/test_channel_conditions.py tests/test_admission.py tests/test_communication.py`，模拟 UI `scripts/verify_channel_conditions_ui.py`、`scripts/verify_communication_ui.py`。计划见 [全渠道联系条件](plan/channel-conditions.md)。不新增 WhatsApp／TikTok／LinkedIn API 或 TPS 服务，不自动发送；本地验收后由用户自行提交推送。

@@ -2,6 +2,7 @@
 import { useOutreachIdentity } from "@/lib/useOutreachIdentity";
 import { Alert, Card, Checkbox, Collapse, DatePicker, Drawer, Form, Input, Select, Space, Table, Tag, Typography } from "antd";
 import Button from "@/components/AccessButton";
+import ChannelConditions from "./ChannelConditions";
 import ContactReviewActions from "./ContactReviewActions";
 import OutreachJourney from "@/components/OutreachJourney";
 import Link from "next/link";
@@ -73,6 +74,7 @@ function DraftEditor({ draft, assignees, returnTo, sender, optOut, preferredAnal
       <Button readOnlySafe disabled={busy} onClick={() => act(refreshDraft)}>重新检查创建条件</Button>
     </Space></>} style={{ marginBottom: 12 }} />}
     {admissionNotice && <Alert type="info" showIcon message={admissionNotice} style={{ marginBottom: 12 }} />}
+    <Space wrap style={{marginBottom:12}}><Button disabled={busy || readOnly} onClick={() => act(() => patch({ queued: !draft.queued }))}>{draft.queued ? "移出准备待办" : "加入准备待办"}</Button><Typography.Text type="secondary">可先安排负责人和提醒，缺项不会阻止加入待办。</Typography.Text>{draft.queued && <Link href={taskLink({lead:draft.lead_id, returnTo})}>查看沟通待办</Link>}</Space>
     <Collapse size="small" style={{ marginBottom: 12 }} items={[{ key: "execution", label: `执行安排 · ${choices.find((c) => c.value === draft.execution_mode)?.label || "人工执行"}${draft.assigned_to ? ` · ${draft.assigned_to}` : ""}`, children: <Space wrap>
       <Select aria-label="执行方式" value={draft.execution_mode} style={{ width: 210 }} disabled={busy || readOnly} options={choices} onChange={(execution_mode) => act(() => patch({ execution_mode }))} />
       <Select aria-label="负责人" allowClear value={draft.assigned_to || undefined} style={{ width: 170 }} placeholder="负责人" disabled={busy || readOnly} options={assignees.map((a) => ({ value: a.username, label: a.display_name || a.username }))} onChange={(assigned_to) => act(() => patch({ assigned_to: assigned_to || null }))} />
@@ -84,14 +86,20 @@ function DraftEditor({ draft, assignees, returnTo, sender, optOut, preferredAnal
       <Form.Item hidden={!draft.context.contents.length}><Collapse size="small" items={[{ key: "history", label: `历史消息（${draft.context.contents.length}）`, children: <Select allowClear placeholder="选择已有消息" value={draft.content_id || undefined} options={draft.context.contents.map((c) => ({ value: c.id, label: `${c.mode === "menu_inquiry" ? "询问菜单／负责人" : "菜单合作消息"} v${c.version} · ${c.approved ? "审批有效" : c.reason || "待审批"}` }))} onChange={(content_id) => act(() => patch({ content_id: content_id || null }))} disabled={busy || readOnly} style={{ width: "100%" }} /> }]} /></Form.Item>
     </Form>
     <Collapse activeKey={sections} onChange={keys => setSections(typeof keys === "string" ? [keys] : keys)} items={[
-      { key: "eligibility", label: "补充联系方式／人工核对渠道准入", children: <Form form={contactForm} layout="vertical" disabled={busy || readOnly} onFinish={(v) => act(async () => { const recorded = await api<{ id: string }>(`/api/leads/${draft.lead_id}/eligibility`, json({ ...v, channel: draft.channel, review_due_at: v.review_due_at?.toISOString() || null })); await patch({ eligibility_id: recorded.id }); })}>
-        <Alert type="info" showIcon message="记录联系方式不等于允许联系。准入允许时必须填写真实证据与规则版本；系统不会代替你授权。" style={{ marginBottom: 12 }} />
-        <Form.Item name="contact_ref" label="邮箱／平台主页" rules={[{ required: true }]}><Input /></Form.Item>
-        <Form.Item name="contact_source" label="来源"><Input /></Form.Item>
-        <Space align="start"><Form.Item name="contact_usable" label="联系方式可用性"><Select style={{ width: 140 }} options={[{ value: "unknown", label: "未知" }, { value: "valid", label: "有效" }, { value: "invalid", label: "无效" }]} /></Form.Item><Form.Item name="eligibility" label="渠道准入"><Select style={{ width: 150 }} options={[{ value: "unknown", label: "待核对" }, { value: "allowed", label: "允许" }, { value: "blocked", label: "禁止" }]} /></Form.Item></Space>
-        <Form.Item name="rule_version" label="准入规则版本"><Input /></Form.Item><Form.Item name="evidence" label="准入证据"><Input.TextArea rows={2} /></Form.Item>
-        <Form.Item name="review_due_at" label="复核到期时间"><DatePicker showTime /></Form.Item><Button htmlType="submit" loading={busy}>保存联系方式与准入</Button>
-      </Form> },
+      { key: "eligibility", label: "补充联系方式与联系条件", children: <>
+        {contact && <ChannelConditions leadId={draft.lead_id} contactId={contact.id} contact={contact.contact_ref} busy={busy || readOnly} onChanged={async () => { await refreshDraft(); }} />}
+        <Form form={contactForm} layout="vertical" disabled={busy || readOnly} onFinish={(v) => act(async () => {
+          await api(`/api/leads/${draft.lead_id}/contacts`, json({items:[{channel:draft.channel,contact_ref:v.contact_ref,contact_source:v.contact_source}]}));
+          const next = await refreshDraft();
+          const saved = next.context.contacts.find(e => e.channel === draft.channel && e.contact_ref?.toLowerCase() === v.contact_ref.trim().toLowerCase());
+          if (saved) await patch({eligibility_id:saved.id});
+        })}>
+          <Typography.Paragraph type="secondary">保存联系值不会覆盖已有核验；选择联系人后，通过“联系条件”补充本渠道的实际依据。</Typography.Paragraph>
+          <Form.Item name="contact_ref" label="邮箱／电话／平台主页／联系地址" rules={[{required:true}]}><Input /></Form.Item>
+          <Form.Item name="contact_source" label="来源"><Input /></Form.Item>
+          <Button htmlType="submit" disabled={busy}>保存联系方式</Button>
+        </Form>
+      </> },
       { key: "content", label: "发送什么", children: <>
         <Typography.Paragraph type="secondary">结合门店、已核对菜单与我们的服务起草；没有菜单也可以询问菜单或负责人。</Typography.Paragraph>
         <Select aria-label="文案引用的菜单分析" allowClear placeholder="未选择菜单：询问菜单或负责人" value={analysisId} onChange={setAnalysisId} style={{ width: "100%", marginBottom: 12 }} options={draft.context.analyses.map((a) => ({ value: a.id, label: `${a.label || "菜单"} · 分析 v${a.version}${a.facts.length ? " · 有已确认问题" : " · 未确认明显问题"}` }))} />

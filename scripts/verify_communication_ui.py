@@ -41,6 +41,11 @@ async def handle(route):
     requests.append((request.method, path, body))
     if path == "/api/auth/me":
         result = {"id": "ui", "username": "ui-test", "role": "admin", "display_name": None, "must_change_password": False}
+    elif path == "/api/outreach-identity":
+        result = {"sender_identity": "UI Tester\nExample Studio", "opt_out_text": "Please let us know to opt out."}
+    elif path.startswith("/api/avatars/"):
+        await route.fulfill(status=404)
+        return
     elif path == "/api/batches":
         result = [{"id": "batch", "batch_key": "测试", "country": "UK", "region": "Aberdeen", "source_name": "fsa", "candidate_count": 2}]
     elif path == "/api/leads":

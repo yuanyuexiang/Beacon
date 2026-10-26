@@ -86,6 +86,7 @@ class ChannelEligibility(UUIDPk, Timestamped, Base):
         _enum(Eligibility, "eligibility"), default=Eligibility.unknown, nullable=False
     )
     rule_version: Mapped[str | None] = mapped_column(String(64))
+    conditions: Mapped[dict | None] = mapped_column(JSONB)
     evidence: Mapped[str | None] = mapped_column(Text)  # 授权/筛查证据说明
     reviewed_by: Mapped[str | None] = mapped_column(String(64))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

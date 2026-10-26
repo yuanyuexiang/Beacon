@@ -1,5 +1,6 @@
 "use client";
 import { UserIdentity } from "@/components/UserAvatar";
+import ChannelConditions from "@/components/ChannelConditions";
 import Button from "@/components/AccessButton";
 import { Alert, Card, Checkbox, Col, DatePicker, Drawer, Empty, Form, Input, Modal, Row, Select, Space, Table, Tabs, Tag, Timeline, Typography } from "antd";
 import Link from "next/link";
@@ -8,7 +9,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import dayjs from "dayjs";
 import { api, json } from "@/lib/api";
 import { useOperator } from "@/lib/auth";
-import { Assignee, CHANNELS, CommunicationTask, Contact, LeadContext, MODES, PROGRESS, Progress, safeReturnTo } from "@/lib/communication";
+import { Assignee, CHANNELS, CommunicationTask, LeadContext, MODES, PROGRESS, Progress, safeReturnTo } from "@/lib/communication";
 import { channelLabel, label } from "@/lib/format";
 import { HeroBand } from "@/components/ui";
 import OutreachJourney from "@/components/OutreachJourney";
@@ -18,7 +19,7 @@ import SocialOutreach from "@/components/SocialOutreach";
 
 type Customer = { id: string; name: string; postcode: string | null; progress: Progress };
 type Activity = { timeline: { id: string; channel: string | null; direction: string; at: string; summary: string; source: string; status: string }[]; deliveries: { id: string; task_id: string; channel: string; status: string; source: string; at: string; error?: string | null; message_id?: string | null }[]; conversations: { id: string; channel: string; at: string; summary: string; source: string }[] };
-type ManualPreview = { task_id: string; channel: string; url: string; text: string };
+type ManualPreview = { task_id: string; channel: string; url: string | null; address?: string; text: string };
 const EMPTY_ACTIVITY: Activity = { timeline: [], deliveries: [], conversations: [] };
 const SOURCE: Record<string, string> = { manual: "人工记录", gmail: "Gmail 同步（回复仅邮件头）", meta: "平台同步" };
 const ACTIVE = ["pending", "opened", "paused"];
@@ -51,24 +52,22 @@ function TasksInner() {
   const [manual, setManual] = useState<ManualPreview>();
   const [confirmed, setConfirmed] = useState(false);
   const [apiTask, setApiTask] = useState<CommunicationTask>();
-  const [contact, setContact] = useState<Contact>();
   const [suppression, setSuppression] = useState<Record<string, string>[] | null>(null);
   const [eventForm] = Form.useForm();
-  const [contactForm] = Form.useForm();
   const [sentForm] = Form.useForm();
   const eventKey = useRef<string | null>(null);
   const contextRequest = useRef(0);
   const listRequest = useRef(0);
   const navigate = useCallback((patch: Record<string, string | undefined>) => { const params = new URLSearchParams(sp.toString()); Object.entries(patch).forEach(([key, value]) => value ? params.set(key, value) : params.delete(key)); router.replace(`/tasks?${params}`, { scroll: false }); }, [router, sp]);
   const refreshList = useCallback(async () => { const request = ++listRequest.current; const params = new URLSearchParams({ page: String(page) }); if (batch) params.set("batch_key", batch); if (channel) params.set("channel", channel); if (assigned) params.set("assigned_to", assigned); if (query) params.set("q", query); if (group) params.set("preparation_group", group); const result = await api<{ items: Customer[]; total: number }>(`/api/communication/overview?${params}`); if (request === listRequest.current) { setRows(result.items); setTotal(result.total); } }, [page, batch, channel, assigned, query, group]);
-  const refreshContext = useCallback(async () => { const request = ++contextRequest.current; if (!leadId) { setContext(null); setUnstarted(false); setActivity(EMPTY_ACTIVITY); return; } const [data, history] = await Promise.all([api<LeadContext>(`/api/communication/leads/${leadId}`), api<Activity>(`/api/communication/activity/${leadId}`)]); if (request === contextRequest.current) { const started = data.tasks.length > 0 || history.timeline.length > 0 || history.conversations.length > 0; setContext(started ? data : null); setUnstarted(!started); setActivity(started ? history : EMPTY_ACTIVITY); } }, [leadId]);
+  const refreshContext = useCallback(async () => { const request = ++contextRequest.current; if (!leadId) { setContext(null); setUnstarted(false); setActivity(EMPTY_ACTIVITY); return; } const [data, history] = await Promise.all([api<LeadContext>(`/api/communication/leads/${leadId}`), api<Activity>(`/api/communication/activity/${leadId}`)]); if (request === contextRequest.current) { const started = data.drafts?.some(d => d.queued) || data.tasks.length > 0 || history.timeline.length > 0 || history.conversations.length > 0; setContext(started ? data : null); setUnstarted(!started); setActivity(started ? history : EMPTY_ACTIVITY); } }, [leadId]);
   const refresh = useCallback(async () => { await Promise.all([refreshList(), refreshContext()]); }, [refreshList, refreshContext]);
   useEffect(() => { api<{ batch_key: string }[]>("/api/batches").then(setBatches).catch((e) => setError(e.message)); api<Assignee[]>("/api/communication/assignees").then(setOwners).catch((e) => setError(e.message)); }, []);
   useEffect(() => { refreshList().catch((e) => setError(e.message)); }, [refreshList]);
   useEffect(() => { setContext(null); setActivity(EMPTY_ACTIVITY); setManual(undefined); setApiTask(undefined); setError(undefined); eventForm.resetFields(); eventKey.current = null; refreshContext().catch((e) => setError(e.message)); }, [refreshContext, eventForm]);
   useEffect(() => { if (!leadId && rows[0]) navigate({ lead: rows[0].id }); }, [leadId, rows, navigate]);
   useEffect(() => { const tick = () => { if (!document.hidden && !busy) refresh().catch(() => {}); }; const timer = setInterval(tick, 15000); window.addEventListener("focus", tick); return () => { clearInterval(timer); window.removeEventListener("focus", tick); }; }, [refresh, busy]);
-  useEffect(() => { if (contact) { contactForm.resetFields(); contactForm.setFieldsValue({ ...contact, review_due_at: contact.review_due_at ? dayjs(contact.review_due_at) : null }); } }, [contact, contactForm]);
+
   const act = async (work: () => Promise<void>) => { setBusy(true); setError(undefined); setSuccess(undefined); try { await work(); await refresh(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   const tasks = (context?.tasks || []).filter((t) => (!channel || t.channel === channel) && (!assigned || t.assigned_to === assigned) && (!group || t.preparation_group_id === group));
   const selectedTask = tasks.find((t) => t.id === sp.get("task")) || tasks.find((t) => ACTIVE.includes(t.status)) || tasks[0];
@@ -76,8 +75,8 @@ function TasksInner() {
   const openManual = async (task: CommunicationTask) => { const value = await api<ManualPreview>(`/api/communication/tasks/${task.id}/manual-open`, { method: "POST" }); setManual(value); sentForm.resetFields(); setConfirmed(false); navigate({ task: task.id }); };
   const rename = (id: string) => context?.lead.id === id ? context.lead.name : rows.find((r) => r.id === id)?.name || id;
   return <>
-    <HeroBand kicker="COMMUNICATION" title="触达任务与回复" subtitle="从名单创建触达任务后，在这里执行、查看回复与继续跟进。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回来源页面</Button></Link><Button readOnlySafe onClick={() => refresh().catch((e) => setError(e.message))}>刷新进展</Button><Button readOnlySafe onClick={() => api<Record<string, string>[]>("/api/suppressions").then(setSuppression).catch((e) => setError(e.message))}>抑制名单</Button></Space>} />
-    <OutreachJourney current={!context ? 0 : ["waiting_reply", "replied", "recorded", "suppressed"].includes(context?.progress.status || "") ? 3 : 2} />
+    <HeroBand kicker="COMMUNICATION" title="触达任务与回复" subtitle="从名单加入准备待办或创建触达任务，在这里继续准备、执行与跟进。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回来源页面</Button></Link><Button readOnlySafe onClick={() => refresh().catch((e) => setError(e.message))}>刷新进展</Button><Button readOnlySafe onClick={() => api<Record<string, string>[]>("/api/suppressions").then(setSuppression).catch((e) => setError(e.message))}>抑制名单</Button></Space>} />
+    <OutreachJourney current={!context ? 0 : context.progress.status === "preparing" ? 1 : ["waiting_reply", "replied", "recorded", "suppressed"].includes(context?.progress.status || "") ? 3 : 2} />
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     {success && <Alert type="success" showIcon message={success} style={{ marginBottom: 12 }} />}
     <Space wrap style={{ marginBottom: 16 }}>
@@ -96,7 +95,12 @@ function TasksInner() {
           <Tag color={context.progress.status === "suppressed" ? "red" : "blue"}>{PROGRESS[context.progress.status]}</Tag>
           <Tabs activeKey={tab} onChange={(value) => navigate({ tab: value })} items={[
             { key: "tasks", label: "待办任务", children: <>
-              {!tasks.length ? <Empty description="当前筛选下没有任务，可查看客户会话和发送记录。" /> : tasks.map((t) => <Card key={t.id} size="small" style={{ marginBottom: 12, borderColor: selectedTask?.id === t.id ? "#cf010e" : undefined }} title={<Space wrap><span>{channelLabel(t.channel)}</span><Tag>{label(t.status)}</Tag><Typography.Text type="secondary">{t.execution_mode === "manual" ? "人工执行" : t.execution_mode === "gmail" ? "Gmail 接口" : "已授权社媒会话"}</Typography.Text></Space>}>
+              {(context.drafts || []).filter(d => d.queued && (!channel || d.channel === channel) && (!assigned || d.assigned_to === assigned) && !group).map(d => <Card size="small" key={d.id} title={`${channelLabel(d.channel)} · 准备待办`} style={{marginBottom:12}}>
+                <Typography.Paragraph>负责人：{d.assigned_to || "未分配"}{d.follow_up_at ? ` · 提醒：${new Date(d.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
+                <Typography.Paragraph>{d.blockers.length ? d.blockers.join("；") : "条件已齐备，可确认并创建执行任务"}</Typography.Paragraph>
+                <Space><Link href={`/leads/${d.lead_id}?returnTo=${encodeURIComponent(back)}`}>继续准备</Link><Button disabled={busy} onClick={() => act(async () => { await api(`/api/communication/drafts/${d.id}`, json({queued:false}, "PATCH")); })}>移出待办</Button></Space>
+              </Card>)}
+              {!tasks.length && !context.drafts?.some(d => d.queued) ? <Empty description="当前筛选下没有任务，可查看客户会话和发送记录。" /> : tasks.map((t) => <Card key={t.id} size="small" style={{ marginBottom: 12, borderColor: selectedTask?.id === t.id ? "#cf010e" : undefined }} title={<Space wrap><span>{channelLabel(t.channel)}</span><Tag>{label(t.status)}</Tag><Typography.Text type="secondary">{t.execution_mode === "manual" ? "人工执行" : t.execution_mode === "gmail" ? "Gmail 接口" : "已授权社媒会话"}</Typography.Text></Space>}>
                 <Typography.Paragraph type="secondary">负责人：{<UserIdentity username={t.assigned_to} />}{t.follow_up_at ? ` · 跟进提醒：${new Date(t.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
                 {t.status_reason && <Alert type="warning" message={t.status_reason} style={{ marginBottom: 12 }} />}
                 {inflight(t) && <Alert type="info" message="已有接口发送记录，请先核对排队、发送或未知结果，避免人工重复发送。" style={{ marginBottom: 12 }} />}
@@ -134,7 +138,7 @@ function TasksInner() {
           <Typography.Paragraph>{context.lead.address} {context.lead.postcode}</Typography.Paragraph>{context.lead.website && <p><a href={context.lead.website} target="_blank" rel="noreferrer">查看官网</a></p>}
           <Space wrap><Link href={`/leads/${context.lead.id}?returnTo=${encodeURIComponent(back)}`}>完整线索详情</Link><Link href={`/leads/${context.lead.id}?returnTo=${encodeURIComponent(back)}#menu-files`}>补充／核对菜单</Link></Space>
           <Typography.Title level={5}>已发现的联系方式</Typography.Title>
-          {context.contacts.length ? context.contacts.map((e) => <div key={e.id} style={{ padding: "8px 0", borderBottom: "1px solid #eee" }}><b>{channelLabel(e.channel, e.contact_ref)}</b><p style={{ overflowWrap: "anywhere", margin: "4px 0" }}>{e.contact_ref || "未填写"}</p><Tag color={e.suppressed ? "red" : e.eligibility === "allowed" ? "green" : "default"}>{e.suppressed ? "已抑制" : e.eligibility === "allowed" ? "准入允许" : "准入待核对"}</Tag><Button size="small" onClick={() => setContact(e)}>核对准入</Button></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无联系方式，请在线索详情补充" />}
+          {context.contacts.length ? context.contacts.map((e) => <div key={e.id} style={{ padding: "8px 0", borderBottom: "1px solid #eee" }}><b>{channelLabel(e.channel, e.contact_ref)}</b><p style={{ overflowWrap: "anywhere", margin: "4px 0" }}>{e.contact_ref || "未填写"}</p><Tag color={e.suppressed ? "red" : (e.contact_conditions?.status || e.eligibility) === "allowed" ? "green" : "default"}>{e.suppressed ? "已抑制" : (e.contact_conditions?.status || e.eligibility) === "allowed" ? "联系依据已核对" : (e.contact_conditions?.status || e.eligibility) === "blocked" ? "不应联系" : "待补联系依据"}</Tag><ChannelConditions leadId={context.lead.id} contactId={e.id} contact={e.contact_ref} busy={busy || !canWrite} onChanged={refresh} /></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无联系方式，请在线索详情补充" />}
           <Typography.Title level={5}>菜单问题依据</Typography.Title>{context.analyses.length ? context.analyses.map((a) => <Typography.Paragraph key={a.id}>已审核 v{a.version}：{a.facts.join("；")}</Typography.Paragraph>) : <Typography.Paragraph type="secondary">还没有已审核、已确认的问题，准备抽屉会提示补齐，不能虚构营销理由。</Typography.Paragraph>}
           <Typography.Title level={5}>文案与审批</Typography.Title>{context.contents.map((c) => <p key={c.id}>文案 v{c.version} · <Tag color={c.approved ? "green" : "default"}>{c.approved ? "审批有效" : "需核对／审批"}</Tag></p>)}
         </>}
@@ -143,19 +147,12 @@ function TasksInner() {
     <PrepareOutreach open={prepare} leadIds={leadId ? [leadId] : []} batchKey={batch} returnTo={back} initialChannel={channel || context?.drafts?.[0]?.channel || "email"} purpose="followup" onClose={() => { setPrepare(false); refresh().catch((e) => setError(e.message)); }} onChanged={() => refresh().catch((e) => setError(e.message))} />
     <Modal title="人工执行 · 打开平台不等于已发送" open={!!manual} onCancel={() => setManual(undefined)} footer={null} width={720}>
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-      {manual && <><Alert type="info" showIcon message="复制已审批文案，到平台人工发送；实际发送后再回填时间。" /><Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginTop: 16 }}>{manual.text}</Typography.Paragraph><Space><Button disabled={busy} onClick={() => act(async () => { const fresh = await api<ManualPreview>(`/api/communication/tasks/${manual.task_id}/manual-open`, { method: "POST" }); setManual(fresh); await navigator.clipboard.writeText(fresh.text); setSuccess("已复制已审批文案，尚未记录为发送"); })}>复制已审批文案</Button><a href={manual.url} target="_blank" rel="noreferrer">打开 {channelLabel(manual.channel)} 联系入口 ↗</a></Space>
+      {manual && <><Alert type="info" showIcon message="复制已审批文案，到平台人工发送；实际发送后再回填时间。" /><Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginTop: 16 }}>{manual.text}</Typography.Paragraph><Space><Button disabled={busy} onClick={() => act(async () => { const fresh = await api<ManualPreview>(`/api/communication/tasks/${manual.task_id}/manual-open`, { method: "POST" }); setManual(fresh); await navigator.clipboard.writeText(fresh.text); setSuccess("已复制已审批文案，尚未记录为发送"); })}>复制已审批文案</Button>{manual.url && <a href={manual.url} target="_blank" rel="noreferrer">打开 {channelLabel(manual.channel)} 联系入口 ↗</a>}{manual.address && <Typography.Paragraph>人工邮寄地址：{manual.address}</Typography.Paragraph>}</Space>
         <Form form={sentForm} layout="vertical" disabled={!canWrite || busy} style={{ marginTop: 20 }} onFinish={(v) => act(async () => { if (!confirmed) throw new Error("请先确认已经在平台实际发送"); await api(`/api/tasks/${manual.task_id}/sent`, json({ sent_at: v.sent_at.toISOString(), notes: v.notes })); setManual(undefined); setSuccess("已记录人工发送，客户进展已更新"); })}><Form.Item name="sent_at" label="实际发送时间" rules={[{ required: true }]}><DatePicker showTime /></Form.Item><Form.Item name="notes" label="发送备注"><Input.TextArea maxLength={1500} /></Form.Item><Checkbox checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)}>我已在平台实际发送，并核对收件人和内容</Checkbox><Button type="primary" htmlType="submit" disabled={!confirmed} loading={busy} style={{ marginLeft: 12 }}>记录已人工发送</Button></Form></>}
     </Modal>
     <Drawer title="接口预览与发送记录" width={1000} open={!!apiTask} onClose={() => setApiTask(undefined)} destroyOnHidden>
       {apiTask?.channel === "email" ? <GmailOutreach tasks={[apiTask]} name={rename} onChanged={refresh} focusTaskId={apiTask.id} /> : apiTask && <SocialOutreach tasks={[apiTask]} name={rename} onChanged={refresh} focusTaskId={apiTask.id} />}
     </Drawer>
-    <Modal title="人工核对渠道准入" open={!!contact} onCancel={() => setContact(undefined)} footer={null}>
-      {error && <Alert type="error" message={error} />}
-      <Form form={contactForm} layout="vertical" disabled={!canWrite || busy} onFinish={(v) => act(async () => { await api(`/api/leads/${leadId}/eligibility`, json({ channel: contact?.channel, contact_ref: contact?.contact_ref, contact_source: contact?.contact_source, contact_usable: v.contact_usable, eligibility: v.eligibility, rule_version: v.rule_version, evidence: v.evidence, review_due_at: v.review_due_at?.toISOString() || null })); setContact(undefined); setSuccess("渠道准入已保存；执行时仍将再次复核"); })}>
-        <p>{channelLabel(contact?.channel || "", contact?.contact_ref)} · {contact?.contact_ref}</p><Alert type="info" message="本处保留任务关联的联系值；更换收件人需结束旧任务，再重新准备，避免误发。" style={{ marginBottom: 12 }} />
-        <Form.Item name="contact_usable" label="联系方式可用性"><Select options={[{ value: "unknown", label: "未知" }, { value: "valid", label: "有效" }, { value: "invalid", label: "无效" }]} /></Form.Item><Form.Item name="eligibility" label="渠道准入"><Select options={[{ value: "unknown", label: "待核对" }, { value: "allowed", label: "允许" }, { value: "blocked", label: "禁止" }]} /></Form.Item><Form.Item name="rule_version" label="规则版本"><Input /></Form.Item><Form.Item name="evidence" label="真实准入证据"><Input.TextArea /></Form.Item><Form.Item name="review_due_at" label="复核到期时间"><DatePicker showTime /></Form.Item><Button htmlType="submit" type="primary">保存准入</Button>
-      </Form>
-    </Modal>
     <Modal title="抑制名单" open={!!suppression} onCancel={() => setSuppression(null)} footer={null} width={850}><Table rowKey="id" dataSource={suppression || []} columns={[{ title: "客户", dataIndex: "lead_id" }, { title: "联系值", dataIndex: "contact_ref" }, { title: "原因", dataIndex: "reason" }, { title: "时间", dataIndex: "created_at" }]} /></Modal>
     <style>{`.communication-selected td { background: #fff4f0 !important; }`}</style>
   </>;

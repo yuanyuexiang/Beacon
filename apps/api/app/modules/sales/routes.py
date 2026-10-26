@@ -14,7 +14,7 @@ from app.core.auth import current_operator
 from app.core.db import get_db
 from app.core.models import Operator
 from app.modules.leads.models import Batch, BatchLead, Lead
-from app.modules.sales import contacts, service, summary
+from app.modules.sales import channel_conditions, contacts, service, summary
 from app.modules.sales.models import (
     Channel,
     ChannelEligibility,
@@ -52,6 +52,7 @@ class EligibilityOut(EligibilityIn):
     reviewed_at: datetime | None
     recommendation: dict | None = None
     auto_admission: dict | None = None
+    contact_conditions: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -169,6 +170,7 @@ def list_eligibility(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Oper
             **EligibilityOut.model_validate(row).model_dump(),
             "recommendation": contact_ranking.stored(lead, row.channel.value, row.contact_ref),
             "auto_admission": admission.public(db, lead, row),
+            "contact_conditions": channel_conditions.public(row),
         }
         for row in rows
     ]
@@ -487,3 +489,66 @@ def batch_export(batch_key: str, db: Session = Depends(get_db), op: Operator = D
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{batch_key}.csv"'},
     )
+
+
+@router.post("/leads/{lead_id}/contacts/{contact_id}/conditions")
+def review_conditions(
+    lead_id: uuid.UUID,
+    contact_id: uuid.UUID,
+    body: channel_conditions.Review,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
+    _lead(db, lead_id)
+    db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
+    row = db.get(ChannelEligibility, contact_id)
+    if not row or row.lead_id != lead_id:
+        raise HTTPException(404, "联系方式不存在")
+    record = {
+        **body.model_dump(mode="json"),
+        "version": channel_conditions.VERSION,
+        "reviewed_by": op.username,
+        "reviewed_at": service.now().isoformat(),
+    }
+    if body.purpose == "requested_reply" and body.decision == "allowed":
+        from app.modules.content import service as content_service
+        from app.modules.content.models import ContentKind, ContentPiece
+
+        piece = db.get(ContentPiece, body.content_id) if body.content_id else None
+        if not piece or piece.lead_id != lead_id or piece.kind != ContentKind.message_short:
+            raise HTTPException(422, "请选择本门店已经确认的回复消息")
+        valid, why = content_service.approval_valid(db, piece)
+        if not valid:
+            raise HTTPException(422, "回复内容尚未确认：" + (why or "待确认"))
+        if (piece.spec or {}).get("channel") and (piece.spec or {})["channel"] != row.channel.value:
+            raise HTTPException(422, "回复消息渠道不匹配")
+        record["content_hash"] = piece.content_hash
+    errors = channel_conditions.missing(row.channel.value, record)
+    if body.decision == "allowed":
+        if not body.confirmed:
+            errors.append("请确认已核对真实依据")
+        if service.is_suppressed(db, lead_id, row.contact_ref):
+            errors.append("客户或联系方式已拒收，不能允许联系")
+        if row.contact_usable == ContactUsable.invalid:
+            errors.append("联系方式无效")
+        if errors:
+            raise HTTPException(422, "；".join(errors))
+    before = {"conditions": row.conditions, "eligibility": row.eligibility.value}
+    row.conditions = record
+    row.eligibility = Eligibility(body.decision)
+    row.rule_version = channel_conditions.VERSION
+    row.evidence = body.note
+    row.reviewed_by, row.reviewed_at = op.username, service.now()
+    row.review_due_at = min((e.expires_at for e in body.evidence if e.expires_at), default=None)
+    audit.record(db, op, "channel_conditions", "channel_eligibility", row.id, before=before, after=record)
+    db.commit()
+    return channel_conditions.public(row)
+
+
+@router.get("/leads/{lead_id}/contacts/{contact_id}/conditions")
+def get_conditions(lead_id: uuid.UUID, contact_id: uuid.UUID, db: Session = Depends(get_db)):
+    _lead(db, lead_id)
+    row = db.get(ChannelEligibility, contact_id)
+    if not row or row.lead_id != lead_id:
+        raise HTTPException(404, "联系方式不存在")
+    return channel_conditions.public(row)

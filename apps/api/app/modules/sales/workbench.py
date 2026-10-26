@@ -21,7 +21,7 @@ from app.modules.gmail.models import EmailDelivery
 from app.modules.leads.models import Batch, BatchLead, Lead
 from app.modules.menus.models import MenuAnalysis, MenuAsset
 from app.modules.outreach.models import ChannelAccount, Conversation, OutreachDelivery
-from app.modules.sales import service
+from app.modules.sales import channel_conditions, service
 from app.modules.sales.models import (
     Channel,
     ChannelEligibility,
@@ -53,6 +53,7 @@ class PrepareIn(BaseModel):
 
 class DraftPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    queued: bool | None = None
     eligibility_id: uuid.UUID | None = None
     content_id: uuid.UUID | None = None
     assigned_to: str | None = Field(default=None, max_length=64)
@@ -102,6 +103,12 @@ def manual_target(channel: str, value: str | None) -> str | None:
     import re
 
     value = (value or "").strip()
+    if channel == "post":
+        return (
+            "#postal-address"
+            if len(value) >= 8 and not value.lower().startswith(("http:", "https:", "javascript:"))
+            else None
+        )
     if channel == "email":
         return (
             "mailto:" + quote(value, safe="@.+") if re.fullmatch(r"[^\s@?&#]+@[^\s@?&#]+\.[^\s@?&#]+", value) else None
@@ -273,6 +280,7 @@ def context(db: Session, lead: Lead) -> dict:
                 "contact_ref": e.contact_ref,
                 "recommendation": contact_ranking.stored(lead, e.channel.value, e.contact_ref),
                 "auto_admission": admission.public(db, lead, e),
+                "contact_conditions": channel_conditions.public(e),
                 "contact_source": e.contact_source,
                 "contact_usable": e.contact_usable.value,
                 "eligibility": e.eligibility.value,
@@ -335,6 +343,10 @@ def assess(db: Session, draft: Preparation) -> list[str]:
             lead = db.get(Lead, draft.lead_id)
             auto = admission.public(db, lead, elig) if lead else None
             blockers.append((auto or {}).get("reason") or "渠道准入尚未允许，请运行 AI 自动准入或补充证据")
+        if elig.conditions:
+            blockers.extend(channel_conditions.missing(elig.channel.value, elig.conditions))
+            if piece:
+                blockers.extend(channel_conditions.content_missing(elig.conditions, str(piece.id), piece.content_hash))
         if elig.contact_usable == ContactUsable.invalid:
             blockers.append("联系方式无效")
         if elig.review_due_at and elig.review_due_at < service.now():
@@ -374,7 +386,9 @@ def assess(db: Session, draft: Preparation) -> list[str]:
             )
         )
         if not found:
-            blockers.append("没有已授权、准入匹配且处于回复窗口的社媒会话；可改为人工执行")
+            blockers.append(
+                "没有已连接、收件人匹配且处于有效窗口的社媒会话；准备待办可保留，人工联系需另行核对平台入口与依据"
+            )
     return list(dict.fromkeys(blockers))
 
 
@@ -392,6 +406,7 @@ def draft_public(db: Session, d: Preparation) -> dict:
         "purpose": d.purpose,
         "notes": d.notes,
         "status": d.status,
+        "queued": d.queued,
         "task_id": str(d.task_id) if d.task_id else None,
         "blockers": assess(db, d) if d.status == "draft" else [],
         "context": context(db, lead),
@@ -438,18 +453,23 @@ def overview(
     db: Session = Depends(get_db),
 ):
     page, page_size = max(page, 1), min(max(page_size, 1), 100)
+    draft_leads = select(Preparation.lead_id).where(Preparation.queued.is_(True), Preparation.status == "draft")
     task_leads = select(ManualTask.lead_id)
     event_leads = select(Event.lead_id)
     conversation_leads = select(Conversation.lead_id).join(ChannelAccount, Conversation.account_id == ChannelAccount.id)
     if channel:
+        draft_leads = draft_leads.where(Preparation.channel == channel.value)
         task_leads = task_leads.where(ManualTask.channel == channel)
         event_leads = event_leads.where(Event.channel == channel)
         conversation_leads = conversation_leads.where(ChannelAccount.platform == channel.value)
     if assigned_to:
         task_leads = task_leads.where(func.coalesce(ManualTask.assigned_to, ManualTask.created_by) == assigned_to)
-        membership = or_(Lead.id.in_(task_leads))
+        draft_leads = draft_leads.where(Preparation.assigned_to == assigned_to)
+        membership = or_(Lead.id.in_(task_leads), Lead.id.in_(draft_leads))
     else:
-        membership = or_(Lead.id.in_(task_leads), Lead.id.in_(event_leads), Lead.id.in_(conversation_leads))
+        membership = or_(
+            Lead.id.in_(task_leads), Lead.id.in_(draft_leads), Lead.id.in_(event_leads), Lead.id.in_(conversation_leads)
+        )
     query = select(Lead).where(membership)
     if batch_key:
         batch = db.scalar(select(Batch).where(Batch.batch_key == batch_key))
@@ -601,6 +621,8 @@ def patch_draft(
         owner(db, body.assigned_to)
     if changes.get("execution_mode") is None and "execution_mode" in changes:
         raise HTTPException(422, "执行方式不能为空")
+    if "queued" in changes and changes["queued"] is None:
+        raise HTTPException(422, "待办状态不能为空")
     check_mode(d.channel, body.execution_mode or d.execution_mode)
     if changes.get("eligibility_id"):
         eligibility = db.get(ChannelEligibility, changes["eligibility_id"])
@@ -744,7 +766,13 @@ def manual_open(task_id: uuid.UUID, db: Session = Depends(get_db), op: Operator 
     except service.SalesError as exc:
         raise HTTPException(409, str(exc)) from exc
     piece = db.get(ContentPiece, t.content_id)
-    return {"task_id": str(t.id), "url": target, "text": piece.body_text if piece else None, "channel": t.channel.value}
+    return {
+        "task_id": str(t.id),
+        "url": None if t.channel == Channel.post else target,
+        "address": elig.contact_ref if elig and t.channel == Channel.post else None,
+        "text": piece.body_text if piece else None,
+        "channel": t.channel.value,
+    }
 
 
 @router.get("/activity/{lead_id}")

@@ -94,6 +94,13 @@ def check_can_contact(db: Session, elig: ChannelEligibility, content: ContentPie
         raise SalesError("消息生成渠道与所选联系方式不一致，请为当前渠道重新起草")
     if (content.spec or {}).get("recipient_id") and (content.spec or {})["recipient_id"] != str(elig.id):
         raise SalesError("消息面向的联系人已变化，请为当前联系人重新起草")
+    if elig.conditions:
+        from app.modules.sales import channel_conditions
+
+        gaps = channel_conditions.missing(elig.channel.value, elig.conditions)
+        gaps += channel_conditions.content_missing(elig.conditions, str(content.id), content.content_hash)
+        if gaps:
+            raise SalesError("；".join(gaps))
     if elig.eligibility != Eligibility.allowed:
         raise SalesError(f"渠道准入为 {elig.eligibility}，不能生成或执行任务")
     if (elig.rule_version or "").startswith("ai-admission:"):

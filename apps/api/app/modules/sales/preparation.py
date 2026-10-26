@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,5 +37,6 @@ class Preparation(UUIDPk, Timestamped, Base):
     task_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("manual_task.id", ondelete="SET NULL")
     )
+    queued: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(String(64))

@@ -344,3 +344,35 @@ def test_gm_role_mailbox_and_pending_reason_is_not_duplicated(client, db, eligib
     client.post(f"/api/content/{piece['id']}/approve", json={"decision": "approved"})
     blockers = prepare(client, str(lead.id))["draft"]["blockers"]
     assert len(blockers) == (0 if corporate else 1), blockers
+
+
+def test_free_domain_role_email_uses_cited_role_not_suffix(client, db, eligible):
+    lead, row = eligible
+    row.contact_ref = "vesperdevelopmentmanager@gmail.com"
+    c = lead.raw["contact_review"]["candidates"][0]
+    assessment = {
+        **c["assessment"],
+        "mailbox_type": "role",
+        "citations": [{"quote": "Our development manager inbox: vesperdevelopmentmanager@gmail.com", "url": SITE}],
+    }
+    lead.raw = {
+        **lead.raw,
+        "contact_review": {
+            **lead.raw["contact_review"],
+            "candidates": [{**c, "value": row.contact_ref, "assessment": assessment}],
+        },
+    }
+    admission.apply(db, lead)
+    assert row.eligibility == Eligibility.allowed
+    # An explicitly named person cannot use the generic corporate role branch.
+    lead.raw = {
+        **lead.raw,
+        "contact_review": {
+            **lead.raw["contact_review"],
+            "candidates": [
+                {**c, "value": row.contact_ref, "assessment": {**assessment, "mailbox_type": "named_person"}}
+            ],
+        },
+    }
+    admission.apply(db, lead)
+    assert row.eligibility == Eligibility.unknown

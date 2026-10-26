@@ -17,7 +17,7 @@ from app.modules.leads.models import Lead
 from app.modules.sales import contact_ranking
 from app.modules.sales.models import ChannelEligibility, ContactUsable, Eligibility
 
-VERSION = "ai-admission:uk-v2"
+VERSION = "ai-admission:uk-v3"
 SOURCE = "https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/business-to-business-marketing/"
 SUBSCRIBER_VERSION = "subscriber-v1"
 AI_ACTOR = "AI+规则引擎"
@@ -130,7 +130,24 @@ def prepare(lead: Lead, found: dict, p: policy.Policy) -> dict:
         operator_quote = any(
             name and name in normalized(c.quote) and relationship.search(c.quote) for c in verdict.citations
         )
-        form = bool(re.search(r"\b(?:limited|ltd\.?|plc|llp)\b", verdict.legal_name, re.I))
+        if verdict.operator_relationship:
+            operator_quote = operator_quote or any(
+                name
+                and name in normalized(c.quote)
+                and verdict.operator_relationship.strip() in c.quote
+                and not re.search(r"website (?:designed|developed)|web designer|payment processor", c.quote, re.I)
+                for c in verdict.citations
+            )
+        form = any(
+            name
+            and name in normalized(c.quote)
+            and re.search(
+                r"\b(?:limited|ltd\.?|plc|llp|CIO|SCIO|Scottish partnership|charitable incorporated organisation)\b",
+                c.quote,
+                re.I,
+            )
+            for c in verdict.citations
+        )
         number = not verdict.company_number or any(
             normalized(verdict.company_number) in normalized(c.quote) for c in verdict.citations
         )
@@ -169,7 +186,7 @@ def stale_reason(db: Session, lead: Lead, row: ChannelEligibility) -> str | None
     if not (row.rule_version or "").startswith("ai-admission:"):
         return None
     record = _record(lead, row)
-    if not record or row.rule_version != VERSION:
+    if not record or row.rule_version not in {VERSION, "ai-admission:uk-v2"}:
         return "自动准入规则已更新，请重新核验"
     if row.reviewed_by != AI_ACTOR or record.get("status") != row.eligibility.value:
         return "自动准入记录与当前审核结果不一致，请重新核验"
@@ -225,7 +242,7 @@ def apply(db: Session, lead: Lead, prepared: dict | None = None, expected_policy
     totals = {"allowed": 0, "blocked": 0, "unknown": 0, "manual_preserved": 0}
     for row in rows:
         auto = (row.rule_version or "").startswith("ai-admission:")
-        protected = not auto and row.eligibility != Eligibility.unknown
+        protected = bool(row.conditions) or (not auto and row.eligibility != Eligibility.unknown)
         suppression = service.is_suppressed(db, lead.id, row.contact_ref)
         missing = []
         decision, reason = "unknown", ""
@@ -271,8 +288,10 @@ def apply(db: Session, lead: Lead, prepared: dict | None = None, expected_policy
                 missing.append("联系方式归属证据已过期或缺少核验时间")
             if not selected.corporate_email_auto:
                 missing.append("公司邮箱自动准入未启用")
-            if not role_mailbox(row.contact_ref):
-                missing.append("尚未识别为通用职务邮箱，需要核实邮箱性质及对应依据")
+            if assessment.get("mailbox_type") == "named_person" or (
+                assessment.get("mailbox_type") != "role" and not role_mailbox(row.contact_ref)
+            ):
+                missing.append("尚缺职务／通用邮箱的原文说明；可 AI 补查或记录个人业务联系的适用依据")
             if assessment.get("purpose") not in {"business", "general"}:
                 missing.append("邮箱不是已核实的通用业务或商务联系用途")
             try:
@@ -293,13 +312,17 @@ def apply(db: Session, lead: Lead, prepared: dict | None = None, expected_policy
             if not missing:
                 decision, reason = "allowed", "AI 已核实官网运营公司与通用业务邮箱，符合英国公司 B2B 邮件准入规则"
         elif row.channel.value == "phone":
-            missing.extend(["缺少有效 TPS 筛查结果", "缺少有效 CTPS 筛查结果"])
+            missing.extend(["请在联系条件中记录 TPS 和 CTPS 筛查来源、时间及结果"])
         elif row.channel.value == "whatsapp":
             missing.append("缺少该收件人针对发送方与用途的 opt-in 授权证据")
         elif row.channel.value in {"facebook", "instagram", "tiktok", "linkedin", "other_social"}:
-            missing.append("缺少该平台会话权限、有效消息窗口或针对本次触达的授权证据")
+            missing.append("请在联系条件中记录本次消息依据；平台 API 连接和会话窗口在执行时单独检查")
+        elif row.channel.value == "contact_form":
+            missing.append("请核对表单是否接受商务／供应商咨询，并记录本次提交依据")
+        elif row.channel.value == "post":
+            missing.append("请核对业务邮寄地址、处理依据及拒收记录")
         else:
-            missing.append("当前渠道没有可自动放行的规则与授权证据")
+            missing.append("当前渠道尚无自动审核规则，请补充适用依据")
         reason = reason or "；".join(missing)
         before = {"eligibility": row.eligibility.value, "rule_version": row.rule_version}
         now = datetime.now(UTC)
