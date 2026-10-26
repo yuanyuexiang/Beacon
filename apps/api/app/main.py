@@ -132,6 +132,9 @@ protected.include_router(assignment_router)
 from app.modules.leads.enrichment import router as enrichment_router  # noqa: E402
 
 protected.include_router(enrichment_router)
+from app.modules.leads.manual import router as manual_leads_router  # noqa: E402
+
+protected.include_router(manual_leads_router)
 protected.include_router(leads_router)
 protected.include_router(directory_router)
 protected.include_router(auto_research_router)

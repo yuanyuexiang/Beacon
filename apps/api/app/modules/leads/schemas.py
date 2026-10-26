@@ -47,6 +47,7 @@ class LeadOut(BaseModel):
     business_type_id: int | None = None
     business_type_name: str | None = None
     inspection_pending: bool = False
+    manual_entry: dict | None = None
     operating_type: dict | None = None
     website_research: dict | None = None
     google_enrichment: dict | None = None
@@ -63,6 +64,7 @@ class LeadOut(BaseModel):
             raw = value.raw or {}
             row = {k: getattr(value, k) for k in cls.model_fields if hasattr(value, k)}
             row.update(
+                manual_entry={k: v for k, v in raw.get("manual_entry", {}).items() if k != "request_hash"} or None,
                 operating_type=raw.get("operating_type"),
                 website_research=raw.get("website_research"),
                 google_enrichment=raw.get("places_enrichment"),

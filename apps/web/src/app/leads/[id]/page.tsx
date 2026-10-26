@@ -27,7 +27,7 @@ import ContactReviewActions from "@/components/ContactReviewActions";
 import ContactAssessmentView from "@/components/ContactAssessment";
 import { AutoAdmission, ContactAssessment } from "@/lib/contact-ranking";
 
-type Lead = { communication_progress?: Progress; list_summary?: ListSummary; contact_count?: number; assigned_to?: string | null; operating_type?: { category: string; reason: string; citations: { quote: string }[] }; google_enrichment?: { status: string; error?: string }; verified_websites?: { url: string }[]; website_history?: { url: string; source?: string }[]; id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null };
+type Lead = { manual_entry?: {region?:string;contact_name?:string;notes?:string;created_by?:string}; communication_progress?: Progress; list_summary?: ListSummary; contact_count?: number; assigned_to?: string | null; operating_type?: { category: string; reason: string; citations: { quote: string }[] }; google_enrichment?: { status: string; error?: string }; verified_websites?: { url: string }[]; website_history?: { url: string; source?: string }[]; id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null };
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
 type Issue = { issue_code: string; fact: string; severity: string; confirmed: boolean | null; confirmed_by: string | null; note: string | null; deleted?: boolean; evidence: Record<string, unknown> };
@@ -313,7 +313,7 @@ export default function LeadDetail() {
           </div>
         </Form>
       </Card>
-<Collapse items={[{ key: "source", label: "数据来源", children: <p>{lead.source_key}</p> }]} style={{ marginBottom: 16 }} />      <Card title="官网与经营类型" style={{ marginBottom: 16 }}>
+<Collapse items={[{ key: "source", label: "数据来源", children: <><p>{lead.manual_entry ? "用户手动录入" : lead.source_key}</p>{lead.manual_entry && <Descriptions column={1} items={[{key:"region",label:"录入地区",children:lead.manual_entry.region || "—"},{key:"contact",label:"联系人",children:lead.manual_entry.contact_name || "—"},{key:"notes",label:"备注",children:<span style={{whiteSpace:"pre-wrap"}}>{lead.manual_entry.notes || "—"}</span>},{key:"by",label:"录入人",children:lead.manual_entry.created_by}]} />}</> }]} style={{ marginBottom: 16 }} />      <Card title="官网与经营类型" style={{ marginBottom: 16 }}>
         <WebsiteReview lead={lead} onChanged={() => reload().catch(err)} />
         {lead.verified_websites?.map((w) => <p key={w.url}>经官网原文验证：<a href={w.url} target="_blank" rel="noreferrer">{w.url}</a></p>)}
         {lead.website_history?.map((w) => <p key={w.url}>历史官网（{w.source ?? "原记录"}）：<a href={w.url} target="_blank" rel="noreferrer">{w.url}</a></p>)}

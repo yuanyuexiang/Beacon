@@ -115,7 +115,13 @@ def _link(lead: Lead) -> dict | None:
 
 
 def _fingerprint(lead: Lead) -> str:
-    value = [lead.name, lead.address, lead.postcode, (lead.raw or {}).get("google_places_revision")]
+    value = [
+        lead.name,
+        lead.address,
+        lead.postcode,
+        (lead.raw or {}).get("manual_entry", {}).get("region"),
+        (lead.raw or {}).get("google_places_revision"),
+    ]
     return hashlib.sha256(json.dumps(value, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -240,7 +246,11 @@ def search(
     response.headers.update(NO_STORE)
     lead = _lead(db, lead_id)
     fingerprint = _fingerprint(lead)
-    query = (body.query or "").strip() or " ".join(x for x in (lead.name, lead.address, lead.postcode, "UK") if x)[:600]
+    query = (body.query or "").strip() or " ".join(
+        x
+        for x in (lead.name, lead.address, lead.postcode, (lead.raw or {}).get("manual_entry", {}).get("region"), "UK")
+        if x
+    )[:600]
     try:
         places = _client(db, op, lead_id).search(query)
     except google.PlacesError as e:

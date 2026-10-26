@@ -4,6 +4,7 @@ import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ManualLead from "@/components/ManualLead";
 import LeadAssignment from "@/components/LeadAssignment";
 import OutreachJourney from "@/components/OutreachJourney";
 import WebsiteReview, { ResearchLead } from "@/components/WebsiteReview";
@@ -66,6 +67,7 @@ function LeadsInner() {
   const returnTo = `/leads${locationParams.size ? `?${locationParams}` : ""}`;
   const [authorities, setAuthorities] = useState<Authority[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<{ key: string; id: string }>();
@@ -245,6 +247,7 @@ function LeadsInner() {
       <HeroBand kicker="LEADS" title="批次与线索" subtitle="从门店池建立名单，补充官网与联系方式；来源同步与销售处理分开。"
         extra={<>
           <Select style={{ width: 260 }} value={batchKey} disabled={creating || !!busy} onChange={(key) => { setListPage(1); setBatchKey(key); }} placeholder="选择名单" options={batches.map((b) => ({ value: b.batch_key, label: `${b.batch_key}（${b.region ?? b.country}，${b.candidate_count ?? "?"} 家）` }))} />
+          <Button disabled={!canWrite || !mounted} onClick={() => setManualOpen(true)}>新增门店</Button>
           <Button type="primary" aria-label="建立名单" icon={<CloudDownloadOutlined />} disabled={!mounted || locked} onClick={() => { setCsvFile(null); setCreateMethod("auto"); generatedName.current = ""; setNewOpen(true); loadAuthorities(); }}>建立名单</Button>
           <Button type="primary" disabled={!canWrite || !leads.length || !!busy} onClick={() => { setPrepareLeadIds(null); setPrepareOpen(true); }}>准备触达</Button>
           <Link href={taskLink({ batch: batchKey, returnTo })}>查看沟通进展</Link>
@@ -296,6 +299,7 @@ function LeadsInner() {
       </Card>
 
       <PrepareOutreach open={prepareOpen} leadIds={prepareLeadIds || (leads.some((l) => selectedRows.includes(l.id)) ? leads.filter((l) => selectedRows.includes(l.id)) : filtered).map((l) => l.id)} batchKey={batchKey} returnTo={returnTo} onClose={() => { setPrepareOpen(false); loadLeads(batchKey); }} onChanged={() => loadLeads(batchKey)} />
+      <ManualLead open={manualOpen} onClose={() => setManualOpen(false)} batches={batches} batchKey={batchKey} onSaved={() => { loadBatches(); loadLeads(batchKey); }} />
       <Modal title="建立名单" forceRender={mounted} open={newOpen} onCancel={() => { if (!creating) setNewOpen(false); }} footer={null} destroyOnHidden maskClosable={false} closable={!creating}>
           <Form name="create-list" form={createForm} layout="vertical" initialValues={{ exclude_awaiting: false, business_type_ids: [1] }} onFinish={createBatch} onValuesChange={(changed, values) => {
             if ("region" in changed && (!values.batch_key || values.batch_key === generatedName.current)) {
