@@ -146,6 +146,9 @@ protected.include_router(content_router)
 from app.modules.sales.workbench import router as communication_router  # noqa: E402
 
 protected.include_router(communication_router)
+from app.modules.sales.sendflow import router as sendflow_router  # noqa: E402
+
+protected.include_router(sendflow_router)
 from app.modules.sales.assistance import router as assistance_router  # noqa: E402
 
 protected.include_router(assistance_router)

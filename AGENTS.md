@@ -151,3 +151,5 @@ D73（2026-10-22）：Gmail 网页授权为主入口，分开发送与回复 met
 2026-10-25 英国客户服务资料：中文事实、英文身份、en-GB 首触达／跟进、AI 整理待采用、非持久化邮件示例；个人署名在 /account 维护，按当前用户隔离。无迁移，操作见 docs/客户沟通工作台.md。专项 `cd apps/api && uv run pytest tests/test_profile_tools.py tests/test_outreach_ai.py tests/test_sales_assistance.py tests/test_content.py -q`；模拟 UI `uv run --project apps/api --extra maps-worker python scripts/verify_outreach_profile_ui.py`。不自动保存 AI 建议或发送消息，用户验收后自行提交发布。
 
 2026-10-26 全渠道联系条件：将联系人事实、业务推荐、联系依据与 API 执行能力分开；新增明确加入／移出准备待办，缺项不阻止保存。详情、准备与沟通页共用结构化核对；客户请求回复绑定已确认内容 ID/hash，发送前复核依据／到期／抑制。AI 邮件规则 v3 支持有原文证明的职务邮箱，不以免费域名直接否决；人工记录保护。迁移 `d176a0010001`；专项 `tests/test_channel_conditions.py tests/test_admission.py tests/test_communication.py`，模拟 UI `scripts/verify_channel_conditions_ui.py`、`scripts/verify_communication_ui.py`。计划见 [全渠道联系条件](plan/channel-conditions.md)。不新增 WhatsApp／TikTok／LinkedIn API 或 TPS 服务，不自动发送；本地验收后由用户自行提交推送。
+
+2026-10-26 简化客户沟通：MessageComposer 共用单家／批量编辑；/communication/drafts/{id}/message 自动保存，/preview 只读，/confirm 最终确认绑定快照并批准／创建／提交，重复确认复用任务。专项 tests/test_sendflow.py；模拟界面 scripts/verify_simple_send_ui.py 替代旧独立审批／创建任务场景。无迁移，不自动发送或发布。见 plan/simple-outreach.md。

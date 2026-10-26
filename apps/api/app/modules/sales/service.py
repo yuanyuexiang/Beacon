@@ -81,7 +81,25 @@ def is_suppressed(db: Session, lead_id: uuid.UUID, contact_ref: str | None) -> S
     return db.scalar(select(Suppression).where(or_(*conds)).limit(1))
 
 
-def check_can_contact(db: Session, elig: ChannelEligibility, content: ContentPiece) -> None:
+def email_recipient_confirmed(db: Session, elig: ChannelEligibility, piece: ContentPiece) -> bool:
+    from app.modules.content.models import Approval, ApprovalDecision
+
+    if elig.channel.value != "email":
+        return False
+    approval = db.scalar(
+        select(Approval).where(Approval.content_id == piece.id).order_by(Approval.decided_at.desc()).limit(1)
+    )
+    return bool(
+        approval
+        and approval.decision == ApprovalDecision.approved
+        and approval.content_hash == piece.content_hash
+        and approval.note == f"recipient-confirmed:{elig.id}:{elig.contact_ref}"
+    )
+
+
+def check_can_contact(
+    db: Session, elig: ChannelEligibility, content: ContentPiece, *, require_approval: bool = True
+) -> None:
     """三个时点共用的复核；任一不满足抛 SalesError。"""
     if (elig.rule_version or "").startswith("ai-admission:"):
         db.scalar(
@@ -94,16 +112,17 @@ def check_can_contact(db: Session, elig: ChannelEligibility, content: ContentPie
         raise SalesError("消息生成渠道与所选联系方式不一致，请为当前渠道重新起草")
     if (content.spec or {}).get("recipient_id") and (content.spec or {})["recipient_id"] != str(elig.id):
         raise SalesError("消息面向的联系人已变化，请为当前联系人重新起草")
-    if elig.conditions:
+    confirmed_email = email_recipient_confirmed(db, elig, content)
+    if elig.conditions and not confirmed_email:
         from app.modules.sales import channel_conditions
 
         gaps = channel_conditions.missing(elig.channel.value, elig.conditions)
         gaps += channel_conditions.content_missing(elig.conditions, str(content.id), content.content_hash)
         if gaps:
             raise SalesError("；".join(gaps))
-    if elig.eligibility != Eligibility.allowed:
+    if elig.eligibility != Eligibility.allowed and (not confirmed_email or elig.eligibility == Eligibility.blocked):
         raise SalesError(f"渠道准入为 {elig.eligibility}，不能生成或执行任务")
-    if (elig.rule_version or "").startswith("ai-admission:"):
+    if not confirmed_email and (elig.rule_version or "").startswith("ai-admission:"):
         from app.modules.sales import admission
 
         lead = db.get(Lead, elig.lead_id)
@@ -119,9 +138,13 @@ def check_can_contact(db: Session, elig: ChannelEligibility, content: ContentPie
             raise SalesError("自动准入邮件仍需明确的发送身份与退出说明")
     if elig.contact_usable == ContactUsable.invalid:
         raise SalesError("联系方式已标记无效")
-    if elig.review_due_at and elig.review_due_at < now():
+    if not confirmed_email and elig.review_due_at and elig.review_due_at < now():
         raise SalesError("准入复核已到期，需重新审核")
-    ok, why = content_service.approval_valid(db, content)
+    ok, why = (
+        content_service.approval_valid(db, content)
+        if require_approval
+        else content_service.source_still_valid(db, content)
+    )
     if not ok:
         raise SalesError(f"内容审批无效：{why}")
     sup = is_suppressed(db, elig.lead_id, elig.contact_ref)

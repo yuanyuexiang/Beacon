@@ -150,6 +150,29 @@ def record_contacts(db: Session, lead_id: uuid.UUID, items: list[dict[str, Any]]
     return {"created": created, "skipped": skipped}
 
 
+def preserve_partial_review(lead: Lead, found: dict, meta: dict) -> None:
+    """A failed read is not evidence that a previously verified contact disappeared."""
+    pages = (found.get("website") or {}).get("pages") or []
+    prior = (lead.raw or {}).get("contact_review") or {}
+    if not any(not page.get("ok") for page in pages) or prior.get("website") != lead.website:
+        return
+    current = {(c["channel"], c["value"]): c for c in found["candidates"]}
+    for old in prior.get("candidates", []):
+        key = (old["channel"], old["value"])
+        new = current.get(key)
+        if new and new.get("evidence"):
+            continue
+        if not old.get("evidence") or not old.get("assessment", {}).get("citations"):
+            continue
+        saved = {**old, "assessment": {**old["assessment"]}}
+        saved["assessment"]["confirmed_at"] = saved["assessment"].get("confirmed_at") or prior.get("checked_at")
+        saved["refresh_warning"] = "本次官网读取不完整，保留上次证据及核验时间"
+        if new:
+            found["candidates"].remove(new)
+        found["candidates"].append(saved)
+    meta["read_warning"] = "本次官网读取不完整，既有证据保留；未找到新证据不代表联系方式失效"
+
+
 def review_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None) -> dict[str, Any]:
     """显式 AI 操作，保存推荐证据，网络期间发生门店修改则不落档。"""
     from app.modules.leads import website_review
@@ -166,6 +189,7 @@ def review_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None
     locked = _lead(db, lead.id, lock=True)
     if website_review.snapshot(locked) != original:
         raise ValueError("查找期间门店或官网发生变化，已保留最新资料，请重新查找")
+    preserve_partial_review(locked, found, meta)
     found["ai"] = meta
     for c in found["candidates"]:
         manual = contact_ranking.manual_assessment(locked, c["channel"], c["value"])

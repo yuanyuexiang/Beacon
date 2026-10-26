@@ -14,7 +14,7 @@ export function leadNextAction(lead: { contact_count: number; communication_prog
   if (!lead.contact_count) return { text: "补充联系方式", target: "contacts" };
   if (status === "preparing" && p?.contact_selected === false) return { text: "选择联系方式", target: "prepare" };
   if (status === "preparing" && p?.content_selected === false) return { text: "准备并审批文案", target: "prepare" };
-  if (status === "preparing") return { text: "检查文案与渠道准入", target: "prepare" };
+  if (status === "preparing") return { text: "继续准备消息", target: "prepare" };
   if (lead.list_summary?.menu_status === "needs_review") return { text: "核对菜单／准备文案", target: "detail" };
   if (["missing", "failed"].includes(lead.list_summary?.menu_status || "")) return { text: "准备菜单询问", target: "prepare" };
   return { text: "选择渠道并准备文案", target: "prepare" };

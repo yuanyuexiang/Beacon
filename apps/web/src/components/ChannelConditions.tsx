@@ -6,7 +6,7 @@ import Button from "@/components/AccessButton";
 import { api, json } from "@/lib/api";
 type Evidence = { key: string; source: string; detail: string; checked_at: string; expires_at: string; result: string };
 type Conditions = { reply_requirements: { key: string; label: string; hint: string }[]; requirements: { key: string; label: string; hint: string }[]; record?: {purpose?: string; content_id?: string; decision: string; note: string; evidence: Evidence[]}; missing: string[]; execution: string; legacy: boolean };
-export default function ChannelConditions({ leadId, contactId, contact, busy, onChanged }: { leadId: string; contactId: string; contact?: string | null; busy?: boolean; onChanged: () => Promise<void> }) {
+export default function ChannelConditions({ leadId, contactId, contact, busy, onChanged, buttonLabel = "联系条件" }: { leadId: string; contactId: string; contact?: string | null; busy?: boolean; buttonLabel?: string; onChanged: () => Promise<void> }) {
   const [open, setOpen] = useState(false), [loading, setLoading] = useState(false), [saving, setSaving] = useState(false);
   const [researching, setResearching] = useState(false);
   const [data, setData] = useState<Conditions>(), [error, setError] = useState<string>(), [confirmed, setConfirmed] = useState(false);
@@ -20,7 +20,7 @@ export default function ChannelConditions({ leadId, contactId, contact, busy, on
     const context = await api<{contents: {id:string; subject?:string; approved:boolean; version:number}[]}>(`/api/communication/leads/${leadId}`); setMessages(context.contents);
     form.setFieldsValue({ purpose: next.record?.purpose || "business_marketing", content_id: next.record?.content_id, decision: next.record?.decision || "unknown", note: next.record?.note || "", evidence: (next.record?.purpose === "requested_reply" ? next.reply_requirements : next.requirements).map(r => { const e = next.record?.evidence.find(e => e.key === r.key); return { ...e, key: r.key, checked_at: e?.checked_at ? dayjs(e.checked_at) : undefined, expires_at: e?.expires_at ? dayjs(e.expires_at) : undefined }; }) });
   } catch(e) { setError((e as Error).message); } finally { setLoading(false); } };
-  return <><Button size="small" type="link" disabled={busy} onClick={load}>联系条件</Button>
+  return <><Button size="small" type="link" disabled={busy} onClick={load}>{buttonLabel}</Button>
     <Modal title="核对本次业务联系条件" open={open} onCancel={() => { if (!saving && !loading && !researching) setOpen(false); }} onOk={() => form.submit()} okText="保存核对结果" confirmLoading={saving} okButtonProps={{disabled: loading || researching || !data || (decision === "allowed" && !confirmed)}} width={680} style={{top:24}} styles={{body:{maxHeight:"calc(100vh - 180px)",overflowY:"auto",paddingRight:8}}}>
       <Typography.Paragraph strong>{contact}</Typography.Paragraph>
       <Alert type="info" showIcon message="这里只记录实际依据，不发送消息，也不会授予平台 API 权限。" description={data?.execution} style={{marginBottom:16}} />
@@ -33,7 +33,7 @@ export default function ChannelConditions({ leadId, contactId, contact, busy, on
         await onChanged(); setOpen(false);
       } catch(e) { setError((e as Error).message); } finally { setSaving(false); } }}>
         <Form.Item name="purpose" label="本次动作"><Select onChange={() => { form.setFieldsValue({evidence: [], decision:"unknown"}); setConfirmed(false); }} options={[{value:"business_marketing",label:"主动业务联系／营销跟进"},{value:"requested_reply",label:"回复客户明确提出的请求"}]} /></Form.Item>
-        {purpose === "requested_reply" && <Form.Item name="content_id" label="仅适用于这份已确认回复" rules={decision === "allowed" ? [{required:true}] : []}><Select options={messages.filter(m => m.approved).map(m => ({value:m.id,label:`v${m.version} · ${m.subject || "已确认消息"}`}))} /></Form.Item>}
+        {purpose === "requested_reply" && <Form.Item name="content_id" label="仅适用于这份回复" rules={decision === "allowed" ? [{required:true}] : []}><Select options={messages.map(m => ({value:m.id,label:`v${m.version} · ${m.subject || "回复消息"}`}))} /></Form.Item>}
         <Form.Item name="decision" label="本次联系条件" rules={[{required:true}]}><Select options={[{value:"unknown",label:"待补充依据"},{value:"allowed",label:"依据已核对"},{value:"blocked",label:"不应联系"}]} /></Form.Item>
         {requirements?.map((r,i) => <div key={r.key} style={{padding:12, border:"1px solid #eee",borderRadius:8,marginBottom:12}}>
           <Typography.Text strong>{r.label}</Typography.Text><Typography.Paragraph type="secondary">{r.hint}</Typography.Paragraph>

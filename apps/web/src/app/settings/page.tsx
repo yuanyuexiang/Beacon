@@ -29,7 +29,7 @@ function Help({ section }: { section: string }) {
     ["1 · 建立名单与同步", "从门店池选择地区与类型建立名单，先同步 Overture、Google 来源候选；随后按需对整批或所选门店执行 AI 核验与完善。"],
     ["2 · 完善客户资料", "核验官网、识别经营类型、查找联系方式；AI 提供有证据的推荐与准入判断，缺项保留并允许补充。"],
     ["3 · 菜单与触达消息", "从官网、单家 Maps 获取或手动上传菜单，分析后核对事实；AI 结合服务资料和已核对信息起草消息，无菜单时可先询问菜单。"],
-    ["4 · 确认发送", "选择联系方式、确认文案并检查准入，创建就绪任务。邮件和已连接社媒会话完整预览确认后发送，其余渠道人工执行。"],
+    ["4 · 确认发送", "选择联系方式并编辑消息，草稿自动保存。点击预览，核对完整内容后确认发送；其余渠道确认后打开联系入口并回填结果。"],
     ["5 · 沟通跟进", "在触达任务与回复中查看记录、回填结果；回复暂停相关任务，拒绝或退订进入抑制名单。"],
   ];
   return <Card title={section === "faq" ? "常见问题" : "操作指南"}>{rows.map(([title, text]) => <section key={title} style={{ marginBottom: 24 }}><Typography.Title level={5}>{title}</Typography.Title><Typography.Paragraph>{text}</Typography.Paragraph></section>)}</Card>;

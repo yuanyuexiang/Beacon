@@ -319,7 +319,7 @@ def create_inquiry(db: Session, lead: Lead, sender_identity: str, opt_out_text: 
 
 
 def revise_message(
-    db: Session, piece: ContentPiece, body_text: str, by: str, subject: str | None = None
+    db: Session, piece: ContentPiece, body_text: str, by: str, subject: str | None = None, *, commit: bool = True
 ) -> ContentPiece:
     if piece.kind != ContentKind.message_short:
         raise ContentError("只有文案可以直接编辑；样稿请重新生成")
@@ -359,7 +359,7 @@ def revise_message(
         created_by=by,
     )
     db.add(nv)
-    db.commit()
+    db.commit() if commit else db.flush()
     db.refresh(nv)
     return nv
 
@@ -403,7 +403,9 @@ def source_still_valid(db: Session, piece: ContentPiece) -> tuple[bool, str | No
     return True, None
 
 
-def decide(db: Session, piece: ContentPiece, decision: ApprovalDecision, by: str, note: str | None) -> ContentPiece:
+def decide(
+    db: Session, piece: ContentPiece, decision: ApprovalDecision, by: str, note: str | None, *, commit: bool = True
+) -> ContentPiece:
     ok, why = source_still_valid(db, piece)
     if decision == ApprovalDecision.approved and not ok:
         raise ContentError(f"源数据已变更，不能审批：{why}")
@@ -418,7 +420,7 @@ def decide(db: Session, piece: ContentPiece, decision: ApprovalDecision, by: str
         )
     )
     piece.status = ContentStatus.approved if decision == ApprovalDecision.approved else ContentStatus.rejected
-    db.commit()
+    db.commit() if commit else db.flush()
     db.refresh(piece)
     return piece
 

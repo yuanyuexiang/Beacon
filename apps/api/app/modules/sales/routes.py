@@ -516,10 +516,10 @@ def review_conditions(
 
         piece = db.get(ContentPiece, body.content_id) if body.content_id else None
         if not piece or piece.lead_id != lead_id or piece.kind != ContentKind.message_short:
-            raise HTTPException(422, "请选择本门店已经确认的回复消息")
-        valid, why = content_service.approval_valid(db, piece)
+            raise HTTPException(422, "请选择本门店的回复消息")
+        valid, why = content_service.source_still_valid(db, piece)
         if not valid:
-            raise HTTPException(422, "回复内容尚未确认：" + (why or "待确认"))
+            raise HTTPException(422, "回复来源已变化：" + (why or "请重新起草"))
         if (piece.spec or {}).get("channel") and (piece.spec or {})["channel"] != row.channel.value:
             raise HTTPException(422, "回复消息渠道不匹配")
         record["content_hash"] = piece.content_hash

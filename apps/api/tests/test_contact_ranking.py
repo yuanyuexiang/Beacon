@@ -446,3 +446,34 @@ def test_contact_confirmation_rejects_cross_lead_and_viewer(client, db):
     op.must_change_password = False
     db.commit()
     assert session(op).post(f"/api/leads/{lead_id}/contacts/{row['id']}/confirm", json=body).status_code == 403
+
+
+def test_failed_refresh_preserves_previous_contact_evidence_and_age():
+    candidate = found()["candidates"][0]
+    candidate["assessment"] = {
+        "recommendation": "recommended",
+        "affiliation": "target",
+        "citations": [{"quote": TEXT}],
+        "confirmed_at": "2026-01-01T00:00:00+00:00",
+    }
+    lead = Lead(
+        website=SITE,
+        raw={
+            "contact_review": {
+                "website": SITE,
+                "checked_at": "2026-01-01T00:00:00+00:00",
+                "candidates": [candidate],
+            }
+        },
+    )
+    current: dict = {"website": {"pages": [{"ok": False}]}, "candidates": []}
+    contacts.preserve_partial_review(lead, current, {})
+    assert current["candidates"][0]["assessment"]["confirmed_at"] == "2026-01-01T00:00:00+00:00"
+    assert current["candidates"][0]["evidence"] == candidate["evidence"]
+    complete: dict = {"website": {"pages": [{"ok": True}]}, "candidates": []}
+    contacts.preserve_partial_review(lead, complete, {})
+    assert not complete["candidates"]
+    lead.website = "https://different.example"
+    changed: dict = {"website": {"pages": [{"ok": False}]}, "candidates": []}
+    contacts.preserve_partial_review(lead, changed, {})
+    assert not changed["candidates"]
