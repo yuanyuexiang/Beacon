@@ -177,3 +177,26 @@ def test_email_unknown_evidence_can_be_explicitly_confirmed(client, db, monkeypa
 
     with pytest.raises(SalesError):
         gmail_service.recheck(db, delivery)
+
+
+def test_new_recipient_can_prepare_and_confirm_without_replacing_old_task(client, db, monkeypatch):
+    draft, calls = setup(client, db, monkeypatch)
+    base = f"/api/communication/drafts/{draft['id']}"
+    first_preview = client.post(base + "/preview").json()
+    first = client.post(base + "/confirm", json={"preview_hash": first_preview["preview_hash"], "confirmed": True})
+    assert first.status_code == 200, first.text
+    lead = draft["lead_id"]
+    contact = _elig(client, lead, contact_ref="second@example.com").json()
+    second = prepare(client, lead, execution_mode="gmail", eligibility_id=contact["id"])["draft"]
+    assert second["id"] != draft["id"]
+    assert second["eligibility_id"] == contact["id"]
+    assert (
+        prepare(client, lead, eligibility_id=draft["eligibility_id"])["existing_task"]["id"] == first.json()["task_id"]
+    )
+    base2 = f"/api/communication/drafts/{second['id']}"
+    preview2 = client.post(base2 + "/preview").json()
+    response = client.post(base2 + "/confirm", json={"preview_hash": preview2["preview_hash"], "confirmed": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["task_id"] != first.json()["task_id"]
+    assert db.scalar(select(func.count()).select_from(ManualTask)) == 2
+    assert "/send" not in calls

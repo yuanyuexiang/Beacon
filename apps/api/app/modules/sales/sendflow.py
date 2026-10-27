@@ -168,10 +168,11 @@ def confirm(
         raise HTTPException(409, "草稿已结束")
     if any(
         t.channel.value == d.channel
+        and workbench.same_recipient(db, t, d.eligibility_id)
         and (t.status in service.OPEN_STATUSES or (d.purpose == "initial" and t.status in workbench.SENT))
         for t in workbench.tasks_for(db, d.lead_id)
     ):
-        raise HTTPException(409, "已有该渠道的沟通任务，请查看记录，避免重复联系")
+        raise HTTPException(409, "该收件人已有沟通任务，请查看记录，避免重复联系")
     check = snapshot(db, d)
     if check["preview_hash"] != body.preview_hash:
         raise HTTPException(409, "收件人、消息或发送账号已变化，请重新预览")

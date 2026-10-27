@@ -53,13 +53,13 @@ export default function PrepareOutreach({ open, leadIds, batchKey, returnTo, onC
         setContext(next);
         if (initialContactId && selectedRequest.current !== `${identity}:${selectionRequest || initialContactId}`) {
           selectedRequest.current = `${identity}:${selectionRequest || initialContactId}`;
-          const response = await api<{ items: Prepared[] }>("/api/communication/prepare", json({ lead_ids: [identity], channel: initialChannel, execution_mode: initialChannel === "email" ? "gmail" : "manual", purpose }));
+          const response = await api<{ items: Prepared[] }>("/api/communication/prepare", json({ lead_ids: [identity], channel: initialChannel, execution_mode: initialChannel === "email" ? "gmail" : "manual", purpose, eligibility_id: initialContactId }));
           if (!active) return;
           const row = response.items[0];
           if (row?.draft) row.draft = await api<Draft>(`/api/communication/drafts/${row.draft.id}`, json({ eligibility_id: initialContactId }, "PATCH"));
           if (active) { setRows(response.items); changed.current?.(); }
         } else {
-          const existing = next.drafts?.find((d) => d.channel === channelRef.current);
+          const existing = next.drafts?.find((d) => d.channel === channelRef.current && (!initialContactId || d.eligibility_id === initialContactId));
           if (existing && epoch === rowsEpoch.current) { setRows([{ lead_id: identity, name: next.lead.name, draft: existing }]); setChannel(existing.channel); setMode(existing.execution_mode); }
         }
       })().catch((e) => { if (active) setError(e.message); }).finally(() => { if (active) setLoadingContext(false); });
@@ -81,7 +81,7 @@ export default function PrepareOutreach({ open, leadIds, batchKey, returnTo, onC
 
     {note && <Alert type="success" showIcon message={note} style={{ marginBottom: 12 }} />}
 
-    {embedded && rows.map((r) => <div key={r.lead_id}>{r.error && <Alert type="error" message={r.error} />}{r.draft?.status === "draft" ? <DraftEditor onWorkingChange={workingChange} key={r.draft.id} draft={r.draft} assignees={assignees} returnTo={returnTo} sender={sender} optOut={optOut} preferredAnalysisId={preferredAnalysisId} onViewMenus={onViewMenus} onChange={(draft) => { rowsEpoch.current++; setRows((old) => old.map((item) => item.lead_id === draft.lead_id ? { ...item, draft, error: undefined } : item)); onChanged?.(); }} /> : <Alert key={r.lead_id} type="info" message="已有触达任务，尚未发送新的消息" action={<Link href={taskLink({ lead: r.lead_id, task: r.existing_task?.id || r.activated_task_id || r.draft?.task_id, returnTo })}>查看任务与会话</Link>} />}</div>)}
+    {embedded && rows.map((r) => <div key={r.lead_id}>{r.error && <Alert type="error" message={r.error} />}{r.draft?.status === "draft" ? <DraftEditor onWorkingChange={workingChange} key={r.draft.id} draft={r.draft} assignees={assignees} returnTo={returnTo} sender={sender} optOut={optOut} preferredAnalysisId={preferredAnalysisId} onViewMenus={onViewMenus} onChange={(draft) => { rowsEpoch.current++; setRows((old) => old.map((item) => item.lead_id === draft.lead_id ? { ...item, draft, error: undefined } : item)); onChanged?.(); }} /> : <Alert key={r.lead_id} type="info" message="当前收件人已有触达任务，可查看发送进度" action={<Link href={taskLink({ lead: r.lead_id, task: r.existing_task?.id || r.activated_task_id || r.draft?.task_id, returnTo })}>查看任务与会话</Link>} />}</div>)}
     {!embedded && <Table<Prepared> rowKey="lead_id" size="small" pagination={{ pageSize: 10 }} dataSource={rows} columns={[
       { title: "客户", render: (_, r) => r.name || r.draft?.context.lead.name || r.lead_id },
       { title: "准备结果", render: (_, r) => r.error ? <Typography.Text type="danger">{r.error}</Typography.Text> : r.activated_task_id ? <Tag color="green">任务已就绪，尚未发送</Tag> : r.existing_task ? <Tag color="blue">已有任务 · {r.existing_task.status}</Tag> : <Tag color={r.draft?.blockers.length ? "orange" : "green"}>{r.draft?.blockers.length ? "待准备" : "可预览"}</Tag> },

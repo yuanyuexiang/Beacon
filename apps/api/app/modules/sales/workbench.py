@@ -49,6 +49,7 @@ class PrepareIn(BaseModel):
     batch_key: str | None = Field(default=None, max_length=64)
     assigned_to: str | None = Field(default=None, max_length=64)
     purpose: Literal["initial", "followup"] = "initial"
+    eligibility_id: uuid.UUID | None = None
 
 
 class DraftPatch(BaseModel):
@@ -514,6 +515,19 @@ def overview(
     }
 
 
+def same_recipient(db: Session, task: ManualTask, eligibility_id: uuid.UUID | None) -> bool:
+    if eligibility_id is None:
+        return True
+    left = db.get(ChannelEligibility, task.eligibility_id)
+    right = db.get(ChannelEligibility, eligibility_id)
+    return bool(
+        left
+        and right
+        and left.channel == right.channel
+        and (left.contact_ref or "").strip().casefold() == (right.contact_ref or "").strip().casefold()
+    )
+
+
 @router.post("/prepare")
 def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
     owner(db, body.assigned_to)
@@ -532,11 +546,16 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                     raise HTTPException(422, "客户不属于来源名单")
                 if service.is_suppressed(db, identity, None):
                     raise HTTPException(409, "客户已被抑制，不能准备触达")
+                if body.eligibility_id:
+                    chosen = db.get(ChannelEligibility, body.eligibility_id)
+                    if not chosen or chosen.lead_id != identity or chosen.channel != body.channel:
+                        raise HTTPException(422, "所选联系方式不属于当前门店或渠道")
                 prior = next(
                     (
                         t
                         for t in tasks_for(db, identity)
                         if t.channel == body.channel
+                        and same_recipient(db, t, body.eligibility_id)
                         and (t.status in service.OPEN_STATUSES or (body.purpose == "initial" and t.status in SENT))
                     ),
                     None,
@@ -556,6 +575,7 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                         Preparation.lead_id == identity,
                         Preparation.channel == body.channel.value,
                         Preparation.status == "draft",
+                        *([Preparation.eligibility_id == body.eligibility_id] if body.eligibility_id else []),
                     )
                 )
                 if d is None:
@@ -588,7 +608,7 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                         source_batch_id=batch.id if batch else None,
                         channel=body.channel.value,
                         execution_mode=body.execution_mode,
-                        eligibility_id=suitable[0].id if len(suitable) == 1 else None,
+                        eligibility_id=body.eligibility_id or (suitable[0].id if len(suitable) == 1 else None),
                         content_id=content.id if content else None,
                         assigned_to=body.assigned_to or lead.assigned_to or op.username,
                         purpose=body.purpose,
@@ -687,6 +707,7 @@ def activate(body: ActivateIn, db: Session = Depends(get_db), op: Operator = Dep
                         t
                         for t in tasks_for(db, d.lead_id)
                         if t.channel.value == d.channel
+                        and same_recipient(db, t, d.eligibility_id)
                         and (t.status in service.OPEN_STATUSES or (d.purpose == "initial" and t.status in SENT))
                     ),
                     None,
