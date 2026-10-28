@@ -333,3 +333,37 @@ def test_graph_diagnostics_redact_upstream_credentials(tmp_path, monkeypatch, co
     text = str(caught.value)
     assert f"code={code}" in text and "error_subcode=42" in text
     assert "secret-page-token" not in text and "secret-app-key" not in text
+
+
+def test_page_identity_permission_error_is_actionable_and_redacted(tmp_path, monkeypatch):
+    c = Core(tmp_path)
+    original = httpx.Client
+    transport = httpx.MockTransport(
+        lambda req: httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": 100,
+                    "message": "This endpoint requires the 'pages_read_engagement' permission. secret-page-token",
+                }
+            },
+        )
+    )
+    monkeypatch.setattr(httpx, "Client", lambda **kw: original(transport=transport, **kw))
+    with pytest.raises(MetaError) as caught:
+        c.graph({"token": "secret-page-token"}, "GET", "me?fields=id,name")
+    assert "pages_read_engagement" in str(caught.value)
+    assert "重新授权" in str(caught.value)
+    assert "secret-page-token" not in str(caught.value)
+
+
+@pytest.mark.parametrize("platform", ["facebook", "instagram"])
+def test_page_login_requests_identity_permission(setup, platform):
+    from urllib.parse import parse_qs, urlsplit
+
+    c, key, _ = setup
+    account = {"platform": platform, "auth_mode": "facebook_login", "sender_id": "1234", "page_id": "1234"}
+    url = c.oauth_start(key, account, "b" * 64)["url"]
+    scopes = parse_qs(urlsplit(url).query)["scope"][0].split(",")
+    assert "pages_read_engagement" in scopes
+    assert ("pages_messaging" if platform == "facebook" else "instagram_manage_messages") in scopes

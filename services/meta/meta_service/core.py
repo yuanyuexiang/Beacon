@@ -188,6 +188,12 @@ class Core:
                     reason = "访问令牌无效或已过期，请重新生成公共主页令牌并导入"
                 elif code in (10, 200) or response.status_code == 403:
                     reason = "权限不足，请核对应用权限及当前账号的公共主页管理权限"
+                elif code == 100 and "pages_read_engagement" in str(error.get("message", "")):
+                    reason = (
+                        "公共主页身份读取缺少 pages_read_engagement 权限；"
+                        "请在 Meta 应用中添加该权限，再重新授权并获取新的 Page Token。"
+                        "仅重新导入旧令牌不会增加权限"
+                    )
                 elif code == 100:
                     reason = "请求参数或对象不可访问，请核对账号 ID、令牌类型及 API 版本"
                 else:
@@ -394,9 +400,11 @@ class Core:
                 "INSERT INTO states (key,account,expires,candidate,binding,base_version) VALUES (?,?,?,?,?,?)",
                 (state, key, time.time() + 600, json.dumps(account), binding, old.get("version")),
             )
-        scopes = "pages_show_list,pages_messaging,pages_manage_metadata"
+        scopes = "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement"
         if account["platform"] == "instagram":
-            scopes = "pages_show_list,pages_manage_metadata,instagram_basic,instagram_manage_messages"
+            scopes = (
+                "pages_show_list,pages_manage_metadata,pages_read_engagement,instagram_basic,instagram_manage_messages"
+            )
         return {
             "url": "https://www.facebook.com/"
             + app["version"]

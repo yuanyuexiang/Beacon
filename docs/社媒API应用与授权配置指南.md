@@ -87,11 +87,11 @@ https://beacon.ai-onestep.com/api/outreach/oauth/callback
 
 | 用途 | Beacon 现有授权请求 | 配置注意事项 |
 |---|---|---|
-| Facebook Page 授权 | `pages_show_list`、`pages_messaging`、`pages_manage_metadata` | 在对应产品／权限中申请并让管理员实际同意 |
-| Instagram / Facebook Login | `pages_show_list`、`pages_manage_metadata`、`instagram_basic`、`instagram_manage_messages` | 使用关联 Page 的身份；不是 `instagram_business_*` 路线 |
+| Facebook Page 授权 | `pages_show_list`、`pages_messaging`、`pages_manage_metadata`、`pages_read_engagement` | 在对应产品／权限中申请并让管理员实际同意 |
+| Instagram / Facebook Login | `pages_show_list`、`pages_manage_metadata`、`pages_read_engagement`、`instagram_basic`、`instagram_manage_messages` | 使用关联 Page 的身份；不是 `instagram_business_*` 路线 |
 | Instagram / Instagram Login | 当前无浏览器授权请求 | 后续适配应按该路线申请 `instagram_business_basic`、`instagram_business_manage_messages` 等实际动作权限 |
 
-这是仓库代码现状，不是 Meta 所有 API 的完整权限清单。例如官方 Messenger Conversations API 列出 `pages_read_engagement` 等额外要求；以后增加历史会话读取／同步时，应按该端点补齐权限，不能以当前 Webhook 方案的 scopes 代替。[M2]
+这是仓库代码现状，不是 Meta 所有 API 的完整权限清单。当前身份检查读取 Page 的 `id,name`，也需 `pages_read_engagement`；云端已复现缺少此权限会返回 code=100。以后增加历史会话读取／同步时，仍须按具体端点补齐权限。[M2]
 
 开发角色联调通过不代表所有外部账号可用。对外服务应按控制台针对具体权限的 Standard／Advanced Access、App Review、业务验证及应用状态要求办理；不要只切换 Live 就认定消息权限已获批准。[M2]
 
