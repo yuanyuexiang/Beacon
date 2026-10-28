@@ -1,6 +1,7 @@
 export type ChannelAccount = {
   id: string; platform: "facebook" | "instagram"; label: string; auth_mode: string;
   sender_id: string; page_id?: string | null; connected: boolean; sending_enabled: boolean;
+  connection_diagnostics?: { state: string; updated_at: string; error?: string } | null;
   queue_enabled: boolean; daily_limit: number; capabilities: string[];
 };
 export type Conversation = {

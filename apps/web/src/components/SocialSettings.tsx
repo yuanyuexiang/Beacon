@@ -1,5 +1,5 @@
 "use client";
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsDraft, useSettingsStatus } from "./SettingsState";
 import { api, json } from "@/lib/api";
@@ -13,7 +13,7 @@ export default function SocialSettings() {
   useSettingsDraft("meta", Object.values(drafts).some(Boolean));
   const [status, setStatus] = useState<Status>();
   const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
-  useSettingsStatus("meta", !status ? "未检查" : !status.configured ? "服务不可用" : !status.app?.configured ? "未配置" : accounts.some(a => a.connected) ? "身份已核验" : "待授权");
+  useSettingsStatus("meta", !status ? "未检查" : !status.configured ? "服务不可用" : !status.app?.configured ? "未配置" : accounts.some(a => a.connection_diagnostics?.state === "check_failed") ? "连接异常" : accounts.some(a => a.connected) ? "身份已核验" : "待授权");
   const [active, setActive] = useState<Record<string, string>>({});
   const locks = useRef(new Set<string>());
   const scopeOf = (key: string) => key.split(":")[0];
@@ -38,7 +38,7 @@ export default function SocialSettings() {
     const scope = scopeOf(key);
     if (locks.current.has("app") || locks.current.has(scope) || (scope === "app" && locks.current.size)) return;
     locks.current.add(scope); setActive(previous => ({...previous, [scope]: key}));
-    try { await work(); await refresh(); } catch (e) { message.error((e as Error).message); }
+    try { await work(); await refresh(); } catch (e) { message.error((e as Error).message); await refresh().catch(() => undefined); }
     finally {
       locks.current.delete(scope);
       setActive(previous => { const next = {...previous}; delete next[scope]; return next; });
@@ -63,13 +63,13 @@ export default function SocialSettings() {
     </details>
     <Table<ChannelAccount> size="small" rowKey="id" dataSource={accounts} pagination={false} columns={[
       { title: "账号", render: (_, a) => <>{a.label}<br /><Typography.Text type="secondary">{channelLabel(a.platform)} · {a.sender_id}</Typography.Text></> },
-      { title: "状态", render: (_, a) => <Space wrap><Tag color={a.connected ? "green" : "default"}>{a.connected ? "身份已核验" : "待授权 / 检查"}</Tag><Tag>{a.sending_enabled ? "允许发送" : "发送暂停"}</Tag><Tag>{a.queue_enabled ? "队列运行" : "队列暂停"}</Tag></Space> },
+      { title: "状态", render: (_, a) => <Space wrap><Tag color={a.connected ? "green" : "default"}>{a.connected ? "身份已核验" : ({ pending_check: "令牌已保存 · 待检查", missing_token: "未导入令牌", check_failed: "连接检查失败", disconnected: "已断开 · 需重新导入" }[a.connection_diagnostics?.state || ""] || "尚未检查")}</Tag><Tag>{a.sending_enabled ? "允许发送" : "发送暂停"}</Tag><Tag>{a.queue_enabled ? "队列运行" : "队列暂停"}</Tag>{a.connection_diagnostics?.error && <Alert type="error" showIcon message={a.connection_diagnostics.error} description="令牌无需因检查失败而断开；修正后点击检查连接。" />}{a.connection_diagnostics?.updated_at && <Typography.Text type="secondary">最近更新：{new Date(a.connection_diagnostics.updated_at).toLocaleString()}</Typography.Text>}</Space> },
       { title: "操作", render: (_, a) => <Space wrap>
         <Button size="small" disabled={blocked(a.id)} onClick={() => { setTokenAccount(a); setToken(""); dirty("token", false); }}>导入 Token</Button>
         {a.auth_mode === "facebook_login" && <Button size="small" loading={loading(`${a.id}:connect`)} disabled={blocked(a.id) || !status?.app?.configured} onClick={() => act(`${a.id}:connect`, async () => { const r = await api<{ url: string }>(`/api/outreach/accounts/${a.id}/connect`, json({})); window.location.assign(r.url); })}>浏览器授权</Button>}
         <Button size="small" loading={loading(`${a.id}:check`)} disabled={blocked(a.id)} onClick={() => act(`${a.id}:check`, async () => { await api(`/api/outreach/accounts/${a.id}/check`, json({})); message.success("身份检查通过；真实消息权限仍需账号联调"); })}>检查连接</Button>
         <Button size="small" disabled={blocked(a.id)} onClick={() => { setEditing(a); policyForm.setFieldsValue(a); }}>发送设置</Button>
-        <Button size="small" danger loading={loading(`${a.id}:disconnect`)} disabled={blocked(a.id)} onClick={() => act(`${a.id}:disconnect`, async () => { await api(`/api/outreach/accounts/${a.id}/disconnect`, json({})); })}>断开</Button>
+        <Popconfirm title="断开并清除该账号的令牌？" description="这不会修复连接错误；重新连接需再次授权或导入令牌。" onConfirm={() => act(`${a.id}:disconnect`, async () => { await api(`/api/outreach/accounts/${a.id}/disconnect`, json({})); })}><Button size="small" danger loading={loading(`${a.id}:disconnect`)} disabled={blocked(a.id)}>断开</Button></Popconfirm>
       </Space> },
     ]} />
     <details style={{ marginTop: 16 }}><summary>添加发送账号（可以暂不授权）</summary>
@@ -82,7 +82,7 @@ export default function SocialSettings() {
         <Button htmlType="submit" loading={loading("create:account")} disabled={blocked("create")}>添加账号</Button>
       </Form>
     </details>
-    <Modal title={`导入 ${tokenAccount?.label || ""} 的 Access Token`} open={!!tokenAccount} onCancel={() => { if (tokenAccount && blocked(tokenAccount.id)) return; setTokenAccount(undefined); setToken(""); dirty("token", false); }} onOk={() => act(`${tokenAccount!.id}:token`, async () => { await api(`/api/outreach/accounts/${tokenAccount!.id}/credentials`, json({ token }, "PUT")); setToken(""); dirty("token", false); setTokenAccount(current => current?.id === tokenAccount!.id ? undefined : current); message.success("授权已保存，请检查连接"); })} confirmLoading={!!tokenAccount && loading(`${tokenAccount.id}:token`)} okButtonProps={{ disabled: !token.trim() || (!!tokenAccount && blocked(tokenAccount.id)) }}>
+    <Modal title={`导入 ${tokenAccount?.label || ""} 的 Access Token`} open={!!tokenAccount} onCancel={() => { if (tokenAccount && blocked(tokenAccount.id)) return; setTokenAccount(undefined); setToken(""); dirty("token", false); }} onOk={() => act(`${tokenAccount!.id}:token`, async () => { await api(`/api/outreach/accounts/${tokenAccount!.id}/credentials`, json({ token }, "PUT")); setToken(""); dirty("token", false); setTokenAccount(current => current?.id === tokenAccount!.id ? undefined : current); await api(`/api/outreach/accounts/${tokenAccount!.id}/check`, json({})); message.success("令牌已保存，账号身份检查通过"); })} okText="保存并检查连接" confirmLoading={!!tokenAccount && loading(`${tokenAccount.id}:token`)} okButtonProps={{ disabled: !token.trim() || (!!tokenAccount && blocked(tokenAccount.id)) }}>
       <Typography.Paragraph>Facebook 使用 Page Token；INS Facebook Login 使用关联 Page Token；INS Instagram Login 使用该专业账号的 Token。导入会暂停发送并使旧预览失效。</Typography.Paragraph>
       <Input.Password disabled={!!tokenAccount && blocked(tokenAccount.id)} value={token} onChange={(e) => { setToken(e.target.value); dirty("token", !!e.target.value); }} autoComplete="new-password" />
     </Modal>

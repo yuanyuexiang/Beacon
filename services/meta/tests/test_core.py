@@ -313,3 +313,23 @@ def test_disconnect_invalidates_pending_oauth(setup):
     with pytest.raises(MetaError, match="账号已变化"):
         c.oauth_finish(state, "code", "b" * 64)
     assert not c.read(key)["token"]
+
+
+@pytest.mark.parametrize("code,status", [(190, 400), (200, 403), (100, 400)])
+def test_graph_diagnostics_redact_upstream_credentials(tmp_path, monkeypatch, code, status):
+    c = Core(tmp_path)
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            status,
+            json={
+                "error": {"code": code, "error_subcode": 42, "message": "secret-page-token secret-app-key"},
+            },
+        )
+    )
+    original = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **kw: original(transport=transport, **kw))
+    with pytest.raises(MetaError) as caught:
+        c.graph({"token": "secret-page-token"}, "GET", "me?fields=id,name")
+    text = str(caught.value)
+    assert f"code={code}" in text and "error_subcode=42" in text
+    assert "secret-page-token" not in text and "secret-app-key" not in text

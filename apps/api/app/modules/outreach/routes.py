@@ -159,16 +159,23 @@ def credentials(
 
 
 @router.post("/accounts/{aid}/check")
-def check(aid: uuid.UUID, db: Session = Depends(get_db)):
+def check(aid: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
     with operation(db):
         a = account(db, aid)
         try:
             result = client.call("POST", f"/accounts/{a.id}/check", {})
-        except client.ProviderError:
+        except client.ProviderError as exc:
             a.connected, a.sending_enabled, a.queue_enabled = False, False, False
+            a.connection_diagnostics = {
+                "state": "check_failed",
+                "updated_at": service.now().isoformat(),
+                "error": str(exc),
+            }
+            audit.record(db, op, "check_channel_connection", "channel_account", a.id, after=a.connection_diagnostics)
             db.commit()
             raise
         service.sync_account(a, result)
+        audit.record(db, op, "check_channel_connection", "channel_account", a.id, after=a.connection_diagnostics)
         db.commit()
         return service.account_public(a)
 
@@ -194,6 +201,7 @@ def disconnect(aid: uuid.UUID, db: Session = Depends(get_db), op: Operator = Dep
     with operation(db):
         a = account(db, aid)
         service.sync_account(a, client.call("POST", f"/accounts/{a.id}/disconnect", {}))
+        a.connection_diagnostics = {"state": "disconnected", "updated_at": service.now().isoformat()}
         audit.record(db, op, "disconnect_channel_account", "channel_account", a.id)
         db.commit()
         return service.account_public(a)

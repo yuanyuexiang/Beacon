@@ -332,3 +332,47 @@ def test_meta_callback_without_browser_cookie_never_calls_provider(client, monke
     monkeypatch.setattr(provider, "call", unexpected)
     response = client.get("/api/outreach/oauth/callback?state=test&code=test", follow_redirects=False)
     assert response.headers["location"] == "/settings?meta=failed"
+
+
+def test_connection_failure_persists_and_success_clears(client, db, monkeypatch):
+    _ready(client, db)
+    row = client.post(
+        "/api/outreach/accounts",
+        json={
+            "platform": "facebook",
+            "label": "Diagnostics page",
+            "auth_mode": "facebook_login",
+            "sender_id": "998877",
+        },
+    ).json()
+    aid = row["id"]
+
+    def fail(*args, **kwargs):
+        raise provider.ProviderError("权限不足（HTTP 403; code=200）", 409)
+
+    monkeypatch.setattr(provider, "call", fail)
+    assert client.post(f"/api/outreach/accounts/{aid}/check").status_code == 409
+    rows = client.get("/api/outreach/accounts").json()
+    saved = next(a for a in rows if a["id"] == aid)
+    assert saved["connection_diagnostics"]["state"] == "check_failed"
+    assert "code=200" in saved["connection_diagnostics"]["error"]
+    assert saved["connection_diagnostics"]["updated_at"]
+    assert not saved["connected"]
+    monkeypatch.setattr(
+        provider,
+        "call",
+        lambda *a, **k: {
+            "configured": True,
+            "verified": True,
+            "version": "checked",
+            "capabilities": ["text_reply"],
+        },
+    )
+    result = client.post(f"/api/outreach/accounts/{aid}/check").json()
+    assert result["connected"]
+    assert result["connection_diagnostics"]["state"] == "verified"
+    assert "error" not in result["connection_diagnostics"]
+    assert (
+        client.post(f"/api/outreach/accounts/{aid}/disconnect").json()["connection_diagnostics"]["state"]
+        == "disconnected"
+    )

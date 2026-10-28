@@ -177,10 +177,22 @@ class Core:
                 raise MetaError("平台服务暂不可用")
             result = response.json()
             if not response.is_success or result.get("error"):
-                code = (result.get("error") or {}).get("code")
+                error = result.get("error") or {}
+                code = error.get("code")
+                # Never expose upstream message/URL/body: they can contain credentials.
+                details = f"HTTP {response.status_code}"
+                for field in ("code", "error_subcode"):
+                    if type(error.get(field)) is int:
+                        details += f"; {field}={error[field]}"
                 if code == 190 or response.status_code == 401:
-                    raise MetaError("授权失效，请重新连接账号")
-                raise MetaError("平台拒绝请求，请核对权限、收件人及会话条件")
+                    reason = "访问令牌无效或已过期，请重新生成公共主页令牌并导入"
+                elif code in (10, 200) or response.status_code == 403:
+                    reason = "权限不足，请核对应用权限及当前账号的公共主页管理权限"
+                elif code == 100:
+                    reason = "请求参数或对象不可访问，请核对账号 ID、令牌类型及 API 版本"
+                else:
+                    reason = "平台拒绝请求，请核对权限、账号及会话条件"
+                raise MetaError(f"{reason}（{details}）")
             return result
         except (httpx.HTTPError, json.JSONDecodeError, KeyError):
             raise MetaError("平台连接失败；发送结果需对账确认") from None
@@ -195,7 +207,9 @@ class Core:
             ig = result.get("instagram_business_account") or {}
             actual, result = str(ig.get("id") or ""), ig
         if actual != a["sender_id"]:
-            raise MetaError("Token 所属发送账号与配置不一致")
+            raise MetaError(
+                "Token 所属发送账号与配置不一致：请使用该公共主页的 Page Token，不要使用用户 Token 或 App Token"
+            )
         return result
 
     @serialized

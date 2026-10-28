@@ -24,6 +24,7 @@ class ChannelAccount(UUIDPk, Timestamped, Base):
     queue_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     daily_limit: Mapped[int] = mapped_column(Integer, default=20)
     capabilities: Mapped[list] = mapped_column(JSONB, default=list)
+    connection_diagnostics: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class Conversation(UUIDPk, Timestamped, Base):

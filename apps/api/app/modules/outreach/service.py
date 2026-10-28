@@ -38,6 +38,7 @@ def account_public(a: ChannelAccount) -> dict:
         "queue_enabled": a.queue_enabled,
         "daily_limit": a.daily_limit,
         "capabilities": a.capabilities,
+        "connection_diagnostics": a.connection_diagnostics,
     }
 
 
@@ -48,6 +49,10 @@ def sync_account(a: ChannelAccount, result: dict):
     a.capabilities = result.get("capabilities") or []
     if not a.connected:
         a.queue_enabled = False
+    a.connection_diagnostics = {
+        "state": "verified" if a.connected else "pending_check" if result.get("configured") else "missing_token",
+        "updated_at": now().isoformat(),
+    }
 
 
 def conversation_public(c: Conversation) -> dict:
