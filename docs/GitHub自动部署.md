@@ -69,6 +69,8 @@ CI 不读取应用密钥，不发送真实客户消息。发布不改业务发�
 
 新增迁移必须更新 `compatibility.json` 的 `migration_head`，否则 CI 阻断。数据库 revision 不变且 provider 存储格式兼容时可回滚；revision 改变时须在 `rollback_compatible_from` 明确声明对应旧版本，并确认新结构能被旧程序读取。服务 SQLite／JSON 格式不兼容时将 `provider_storage_compatible` 设为 false。
 
+2026-10-28：当前迁移 head 为 `d176a0010001`，包含头像字段（`d174a0010001`）与渠道条件／准备待办字段（`d176a0010001`）。`rollback_compatible_from` 保持空列表：这些字段虽为增量添加，但未完成旧程序对新版任务状态的回滚验收，不声明从 `d170a0010001` 或 `d174a0010001` 自动回滚兼容。升级失败按部署网关的停止与恢复流程处理，不自动降级数据库。
+
 不兼容或发布中断会保留 `/opt/beacon/state/pending.json`，停止继续覆盖。管理员需核对其中阶段、数据库 revision、`releases/*/deploy.log` 和实际服务状态，确认恢复或完成方案后再清理该记录；不要直接删除记录来跳过未确认状态。
 
 应用发布清单在 `state/current.json`，上一成功版本在 `state/previous.json`；失败回滚另记 `state/last_failure.json`。日志与备份不进入 GitHub artifact，避免上传业务凭据或证据。
