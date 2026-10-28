@@ -67,7 +67,7 @@ def test_workflow_freezes_policy_and_google_skips_when_unconfigured(client, db):
     assert result["done"] and "未配置" in result["note"]
 
 
-def test_workflow_does_not_limit_calls_but_keeps_minute_protection(client, db):
+def test_minute_throttle_waits_then_continues_without_failure(client, db, monkeypatch):
     _, lead = setup_lead(client, db)
     get_settings().google_places_api_key = "test-not-real"
     operator = db.scalar(select(Operator))
@@ -83,14 +83,19 @@ def test_workflow_does_not_limit_calls_but_keeps_minute_protection(client, db):
         one.search("Cafe")
     two = google_places._client(db, operator, lead.id, workflow_id="unlimited")
     two.transport = httpx.MockTransport(reply)
-    with pytest.raises(google.PlacesError, match="次数已达上限"):
-        two.search("Cafe")
-    assert len(calls) == 20
-    for record in db.scalars(select(AuditLog).where(AuditLog.action == "google_places_request")):
-        record.at = datetime.now(UTC) - timedelta(minutes=2)
-    db.commit()
+    waits = []
+
+    def wait(seconds):
+        waits.append(seconds)
+        assert len(calls) == 20  # 不提前向 Google 请求，也不多记一次失败。
+        for record in db.scalars(select(AuditLog).where(AuditLog.action == "google_places_request")):
+            record.at = datetime.now(UTC) - timedelta(minutes=2)
+        db.commit()
+
+    monkeypatch.setattr(google_places.time, "sleep", wait)
     two.search("Cafe")
-    assert len(calls) == 21  # 同一任务超过旧 20 次上限仍可调用。
+    assert waits == [1]
+    assert len(calls) == 21  # 节流后自动继续，无需人工重试。
     get_settings().google_places_api_key = None
 
 
@@ -232,12 +237,18 @@ def test_verified_operating_type_takes_priority_over_name_keywords(client, db):
     assert cls == ScreeningClass.excluded_cafe and "官网原文" in reason
 
 
-def test_old_exhausted_workflow_can_continue_without_new_task(client, db, monkeypatch):
+@pytest.mark.parametrize(
+    "note",
+    [
+        "本次任务 Google 调用预算已用完，剩余门店可另开补充任务",
+        "Google 查询次数已达上限，请稍后或次日重试",
+    ],
+)
+def test_old_exhausted_workflow_can_continue_without_new_task(client, db, monkeypatch, note):
     batch, lead = setup_lead(client, db)
     monkeypatch.setattr(get_settings(), "google_places_api_key", "test")
     task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
     task.step = task.steps.index("google")
-    note = "本次任务 Google 调用预算已用完，剩余门店可另开补充任务"
     lead.raw = {
         "places_enrichment": {
             "strategy_version": places_enrichment.STRATEGY_VERSION,
@@ -264,3 +275,31 @@ def test_old_exhausted_workflow_can_continue_without_new_task(client, db, monkey
     assert calls == [str(lead.id)] and result["done"]
     assert "google_exhausted" not in result and "note" not in result
     assert "google_request_limit" not in policy.Policy.model_validate(task.params["policy"]).model_dump()
+
+
+def test_minute_wait_can_be_cancelled_without_upstream_call(client, db, monkeypatch):
+    batch, lead = setup_lead(client, db)
+    monkeypatch.setattr(get_settings(), "google_places_api_key", "test-not-real")
+    task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
+    operator = db.scalar(select(Operator))
+    c = google_places._client(db, operator, lead.id, workflow_id=str(task.id))
+    calls = []
+
+    def reply(request):
+        calls.append(request)
+        return httpx.Response(200, json={"places": []})
+
+    c.transport = httpx.MockTransport(reply)
+    for _ in range(20):
+        c.search("Cafe")
+    waits = []
+
+    def cancel(seconds):
+        waits.append(seconds)
+        task.status = "cancelled"
+        db.commit()
+
+    monkeypatch.setattr(google_places.time, "sleep", cancel)
+    with pytest.raises(google.PlacesError, match="任务已结束"):
+        c.search("Cafe")
+    assert waits == [1] and len(calls) == 20

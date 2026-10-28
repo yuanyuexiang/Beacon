@@ -118,7 +118,7 @@ export default function GooglePlaces({ id, name, address, postcode, website, onW
     <Typography.Paragraph type="secondary">优先使用完善名单时保存的核验结果，打开页面不会重新查询 Google。价格与照片需按需实时获取；照片可能不是现行菜单，消费档位不能代表采购预算。</Typography.Paragraph>
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     {state && !state.configured && <Alert type="info" message="Google 查询尚未配置，请联系工作台管理员" style={{ marginBottom: 12 }} />}
-    {state?.configured && <Typography.Paragraph type="secondary">今日查询尝试 {state.attempts_today} / {state.daily_limit}（含重试，照片加载另计；实际费用以 Google 账单为准）</Typography.Paragraph>}
+    {state?.configured && <Typography.Paragraph type="secondary">今日查询尝试 {state.attempts_today} 次（不设系统每日上限；繁忙时自动等待，含重试；实际费用以 Google 账单为准）</Typography.Paragraph>}
     {state?.saved_review && <Alert style={{ marginBottom: 12 }} type={state.saved_review.website_changed ? "warning" : "info"} showIcon message={state.saved_review.website_changed ? "官网已变化，以下为历史核验结果" : "已读取完善名单的核验记录"} description={<>{state.saved_review.reason || "核验结果已保存"}{state.saved_review.checked_at && <div>核验时间：{new Date(state.saved_review.checked_at).toLocaleString("zh-CN")}</div>}<div>Google 查询：{({ completed: "已完成", retry: "待重试", not_queried: "未查询" } as Record<string, string>)[state.saved_review.google_status || ""] || "未记录"}；门店关联：{state.link ? "已关联，直接复用" : "尚未确认，可核对候选"}</div></>} />}
     <Typography.Paragraph>当前采用官网：{website ? <a href={website} target="_blank" rel="noreferrer">{website}</a> : "未登记"}</Typography.Paragraph>
     <Space wrap>

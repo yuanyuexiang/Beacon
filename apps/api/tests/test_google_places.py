@@ -66,6 +66,8 @@ def test_upstream_errors_are_safe(status, expected):
     with pytest.raises(google.PlacesError) as e:
         adapter(lambda r: httpx.Response(status, text="fake-secret with raw content"), calls.append).search("test")
     assert e.value.status == expected and "fake-secret" not in str(e.value)
+    if status == 429:
+        assert "Google 官方 API 返回 HTTP 429" in str(e.value)
     assert len(calls) == (2 if status == 500 else 1)
 
 
@@ -231,7 +233,7 @@ def test_lead_change_during_search_cannot_issue_stale_token(client, db, monkeypa
     assert client.post(f"/api/leads/{lead_id}/google-places/search", json={}).status_code == 409
 
 
-def test_project_limit_counts_failed_requests(client, db, monkeypatch):
+def test_removed_daily_limit_still_counts_failed_requests(client, db, monkeypatch):
     lead_id = setup(client, db, monkeypatch)
     get_settings().google_places_daily_limit = 2
     real = routes._client
@@ -243,9 +245,11 @@ def test_project_limit_counts_failed_requests(client, db, monkeypatch):
 
     monkeypatch.setattr(routes, "_client", factory)
     assert client.post(f"/api/leads/{lead_id}/google-places/search", json={}).status_code == 502
-    assert client.post(f"/api/leads/{lead_id}/google-places/search", json={}).status_code == 429
+    assert client.post(f"/api/leads/{lead_id}/google-places/search", json={}).status_code == 502
     db.expire_all()
-    assert len(db.scalars(select(AuditLog).where(AuditLog.action == "google_places_request")).all()) == 2
+    assert len(db.scalars(select(AuditLog).where(AuditLog.action == "google_places_request")).all()) == 4
+    state = client.get(f"/api/leads/{lead_id}/google-places").json()
+    assert state["daily_limit"] == 0 and state["attempts_today"] == 4
 
 
 def test_photo_bytes_no_store_and_no_disk(client, db, monkeypatch, tmp_path):

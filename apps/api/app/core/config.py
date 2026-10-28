@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     exa_api_key: str | None = None  # 可选；空值使用免费限流的 MCP 搜索，密钥只通过请求头发送
     google_places_api_key: str | None = Field(default=None, repr=False)
     google_places_proxy: str | None = None  # 显式代理；为空直连，不读取进程代理变量
-    google_places_daily_limit: int = Field(default=200, ge=1, le=10000)  # 项目内调用尝试上限，不是费用承诺
+    google_places_daily_limit: int = Field(default=0, ge=0)  # 兼容旧环境变量；不再执行项目内每日上限
     gmail_service_url: str | None = None
     gmail_service_token_file: Path | None = None
     meta_service_url: str | None = None

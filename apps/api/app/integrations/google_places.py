@@ -188,7 +188,9 @@ class PlacesClient:
                     if response.status_code >= 500 and attempt == 0:
                         continue
                     if response.status_code == 429:
-                        raise PlacesError("Google Places 配额或速率受限，请稍后重试", 429)
+                        raise PlacesError(
+                            "Google 官方 API 返回 HTTP 429：配额或速率受限，请在 Google Cloud 检查配额后重试", 429
+                        )
                     if response.status_code in (401, 403):
                         raise PlacesError("Google Places 拒绝访问，请检查密钥、结算、API 启用和出口 IP 限制", 503)
                     if response.status_code in (400, 404):

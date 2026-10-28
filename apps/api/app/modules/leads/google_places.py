@@ -168,15 +168,34 @@ def _client(db: Session, op: Operator, lead_id: uuid.UUID, *, workflow_id: str |
     settings = get_settings()
 
     def reserve(sku: google.SKU) -> None:
-        # 项目级持久限额；并发请求先锁计数再提交预留，网络失败也占一次尝试。
-        db.execute(text("SELECT pg_advisory_xact_lock(70931246)"))
-        now = datetime.now(UTC)
-        count = select(func.count()).select_from(AuditLog).where(AuditLog.action == "google_places_request")
-        daily = db.scalar(count.where(AuditLog.at >= _day_start())) or 0
-        recent = db.scalar(count.where(AuditLog.at >= now - timedelta(minutes=1))) or 0
-        if daily >= settings.google_places_daily_limit or recent >= 20:
-            db.rollback()
-            raise google.PlacesError("Google 查询次数已达上限，请稍后或次日重试", 429)
+        # 全项目分钟节流只延迟，不使任务失败；每日次数仅统计，旧限额配置不再生效。
+        while True:
+            db.execute(text("SELECT pg_advisory_xact_lock(70931246)"))
+            now = datetime.now(UTC)
+            recent = (
+                db.scalar(
+                    select(func.count())
+                    .select_from(AuditLog)
+                    .where(AuditLog.action == "google_places_request", AuditLog.at >= now - timedelta(minutes=1))
+                )
+                or 0
+            )
+            if recent < 20:
+                break
+            db.rollback()  # 等待期间释放事务及预留锁，允许结束任务及其他工作继续。
+            if workflow_id:
+                from app.modules.leads.workflows import Workflow
+
+                try:
+                    task_id = uuid.UUID(workflow_id)
+                except ValueError:
+                    task_id = None
+                if task_id is not None:
+                    stopped = db.scalar(select(Workflow.status).where(Workflow.id == task_id)) == "cancelled"
+                    db.rollback()
+                    if stopped:
+                        raise google.PlacesError("任务已结束，停止 Google 查询", 409)
+            time.sleep(1)
         audit.record(
             db,
             op,
@@ -231,7 +250,7 @@ def state(
         "configured": bool(get_settings().google_places_api_key),
         "link": _link(lead),
         "attempts_today": attempts,
-        "daily_limit": get_settings().google_places_daily_limit,
+        "daily_limit": 0,
     }
 
 

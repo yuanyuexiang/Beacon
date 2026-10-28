@@ -30,7 +30,7 @@ def needed(lead: Lead, settings: policy.Policy) -> bool:
         or record.get("manual") != website_review.manual(lead)
     ):
         return True
-    if "本次任务 Google 调用预算已用完" in record.get("reason", ""):
+    if any(note in record.get("reason", "") for note in ("本次任务 Google 调用预算已用完", "Google 查询次数已达上限")):
         return True
     review = (lead.raw or {}).get("website_research") or {}
     try:
@@ -200,8 +200,8 @@ def _save_status(
 def advance(db: Session, batch: Batch, task: "Workflow") -> dict:
     selected = policy.Policy.model_validate(task.params["policy"])
     state: dict[str, Any] = dict(task.results[task.step]) if len(task.results) > task.step else {}
-    # 兼容旧任务：只清除旧的单任务额度耗尽检查点，当前全局限流继续保留。
-    if "本次任务 Google 调用预算已用完" in state.get("note", ""):
+    # 兼容已移除的单任务／项目每日限额；真实上游错误保持原处理。
+    if any(note in state.get("note", "") for note in ("本次任务 Google 调用预算已用完", "Google 查询次数已达上限")):
         state = {}
     for key, value in {
         "processed": [],

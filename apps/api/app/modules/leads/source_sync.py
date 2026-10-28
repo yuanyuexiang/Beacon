@@ -64,6 +64,8 @@ def advance(db: Session, batch: Batch, task: "Workflow") -> dict:
 
     selected = policy.Policy.model_validate(task.params["policy"])
     state = dict(task.results[task.step]) if len(task.results) > task.step else {}
+    if "Google 查询次数已达上限" in state.get("note", ""):
+        state = {}  # 旧本地每日上限不再阻断来源同步；已完成结果由 fresh 复用。
     for key, default in {"processed": [], "synced": 0, "retry": 0}.items():
         state.setdefault(key, default)
     if selected.google_mode == "off" or not get_settings().google_places_api_key:

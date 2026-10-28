@@ -434,3 +434,7 @@ OAuth 会话用新增私有 SQLite 表 oauth_sessions_v2，旧表结构保持兼
 ### 2026-10-28 Page 身份读取权限补全
 
 实际云端 Meta code=100 明确要求 pages_read_engagement，当前身份读取接口与 Facebook Login scopes 不匹配。补齐 Facebook 与关联 Page 的 Instagram 授权范围，并按白名单权限名生成固定错误说明，不回显原始平台错误。云端 App Secret 另有完整性问题，需用户重新保存；未修改云端凭据或发送消息。服务专项21项通过。
+
+### 2026-10-28 测试阶段 Google 每日限额取消
+
+用户授权取消 Beacon 自设每日次数上限；旧 GOOGLE_PLACES_DAILY_LIMIT 环境变量保留解析但不执行，状态接口 daily_limit=0 表示无本地每日上限。每分钟20次改为释放预留事务后等待并继续，等待每秒可检查名单取消；不产生本地429、不触发 google_exhausted。Google真实429提示明确来源。旧额度检查点允许恢复，成功资料复用；保持用户显式启动／重试。无迁移，不修改云端配置，不自动发布。
