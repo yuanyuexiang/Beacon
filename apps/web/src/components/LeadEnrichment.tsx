@@ -3,6 +3,7 @@
 import { Alert, Checkbox, Drawer, List, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Button from "@/components/AccessButton";
+import EnrichmentHistory from "./EnrichmentHistory";
 import { api, json } from "@/lib/api";
 
 type Item = { key: string; title: string; needed: boolean; updated_at: string | null; description: string };
@@ -64,6 +65,7 @@ export default function LeadEnrichment({ leadId, onChanged, onMenus, dataRevisio
       </div>
       <Space wrap><Button readOnlySafe onClick={() => show("refresh")} disabled={!state || active}>重新完善</Button><Button readOnlySafe type="primary" onClick={() => show("continue")}>{active ? "查看完善进度" : "继续完善"}</Button></Space>
     </section>
+    <EnrichmentHistory leadId={leadId} />
     {!open && error && <Alert showIcon type="warning" message="资料状态未能加载" description={error} action={<Button readOnlySafe onClick={() => void load().then(() => setError(undefined)).catch((e) => setError(e.message))}>重试</Button>} />}
     <Drawer title={active ? "完善进度" : mode === "refresh" ? "重新完善这家门店" : "继续完善这家门店"} open={open} width={640} onClose={() => setOpen(false)} footer={<Space wrap>{active ? state?.task?.single ? <Button loading={busy} onClick={stop}>结束本次完善</Button> : <Typography.Text type="secondary">批量任务请在名单页面管理</Typography.Text> : <Button type="primary" loading={busy} disabled={!state || !selected.length} onClick={() => void start()}>{mode === "refresh" ? "更新所选资料" : "开始完善所选项"}</Button>}<Button readOnlySafe onClick={() => setOpen(false)}>关闭</Button></Space>}>
       <Typography.Paragraph type="secondary">{mode === "refresh" ? "重新获取所选资料。人工确认资料保留，新分析生成独立版本；更新后请重新核对相关文案。" : "复用批量处理和单家已有结果，只补充缺失、失败或过期的资料。打开页面不会自动查询或调用 AI。"}</Typography.Paragraph>

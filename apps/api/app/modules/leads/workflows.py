@@ -12,7 +12,7 @@ from typing import Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import ForeignKey, Integer, String, Text, select, text, update
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, Session, mapped_column
 from sqlalchemy.orm.attributes import set_committed_value
@@ -40,6 +40,8 @@ class Workflow(UUIDPk, Timestamped, Base):
     contact_run_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("batch_run.id", ondelete="SET NULL")
     )
+    history_scope: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_by: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
@@ -153,6 +155,13 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
         if body.kind != "enrich" or body.phase != "review" or not set(body.lead_ids) <= members:
             raise HTTPException(422, "Selected stores must belong to this review list")
         params["lead_ids"] = [str(x) for x in dict.fromkeys(body.lead_ids)]
+    if body.kind == "enrich":
+        scope_ids = params.get("lead_ids") or [str(x.id) for x in service.list_leads(db, batch.id, None, None, 0)]
+        params["history_scope"] = {
+            "kind": "selected" if body.lead_ids else "batch",
+            "count": len(scope_ids),
+            "lead_ids": scope_ids,
+        }
     params["ai_revision"] = ai_revision(db)
     params["phase"] = body.phase if body.kind == "enrich" else "sync"
     params["policy"] = policy.current(db).model_dump()
@@ -164,7 +173,8 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
             if params["phase"] == "review"
             else (["pool"] if body.kind != "enrich" else []) + ["overture", "google_sync"]
         ),
-        params=params,
+        params={k: v for k, v in params.items() if k != "history_scope"},
+        history_scope=params.get("history_scope"),
         results=[],
         started_by=by,
     )
@@ -181,7 +191,9 @@ def cancelled(db: Session, task_id: uuid.UUID) -> bool:
 
 def save_progress(db: Session, task: Workflow) -> None:
     """条件更新防止晚到的执行结果覆盖并发取消；业务结果照常提交。"""
-    fields = {key: getattr(task, key) for key in ("status", "error", "step", "results")}
+    fields = {key: getattr(task, key) for key in ("status", "error", "step", "results", "history_scope")}
+    if task.status in {"completed", "failed"}:
+        fields["finished_at"] = datetime.now(UTC)
     for key, value in fields.items():
         set_committed_value(task, key, value)
     with db.no_autoflush:
@@ -302,6 +314,9 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
         if cancelled(db, task.id):
             db.refresh(task)
             return task
+        if not task.history_scope and task.steps[task.step] in {"pool", "fsa"}:
+            ids = [str(x.id) for x in service.list_leads(db, batch.id, None, None, 0)]
+            task.history_scope = {"kind": "batch", "count": len(ids), "lead_ids": ids}
         task.results = task.results[: task.step] + [result]
         task.step += 1
         task.status = "completed" if task.step == len(task.steps) else "pending"

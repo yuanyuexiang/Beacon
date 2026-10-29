@@ -1,16 +1,17 @@
 "use client";
+import { displayTime } from "@/components/LeadTimes";
+import LeadCompleteness from "@/components/LeadCompleteness";
 import { UserIdentity } from "@/components/UserAvatar";
 import { Alert, Button, Card, Col, Collapse, Descriptions, Drawer, Form, Input, Modal, Radio, Row, Select, Space, Steps, Switch, Table, Tag, Typography, Upload, message } from "antd";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ManualLead from "@/components/ManualLead";
+import EnrichmentHistory from "@/components/EnrichmentHistory";
 import LeadAssignment from "@/components/LeadAssignment";
-import OutreachJourney from "@/components/OutreachJourney";
 import WebsiteReview, { ResearchLead } from "@/components/WebsiteReview";
 import PrepareOutreach from "@/components/PrepareOutreach";
-import { MENU_STATES, ListSummary, leadNextAction, leadPriority } from "@/lib/lead-list";
-import { channelLabel } from "@/lib/format";
+import { ListSummary, leadNextAction, leadPriority } from "@/lib/lead-list";
 import { PROGRESS, Progress, taskLink } from "@/lib/communication";
 import { useOperator } from "@/lib/auth";
 import { api, json } from "@/lib/api";
@@ -20,7 +21,7 @@ import { label } from "@/lib/format";
 import { ListWorkflow, workflowUnfinished, workflowBlocksActions, WORKFLOW_TITLES, workflowSummary, contactFailureLabel, getAllBatchLeads } from "@/lib/list-workflow";
 
 type Batch = { id: string; batch_key: string; country: string; region: string | null; source_name: string; business_type?: string | null; candidate_count: number | null };
-type Lead = ResearchLead & { list_summary?: ListSummary | null; assigned_to?: string | null; communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; contact_count: number };
+type Lead = ResearchLead & { list_summary?: ListSummary | null; assigned_to?: string | null; communication_progress?: Progress; operating_type?: { category: string; reason: string }; google_enrichment?: { status: string }; business_type_id?: number | null; business_type_name?: string | null; inspection_pending?: boolean; created_at?: string; updated_at?: string; id: string; source_key: string; name: string; postcode: string | null; website: string | null; screening_class: string; screening_reason: string | null; contact_count: number };
 type Authority = { id: number; name: string; region: string | null; count: number | null; pool_count: number; last_success_at: string | null; type_versions: Record<string, unknown> };
 type DeletePreview = { batch_key: string; leads_in_batch: number; leads_deleted: number; leads_kept_other_batches: number; leads_kept_suppressed: number; menu_assets: number; analyses: number; content_pieces: number; contacts: number; tasks: number; tasks_sent: number; events: number; import_runs: number; batch_runs: number; cost_entries: number };
 
@@ -256,7 +257,7 @@ function LeadsInner() {
           <Button disabled={!batchKey || locked} onClick={() => { setMode("append"); setBuildOpen(true); }}>追加商户</Button>
         </>} />
 
-      <OutreachJourney current={0} />
+      {canManage && <EnrichmentHistory batchKey={batchKey} />}
       {workflowLoadError && <Alert type="warning" showIcon message="任务进度暂时读取失败" description="重新读取后再处理这份名单。" action={<Button onClick={() => batchKey && loadWorkflow(batchKey).catch(err)}>重试读取</Button>} style={{ marginBottom: 16 }} />}
       {workflowUnfinished(workflow) && <Alert showIcon type={workflow?.status === "failed" ? "warning" : "info"} style={{ marginBottom: 16 }} message={workflow?.status === "failed" ? "部分补充数据未完成，名单可以继续使用" : "这份名单有任务等待继续或正在处理"} description={workflow?.status === "failed" ? "已取得的数据保留；可重试失败项，也可追加商户、完善名单或处理现有线索。" : "任务参数与进度已保存，继续时从未完成步骤接续。"} action={<Button disabled={!!busy || creating} onClick={() => { setMode("progress"); setBuildOpen(true); }}>查看 / 继续任务</Button>} />}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
@@ -285,15 +286,14 @@ function LeadsInner() {
         <a href={batchKey ? `/api/batches/${encodeURIComponent(batchKey!)}/export.csv` : undefined}><Button disabled={!batchKey}>导出 CSV</Button></a>
       </Space>}>
         <Typography.Text type="secondary">已选择 {leads.filter((l) => selectedRows.includes(l.id)).length} 家；未勾选时，“准备触达”使用当前筛选结果 {filtered.length} 家；分配门店需在弹窗明确选择范围。</Typography.Text>
-        <Table<Lead> scroll={{ x: 1120 }} rowSelection={{ selectedRowKeys: selectedRows, onChange: selectRows, preserveSelectedRowKeys: true }} rowKey="id" size="small" dataSource={filtered} pagination={{ current: listPage, pageSize, onChange: (p, size) => { setListPage(p); setPageSize(size); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+        <Table<Lead> scroll={{ x: 1175 }} rowSelection={{ selectedRowKeys: selectedRows, onChange: selectRows, preserveSelectedRowKeys: true }} rowKey="id" size="small" dataSource={filtered} pagination={{ current: listPage, pageSize, onChange: (p, size) => { setListPage(p); setPageSize(size); }, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           expandable={{ expandedRowRender: (r) => <Space align="start" size={32} wrap><div><div>来源：{r.source_key}</div><div>FSA 登记类型：{businessLabel(r.business_type_id, r.business_type_name)}</div><div>官网：{r.website ? <a href={r.website} target="_blank" rel="noreferrer">{r.website}</a> : "未登记"}</div><ScreenTag value={r.screening_class} reason={r.screening_reason} /></div><WebsiteReview lead={r} onChanged={() => loadLeads(batchKey)} /></Space> }}
           columns={[
             { title: "门店", dataIndex: "name", width: 260, fixed: "left", render: (v, r) => <div><Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`} style={{ fontWeight: 600 }}>{v}</Link><div style={{ marginTop: 4, fontSize: 12, color: "#888" }}>{r.postcode || "邮编未登记"}{r.operating_type?.category && r.operating_type.category !== "unknown" && <Tag style={{ marginLeft: 8 }}>{({ restaurant: "餐厅", cafe: "咖啡馆", takeaway: "外卖店", pub: "Pub／酒吧", institution: "机构餐饮" } as Record<string, string>)[r.operating_type.category] || r.operating_type.category}</Tag>}{r.inspection_pending && <Tag color="gold">待首次检查</Tag>}</div></div>, sorter: (a, b) => a.name.localeCompare(b.name) },
+            { title: "资料完善", width: 290, render: (_, r) => <LeadCompleteness id={r.id} summary={r.list_summary} returnTo={returnTo} /> },
             ...(["admin", "director"].includes(me?.role || "") ? [{ title: "负责人", width: 110, render: (_: unknown, r: Lead) => <UserIdentity username={r.assigned_to} /> }] : []),
-            { title: "沟通进展", width: 120, render: (_, r) => <Tag color={r.communication_progress?.status === "suppressed" ? "red" : r.communication_progress?.status === "replied" ? "green" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag> },
-            { title: "下一步", width: 200, sorter: (a, b) => leadPriority(a).rank - leadPriority(b).rank, showSorterTooltip: { title: "按工作优先级排序：回复、待执行、待完善；不是成交概率" }, render: (_, r) => { const action = leadNextAction(r); return <Button type="link" size="small" disabled={!canWrite && action.target === "prepare"} onClick={() => { if (action.target === "tasks") router.push(taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })); else if (action.target === "prepare") { setPrepareLeadIds([r.id]); setPrepareOpen(true); } else router.push(`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}${action.target === "contacts" ? "#customer-contacts" : ""}`); }}>{action.text}</Button>; } },
-            { title: "联系方式", width: 180, render: (_, r) => r.contact_count ? <div>{r.list_summary?.channels.map((c) => channelLabel(c)).join("／") || "已记录"}<div style={{ fontSize: 12, color: "#888" }}>{r.contact_count} 项 · 准入见详情</div></div> : <span className="beacon-muted">待补充</span> },
-            { title: "菜单", width: 110, render: (_, r) => <Tag color={r.list_summary?.menu_status === "reviewed" ? "green" : undefined}>{MENU_STATES[r.list_summary?.menu_status || ""] || "待检查"}</Tag> },
+            { title: "跟进状态", key: "follow_up", width: 200, sorter: (a, b) => leadPriority(a).rank - leadPriority(b).rank, showSorterTooltip: { title: "按工作优先级排序：回复、待执行、待完善；不是成交概率" }, render: (_, r) => { const action = leadNextAction(r); return <Space direction="vertical" size={4}><Tag color={r.communication_progress?.status === "suppressed" ? "red" : r.communication_progress?.status === "replied" ? "green" : "blue"}>{PROGRESS[r.communication_progress?.status || "not_started"] || "未准备"}</Tag><Button type="link" size="small" style={{ paddingInline: 0, height: "auto", whiteSpace: "normal", textAlign: "left" }} disabled={!canWrite && action.target === "prepare"} onClick={() => { if (action.target === "tasks") router.push(taskLink({ lead: r.id, task: r.communication_progress?.task_id, batch: batchKey, returnTo })); else if (action.target === "prepare") { setPrepareLeadIds([r.id]); setPrepareOpen(true); } else router.push(`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}${action.target === "contacts" ? "#customer-contacts" : ""}`); }}>{action.text} →</Button></Space>; } },
+            { title: "最近更新", key: "updated_at", width: 175, render: (_, r) => displayTime(r.list_summary?.updated_at || r.updated_at), sorter: (a, b) => (Date.parse(a.list_summary?.updated_at || a.updated_at || "") || 0) - (Date.parse(b.list_summary?.updated_at || b.updated_at || "") || 0), showSorterTooltip: { title: "按门店、联系方式、菜单及分析的最近记录更新时间排序" } },
             { title: "操作", width: 100, render: (_, r) => <Link href={`/leads/${r.id}?returnTo=${encodeURIComponent(returnTo)}`}>查看详情</Link> },
           ]} />
       </Card>

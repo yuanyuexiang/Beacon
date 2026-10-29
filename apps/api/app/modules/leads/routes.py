@@ -49,6 +49,29 @@ def get_workflow(batch_key: str, db: Session = Depends(get_db)):
     return workflows.latest(db, batch)
 
 
+@router.get("/batches/{batch_key}/enrichment-history")
+def batch_enrichment_history(batch_key: str, db: Session = Depends(get_db)):
+    from app.modules.leads.history import history
+
+    if db.info.get("member_scope"):
+        return []
+    batch = service.get_batch_by_key(db, batch_key)
+    if batch is None:
+        raise HTTPException(404, "批次不存在")
+    return history(db, batch_id=batch.id)
+
+
+@router.get("/leads/{lead_id}/enrichment-history")
+def lead_enrichment_history(lead_id: uuid.UUID, db: Session = Depends(get_db)):
+    from app.modules.leads.history import history
+
+    if db.get(Lead, lead_id) is None:
+        raise HTTPException(404, "线索不存在")
+    if db.info.get("member_scope"):
+        return []
+    return history(db, lead_id=lead_id)
+
+
 @router.post("/batches/{batch_key}/workflow", response_model=workflows.WorkflowOut, status_code=201)
 def start_workflow(
     batch_key: str, body: workflows.WorkflowIn, db: Session = Depends(get_db), op: Operator = Depends(current_operator)
@@ -120,7 +143,7 @@ def cancel_workflow(
     changed = db.execute(
         update(workflows.Workflow)
         .where(workflows.Workflow.id == task.id, workflows.Workflow.status.notin_(["completed", "cancelled"]))
-        .values(status="cancelled", error=None)
+        .values(status="cancelled", error=None, finished_at=func.now())
         .returning(workflows.Workflow.id),
         execution_options={"synchronize_session": False},
     ).scalar_one_or_none()

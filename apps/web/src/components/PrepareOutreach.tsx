@@ -3,7 +3,6 @@ import { useOutreachIdentity } from "@/lib/useOutreachIdentity";
 import { Alert, Card, Collapse, Drawer, Input, Select, Space, Table, Tag, Typography } from "antd";
 import Button from "@/components/AccessButton";
 import DraftEditor from "./MessageComposer";
-import OutreachJourney from "@/components/OutreachJourney";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { api, json } from "@/lib/api";
@@ -69,7 +68,6 @@ export default function PrepareOutreach({ open, leadIds, batchKey, returnTo, onC
 
   const check = async () => { rowsEpoch.current++; setBusy(true); setError(undefined); const collected: Prepared[] = []; try { for (let offset = 0; offset < leadIds.length; offset += 25) { const next = await api<{ items: Prepared[] }>("/api/communication/prepare", json({ lead_ids: leadIds.slice(offset, offset + 25), channel, execution_mode: mode, batch_key: batchKey, assigned_to: assigned, purpose })); collected.push(...next.items); setRows([...collected]); setNote(leadIds.length > 1 ? `已准备 ${collected.length}/${leadIds.length} 家` : undefined); } onChanged?.(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   const body = <>
-    {!embedded && <OutreachJourney current={1} />}
     {embedded && context && !rows.length && <Typography.Paragraph type="secondary">选择联系方式，AI 起草后可直接修改并预览发送。没有菜单也可以先询问菜单或负责人。</Typography.Paragraph>}
 
 

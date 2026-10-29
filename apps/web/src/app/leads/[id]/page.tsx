@@ -1,4 +1,5 @@
 "use client";
+import LeadTimes, { displayTime } from "@/components/LeadTimes";
 import LeadEnrichment from "@/components/LeadEnrichment";
 import SalesAssistance from "@/components/SalesAssistance";
 import { UserIdentity } from "@/components/UserAvatar";
@@ -27,7 +28,7 @@ import ContactReviewActions from "@/components/ContactReviewActions";
 import ContactAssessmentView from "@/components/ContactAssessment";
 import { AutoAdmission, ContactAssessment } from "@/lib/contact-ranking";
 
-type Lead = { manual_entry?: {region?:string;contact_name?:string;notes?:string;created_by?:string}; communication_progress?: Progress; list_summary?: ListSummary; contact_count?: number; assigned_to?: string | null; operating_type?: { category: string; reason: string; citations: { quote: string }[] }; google_enrichment?: { status: string; error?: string }; verified_websites?: { url: string }[]; website_history?: { url: string; source?: string }[]; id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null };
+type Lead = { manual_entry?: {region?:string;contact_name?:string;notes?:string;created_by?:string}; communication_progress?: Progress; list_summary?: ListSummary; contact_count?: number; assigned_to?: string | null; operating_type?: { category: string; reason: string; citations: { quote: string }[] }; google_enrichment?: { status: string; error?: string }; verified_websites?: { url: string }[]; website_history?: { url: string; source?: string }[]; created_at?: string; updated_at?: string; id: string; name: string; source_key: string; address: string | null; postcode: string | null; website: string | null; website_source: string | null; screening_class: string; screening_reason: string | null };
 type Asset = { id: string; kind: string; source_url: string | null; original_filename: string | null; fetch_status: string; fetch_error: string | null; storage_path: string | null; sha256: string | null };
 type Item = { name: string; price_text: string; deleted?: boolean; evidence: Record<string, unknown> };
 type Issue = { issue_code: string; fact: string; severity: string; confirmed: boolean | null; confirmed_by: string | null; note: string | null; deleted?: boolean; evidence: Record<string, unknown> };
@@ -93,12 +94,26 @@ export default function LeadDetail() {
     setSectionErrors(Object.fromEntries(results.flatMap((r, i) => r.status === "rejected" ? [[names[i], r.reason?.message || "读取失败"]] : [])));
     setLoading(false);
   }, [id, form]);
-  useEffect(() => { setLead(null); setTab("sales"); form.resetFields(); setWebsiteConflict(false); setSelectedMenu(undefined); setComposerContact(undefined); void reload(); return () => { generation.current += 1; }; }, [reload, form]);
+  useEffect(() => { setLead(null); setTab(({ website: "sources", contacts: "sales", menus: "menus", analysis: "menus" } as Record<string, string>)[new URLSearchParams(window.location.search).get("section") || ""] || "sales"); form.resetFields(); setWebsiteConflict(false); setSelectedMenu(undefined); setComposerContact(undefined); void reload(); return () => { generation.current += 1; }; }, [reload, form]);
   useEffect(() => {
     if (!pendingReview || tab !== "menus") return;
     const target = document.getElementById(`menu-review-${pendingReview}`);
     if (target) { target.scrollIntoView({ behavior: "smooth", block: "start" }); setPendingReview(null); }
   }, [pendingReview, analyses, tab]);
+  const linkedSection = useRef(false);
+  useEffect(() => { linkedSection.current = false; }, [id]);
+  useEffect(() => {
+    if (loading || !lead || linkedSection.current) return;
+    const section = new URLSearchParams(window.location.search).get("section");
+    linkedSection.current = true;
+    const timer = setTimeout(() => {
+      const target = section === "contacts" ? document.getElementById("customer-contacts")
+        : section === "analysis" ? document.querySelector('[id^="menu-review-"]') || document.getElementById("menu-files")
+        : section === "menus" ? document.getElementById("menu-files") : null;
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [loading, lead]);
   useEffect(() => { setContactLookup(null); setContactPicked([]); setContactOpen(false); }, [id, lead?.website]);
   if (!lead) return <Card loading={loading}>{!loading && <Alert type="error" showIcon message={sectionErrors["基本资料"] || "无法读取门店资料"} action={<Button readOnlySafe onClick={() => void reload()}>重试加载</Button>} />}</Card>;
 
@@ -163,6 +178,7 @@ export default function LeadDetail() {
       <header className="lead-workspace-header">
         <div className="lead-header-top"><Link href={back}>← 返回名单</Link><Space size={8}><Tag>{PROGRESS[progress] || "未准备"}</Tag><ScreenTag value={lead.screening_class} reason={lead.screening_reason} /></Space></div>
         <div className="lead-header-main"><div className="lead-identity"><h1>{lead.name}</h1><Typography.Text type="secondary">{lead.address || "地址未登记"}{lead.postcode ? ` · ${lead.postcode}` : ""}</Typography.Text><div className="lead-owner">负责人：{<UserIdentity username={lead.assigned_to} />}<Popover trigger="click" placement="bottomLeft" content={<Space direction="vertical"><LeadAssignment leadIds={[id]} onChanged={() => void reload()} /><AssignmentHistory leadId={id} /></Space>}><Button readOnlySafe size="small" type="text">管理 ···</Button></Popover></div></div><Button readOnlySafe={action.target !== "prepare"} type="primary" onClick={nextStep}>{action.text}</Button></div>
+        <LeadTimes createdAt={lead.created_at} updatedAt={lead.list_summary?.updated_at || lead.updated_at} />
       </header>
       <LeadEnrichment key={`enrichment-${id}`} leadId={id} dataRevision={`${lead.website}:${assets.map((a) => `${a.id}:${a.sha256}:${a.fetch_status}`).join()}:${Object.values(analyses).flat().map((a) => `${a.id}:${a.status}:${a.review_state}`).join()}:${eligs.map((e) => e.id).join()}`} onChanged={() => void reload()} onMenus={() => setTab("menus")} />
       {Object.keys(sectionErrors).length > 0 && <Alert type="warning" showIcon message="部分资料未能加载，已读取的结果仍可使用" description={Object.entries(sectionErrors).map(([name, error]) => <div key={name}>{name}：{error}</div>)} action={<Button readOnlySafe onClick={() => void reload()}>重试加载</Button>} style={{ marginBottom: 16 }} />}
@@ -292,7 +308,14 @@ export default function LeadDetail() {
         ))}
       </Card> }]} />
 </> },
-        { key: "sources", label: "来源与历史", children: <>      <Card size="small" title="门店资料" style={{ marginBottom: 16 }}>
+        { key: "sources", label: "来源与历史", children: <><Card size="small" title="资料时间" style={{ marginBottom: 16 }}>
+          <Descriptions size="small" column={2} items={[
+            { key: "created", label: "首次加入系统", children: displayTime(lead.created_at) },
+            { key: "updated", label: "最近记录更新", children: displayTime(lead.list_summary?.updated_at || lead.updated_at) },
+            ...([["website", "最近官网核验"], ["contacts", "最近查找联系方式"], ["menus", "最近菜单获取"], ["analysis", "当前菜单分析创建"]] as const).map(([key, label]) => ({ key, label, children: displayTime(lead.list_summary?.activity_times?.[key]) })),
+          ]} />
+          <Typography.Text type="secondary">核验与查找时间包含失败尝试，请结合资料状态查看。历史未记录的时间不推算；时间按当前设备时区显示。</Typography.Text>
+        </Card>      <Card size="small" title="门店资料" style={{ marginBottom: 16 }}>
         {websiteConflict && <Alert type="warning" message="官网已有更新，当前输入尚未保存" description="请选择采用已更新的官网，或明确保留你的输入，避免覆盖新资料。" action={<Space><Button onClick={() => { form.setFields([{ name: "website", value: lead.website, touched: false }]); setWebsiteConflict(false); }}>采用最新官网</Button><Button onClick={() => setWebsiteConflict(false)}>保留我的输入</Button></Space>} style={{ marginBottom: 12 }} />}
         <Form
           form={form}

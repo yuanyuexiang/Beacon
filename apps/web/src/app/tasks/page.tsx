@@ -12,7 +12,6 @@ import { useOperator } from "@/lib/auth";
 import { Assignee, CHANNELS, CommunicationTask, LeadContext, MODES, PROGRESS, Progress, safeReturnTo } from "@/lib/communication";
 import { channelLabel, label } from "@/lib/format";
 import { HeroBand } from "@/components/ui";
-import OutreachJourney from "@/components/OutreachJourney";
 import PrepareOutreach from "@/components/PrepareOutreach";
 import GmailOutreach from "@/components/GmailOutreach";
 import SocialOutreach from "@/components/SocialOutreach";
@@ -76,7 +75,6 @@ function TasksInner() {
   const rename = (id: string) => context?.lead.id === id ? context.lead.name : rows.find((r) => r.id === id)?.name || id;
   return <>
     <HeroBand kicker="COMMUNICATION" title="触达任务与回复" subtitle="从名单加入准备待办或创建触达任务，在这里继续准备、执行与跟进。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回来源页面</Button></Link><Button readOnlySafe onClick={() => refresh().catch((e) => setError(e.message))}>刷新进展</Button><Button readOnlySafe onClick={() => api<Record<string, string>[]>("/api/suppressions").then(setSuppression).catch((e) => setError(e.message))}>抑制名单</Button></Space>} />
-    <OutreachJourney current={!context ? 0 : context.progress.status === "preparing" ? 1 : ["waiting_reply", "replied", "recorded", "suppressed"].includes(context?.progress.status || "") ? 3 : 2} />
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     {success && <Alert type="success" showIcon message={success} style={{ marginBottom: 12 }} />}
     <Space wrap style={{ marginBottom: 16 }}>

@@ -78,6 +78,7 @@ class LeadOut(BaseModel):
     list_summary: dict | None = None
     communication_progress: dict | None = None
     contact_count: int = 0  # 已记录的联系方式数（仅列表接口填充）
+    updated_at: datetime
     created_at: datetime
 
     model_config = {"from_attributes": True}

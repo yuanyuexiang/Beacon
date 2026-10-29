@@ -1,7 +1,7 @@
 import type { Progress } from "./communication";
 
 export const MENU_STATES: Record<string, string> = { missing: "暂未获取", analysis_failed: "分析失败", failed: "获取失败", fetching: "获取中", obtained: "已获取", analyzing: "分析中", needs_review: "待核对", reviewed: "已核对" };
-export type ListSummary = { menu_status: string; channels: string[] };
+export type ListSummary = { updated_at?: string; activity_times?: Partial<Record<"website" | "contacts" | "menus" | "analysis", string | null>>; menu_status: string; channels: string[]; completeness?: Partial<Record<"website" | "contacts" | "menus" | "analysis", string>> };
 export function leadNextAction(lead: { contact_count: number; communication_progress?: Progress; list_summary?: ListSummary | null }) {
   const p = lead.communication_progress;
   const status = p?.status || "not_started";
