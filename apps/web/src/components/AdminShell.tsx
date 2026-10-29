@@ -61,7 +61,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           )}
         </Link>
         <Menu className="beacon-nav" theme="dark" mode="inline" selectedKeys={[section]}
-          items={NAV_GROUPS.filter((g) => g.key !== "system" || me?.role === "admin").map((g) => ({ key: g.key, type: "group" as const, label: g.label, children: g.items.filter((n) => !(me?.role === "member" && n.key === "/directory")).map((n) => ({ key: n.key, icon: n.icon, label: <Link href={n.key}>{n.label}</Link> })) }))} />
+          items={NAV_GROUPS.filter((g) => g.key !== "system" || me?.role === "admin" || me?.role === "director").map((g) => ({ key: g.key, type: "group" as const, label: g.label, children: g.items.filter((n) => !(me?.role === "member" && n.key === "/directory") && !(me?.role === "director" && n.key === "/settings")).map((n) => ({ key: n.key, icon: n.icon, label: <Link href={n.key}>{n.label}</Link> })) }))} />
         <div className="beacon-sider-foot">
           {collapsed ? (
             <Tooltip placement="right" title="邮件与已连接社媒会话预览确认后发送，其余渠道人工触达"><SafetyCertificateOutlined /></Tooltip>
@@ -84,7 +84,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </button>
             <Breadcrumb items={crumbs} />
           </div>
-          <Dropdown menu={{ items: [{ key: "account", label: <Link href="/account">个人账号与密码</Link> }, ...(me?.role === "admin" ? [{ key: "settings", label: <Link href="/settings">设置</Link> }, { key: "users", label: <Link href="/users">用户管理</Link> }] : []), { type: "divider" }, { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => api("/api/auth/logout", { method: "POST" }).then(() => router.replace("/login")) }] }}>
+          <Dropdown menu={{ items: [{ key: "account", label: <Link href="/account">个人账号与密码</Link> }, ...(me?.role === "admin" ? [{ key: "settings", label: <Link href="/settings">设置</Link> }, { key: "users", label: <Link href="/users">用户管理</Link> }] : me?.role === "director" ? [{ key: "users", label: <Link href="/users">用户管理</Link> }] : []), { type: "divider" }, { key: "logout", icon: <LogoutOutlined />, label: "退出登录", onClick: () => api("/api/auth/logout", { method: "POST" }).then(() => router.replace("/login")) }] }}>
             <Space style={{ cursor: "pointer" }}>
               <UserAvatar user={me} />
               <Typography.Text>{me ? me.display_name || me.username : "…"}</Typography.Text>{me && <Typography.Text type="secondary">{ROLE_LABELS[me.role]}</Typography.Text>}
@@ -93,7 +93,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </Layout.Header>
         <Layout.Content style={{ padding: "20px 24px 40px", maxWidth: 1400, width: "100%", margin: "0 auto" }}><AuthContext.Provider value={{ me, refresh }}>
           {me?.role === "viewer" && path !== "/account" && <Alert type="info" showIcon message="当前为只读账号，可查看业务资料；不能修改、运行任务或发送消息。" style={{ marginBottom: 16 }} />}
-          {!me ? <p>正在验证登录…</p> : me.must_change_password && path !== "/account" ? <p>请先修改初始密码…</p> : ["/settings", "/users"].includes(section) && me.role !== "admin" ? <Alert type="warning" showIcon message="此页面仅限管理员使用" /> : children}
+          {!me ? <p>正在验证登录…</p> : me.must_change_password && path !== "/account" ? <p>请先修改初始密码…</p> : ((section === "/settings" && me.role !== "admin") || (section === "/users" && !["admin", "director"].includes(me.role))) ? <Alert type="warning" showIcon message="此页面仅限管理员使用" /> : children}
         </AuthContext.Provider></Layout.Content>
         <Layout.Footer style={{ textAlign: "center", color: "#9ca3af", fontSize: 12, padding: "12px 24px" }}>小当家 · 销售线索工作台（验证版）· 数据来源 FSA（OGL v3）、Overture Maps（CDLA-Permissive-2.0）· 评分不代表成交概率</Layout.Footer>
       </Layout>

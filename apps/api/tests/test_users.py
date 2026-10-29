@@ -222,3 +222,44 @@ def test_upgrade_preserves_existing_admin_password_and_legacy_cookie(client, db)
     c = TestClient(app)
     c.cookies.set(COOKIE, token)
     assert c.get("/api/auth/me").status_code == 200
+
+
+def test_director_manages_members_only(client, db):
+    login(client, db)
+    admin = db.scalar(select(Operator))
+    director = create(client, "director", "director")
+    peer = create(client, "peer", "director")
+    viewer = create(client, "reader", "viewer")
+    op = db.get(Operator, director["id"])
+    op.must_change_password = False
+    db.commit()
+    c = session(op)
+    member = create(c, "new-sales")
+    assert [u["id"] for u in c.get("/api/users").json()] == [member["id"]]
+    for role in ("admin", "director", "viewer"):
+        assert (
+            c.post("/api/users", json={"username": "forbidden", "role": role, "initial_password": INITIAL}).status_code
+            == 403
+        )
+        assert c.patch(f"/api/users/{member['id']}", json={"role": role}).status_code == 403
+    for uid in (str(admin.id), director["id"], peer["id"], viewer["id"]):
+        assert c.patch(f"/api/users/{uid}", json={"display_name": "changed"}).status_code == 403
+        assert c.patch(f"/api/users/{uid}", json={"is_active": False}).status_code == 403
+        assert c.post(f"/api/users/{uid}/reset-password", json={"temporary_password": NEW}).status_code == 403
+    target = db.get(Operator, member["id"])
+    target.must_change_password = False
+    db.commit()
+    old_session = session(target)
+    assert (
+        c.patch(f"/api/users/{member['id']}", json={"display_name": "New Sales", "role": "member"}).status_code == 200
+    )
+    assert c.post(f"/api/users/{member['id']}/reset-password", json={"temporary_password": NEW}).status_code == 200
+    assert old_session.get("/api/auth/me").status_code == 401
+    for active in (False, True):
+        response = c.patch(f"/api/users/{member['id']}", json={"is_active": active})
+        assert response.status_code == 200 and response.json()["is_active"] is active
+    # A member promoted by an administrator is no longer manageable by the director.
+    assert client.patch(f"/api/users/{member['id']}", json={"role": "director"}).status_code == 200
+    assert c.get("/api/users").json() == []
+    assert c.post(f"/api/users/{member['id']}/reset-password", json={"temporary_password": INITIAL}).status_code == 403
+    assert c.put("/api/outreach/app", json={}).status_code == 403

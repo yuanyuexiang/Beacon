@@ -56,26 +56,31 @@ class PasswordReset(BaseModel):
     temporary_password: str = Field(min_length=8, max_length=128, repr=False)
 
 
-def admin_operator(op: Operator = Depends(current_operator)) -> Operator:
-    if op.role != "admin":
-        raise HTTPException(403, "此操作需要管理员权限")
+def user_manager(op: Operator = Depends(current_operator)) -> Operator:
+    if op.role not in {"admin", "director"}:
+        raise HTTPException(403, "此操作需要管理员或销售总监权限")
     return op
 
 
-def lock_admin(db: Session, op: Operator) -> None:
+def lock_manager(db: Session, op: Operator) -> None:
     lock_current(db, op)
-    if op.role != "admin":
-        raise HTTPException(403, "此操作需要管理员权限")
+    if op.role not in {"admin", "director"}:
+        raise HTTPException(403, "此操作需要管理员或销售总监权限")
 
 
 @router.get("", response_model=list[UserOut])
-def list_users(db: Session = Depends(get_db), op: Operator = Depends(admin_operator)):
-    return db.scalars(select(Operator).order_by(Operator.created_at, Operator.id)).all()
+def list_users(db: Session = Depends(get_db), op: Operator = Depends(user_manager)):
+    query = select(Operator).order_by(Operator.created_at, Operator.id)
+    if op.role == "director":
+        query = query.where(Operator.role == "member")
+    return db.scalars(query).all()
 
 
 @router.post("", response_model=UserOut, status_code=201)
-def create_user(body: UserCreate, db: Session = Depends(get_db), op: Operator = Depends(admin_operator)):
-    lock_admin(db, op)
+def create_user(body: UserCreate, db: Session = Depends(get_db), op: Operator = Depends(user_manager)):
+    lock_manager(db, op)
+    if op.role == "director" and body.role != "member":
+        raise HTTPException(403, "销售总监只能创建业务成员")
     if db.scalar(select(Operator.id).where(func.lower(Operator.username) == body.username)):
         raise HTTPException(409, "登录名已存在")
     target = Operator(
@@ -101,12 +106,14 @@ def create_user(body: UserCreate, db: Session = Depends(get_db), op: Operator = 
 
 @router.patch("/{user_id}", response_model=UserOut)
 def update_user(
-    user_id: uuid.UUID, body: UserPatch, db: Session = Depends(get_db), op: Operator = Depends(admin_operator)
+    user_id: uuid.UUID, body: UserPatch, db: Session = Depends(get_db), op: Operator = Depends(user_manager)
 ):
-    lock_admin(db, op)
+    lock_manager(db, op)
     target = db.get(Operator, user_id)
     if target is None:
         raise HTTPException(404, "用户不存在")
+    if op.role == "director" and (target.role != "member" or body.role not in {None, "member"}):
+        raise HTTPException(403, "销售总监只能管理业务成员，不能调整角色")
     changes = body.model_dump(exclude_unset=True)
     if any(changes.get(k, "missing") is None for k in ("role", "is_active")):
         raise HTTPException(422, "角色和启用状态不能为空")
@@ -143,12 +150,14 @@ def update_user(
 
 @router.post("/{user_id}/reset-password", response_model=UserOut)
 def reset_password(
-    user_id: uuid.UUID, body: PasswordReset, db: Session = Depends(get_db), op: Operator = Depends(admin_operator)
+    user_id: uuid.UUID, body: PasswordReset, db: Session = Depends(get_db), op: Operator = Depends(user_manager)
 ):
-    lock_admin(db, op)
+    lock_manager(db, op)
     target = db.get(Operator, user_id)
     if target is None:
         raise HTTPException(404, "用户不存在")
+    if op.role == "director" and target.role != "member":
+        raise HTTPException(403, "销售总监只能管理业务成员")
     if verify_password(body.temporary_password, target.password_hash):
         raise HTTPException(422, "临时密码不能与当前密码相同")
     target.password_hash = hash_password(body.temporary_password)

@@ -20,16 +20,16 @@ export default function UsersPage() {
   const [target, setTarget] = useState<User | null>(null);
   const [form] = Form.useForm();
   const load = useCallback(async () => { try { setUsers(await api<User[]>("/api/users")); } catch (e) { setError((e as Error).message); } }, []);
-  useEffect(() => { if (me?.role === "admin") void load(); }, [load, me?.role]);
+  useEffect(() => { if (me?.role === "admin" || me?.role === "director") void load(); }, [load, me?.role]);
   useEffect(() => { if (mode) { form.resetFields(); if (target) form.setFieldsValue({ display_name: target.display_name, role: target.role }); } }, [mode, target, form]);
-  if (me?.role !== "admin") return null;
+  if (me?.role !== "admin" && me?.role !== "director") return null;
   const act = async (work: () => Promise<void>) => { setBusy(true); setError(undefined); setSuccess(undefined); try { await work(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   const selfChanged = (id: string) => { if (id === me.id) { setMode(null); router.replace("/login"); return true; } return false; };
   return <>
-    <HeroBand kicker="USERS" title="用户管理" subtitle="管理员管理账号，销售总监分配门店，业务成员经营自己的门店。" extra={<Button type="primary" disabled={busy} onClick={() => { setTarget(null); setMode("create"); }}>新增用户</Button>} />
+    <HeroBand kicker="USERS" title="用户管理" subtitle={me.role === "director" ? "管理业务成员账号，添加销售人员后即可为其分配门店。" : "管理员管理全部账号，销售总监管理业务成员并分配门店。"} extra={<Button type="primary" disabled={busy} onClick={() => { setTarget(null); setMode("create"); }}>新增用户</Button>} />
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
     {success && <Alert type="success" showIcon message={success} style={{ marginBottom: 16 }} />}
-    <Alert type="info" showIcon message="初始／临时密码须由你安全交给用户，首次登录强制修改。停用、重置密码或调整角色会使该用户旧会话失效；至少保留一位有效管理员。" style={{ marginBottom: 16 }} />
+    <Alert type="info" showIcon message={me.role === "director" ? "可添加、编辑、停用业务成员及重置密码。初始／临时密码须交给用户，首次登录需修改；停用或重置密码会使旧会话失效。" : "初始／临时密码须由你安全交给用户，首次登录强制修改。停用、重置密码或调整角色会使该用户旧会话失效；至少保留一位有效管理员。"} style={{ marginBottom: 16 }} />
     <Card extra={<Button onClick={() => void load()} disabled={busy}>刷新用户</Button>}>
       <Table<User> rowKey="id" dataSource={users} scroll={{ x: 850 }} columns={[
         { title: "登录名", dataIndex: "username", render: (v, u) => <Space><UserAvatar user={u} />{v}{u.id === me.id && <Tag style={{ marginLeft: 8 }}>当前账号</Tag>}</Space> },
@@ -52,7 +52,7 @@ export default function UsersPage() {
         setMode(null); form.resetFields(); await load();
       })}>
         {mode === "create" && <Form.Item name="username" label="登录名" rules={[{ required: true }, { pattern: /^[a-z0-9][a-z0-9_.-]{2,63}$/, message: "3～64 位小写字母、数字、下划线、点或连字符" }]}><Input autoComplete="off" maxLength={64} /></Form.Item>}
-        {mode !== "reset" && <><Form.Item name="display_name" label="显示名称" rules={[{ max: 80 }]}><Input maxLength={80} /></Form.Item><Form.Item name="role" label="角色" rules={[{ required: true }]}><Select options={roles} /></Form.Item></>}
+        {mode !== "reset" && <><Form.Item name="display_name" label="显示名称" rules={[{ max: 80 }]}><Input maxLength={80} /></Form.Item><Form.Item name="role" label="角色" rules={[{ required: true }]}><Select options={me.role === "director" ? roles.filter(r => r.value === "member") : roles} disabled={me.role === "director"} /></Form.Item></>}
         {mode !== "edit" && <Form.Item name={mode === "reset" ? "temporary_password" : "initial_password"} label={mode === "reset" ? "临时密码" : "初始密码"} rules={[{ required: true }, { min: 8, max: 128, message: "密码需为 8～128 个字符" }]}><Input.Password autoComplete="new-password" maxLength={128} /></Form.Item>}
         <Button type="primary" htmlType="submit" loading={busy}>{mode === "create" ? "创建用户" : mode === "reset" ? "重置密码并撤销旧会话" : "保存修改"}</Button>
       </Form>

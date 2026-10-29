@@ -42,7 +42,7 @@ async def handle(route):
         me = {**me, "must_change_password": False}
         data = me
     elif path == "/api/users" and method == "GET":
-        data = users
+        data = [u for u in users if u["role"] == "member"] if me["role"] == "director" else users
     elif path == "/api/users" and method == "POST":
         data = {**body, "id": "sales", "is_active": True, "must_change_password": True, "created_at": NOW}
         data.pop("initial_password")
@@ -114,6 +114,20 @@ async def main():
         await page.get_by_role("button", name="确 定", exact=True).click()
         await page.get_by_text("至少保留一位有效管理员，请先创建或启用其他管理员", exact=True).wait_for()
         await page.screenshot(path="data/devchecks/users-management.png", full_page=True)
+        me = {**admin, "id": "director", "username": "director", "role": "director"}
+        await page.goto("http://localhost:3000/users")
+        await expect(page.get_by_role("link", name="用户管理", exact=True)).to_be_visible()
+        assert await page.get_by_role("link", name="设置", exact=True).count() == 0
+        await expect(page.locator('tr[data-row-key="admin"]')).to_have_count(0)
+        await page.get_by_role("button", name="新增用户", exact=True).click()
+        await expect(dialog.get_by_label("角色", exact=True)).to_be_disabled()
+        await dialog.get_by_label("登录名", exact=True).fill("director-sales")
+        await dialog.get_by_label("显示名称", exact=True).fill("总监添加的销售")
+        await dialog.get_by_label("初始密码", exact=True).fill("test-only-password-123")
+        await dialog.get_by_role("button", name="创建用户", exact=True).click()
+        await expect(page.get_by_role("row").filter(has=page.get_by_text("director-sales", exact=True))).to_contain_text("业务成员")
+        assert users[-1]["role"] == "member"
+        await page.screenshot(path="data/devchecks/director-users.png", full_page=True)
         me = {**users[1], "must_change_password": True}
         await page.goto("http://localhost:3000/leads")
         await page.wait_for_url("**/account")
@@ -139,6 +153,7 @@ async def main():
             json.dumps(
                 {
                     "user_management": True,
+                    "director_member_management": True,
                     "last_admin_protection": True,
                     "forced_password_change": True,
                     "viewer_controls": True,

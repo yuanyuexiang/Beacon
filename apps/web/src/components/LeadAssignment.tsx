@@ -33,7 +33,7 @@ export default function LeadAssignment({ leadIds, filteredLeadIds, onChanged }: 
       <Collapse style={{ marginTop: 12 }} items={[{ key: "team", label: "查看团队工作量", children: <Table size="small" rowKey="username" pagination={{ pageSize: 5 }} dataSource={members} columns={[{ title: "成员", render: (_, r) => r.display_name || r.username }, { title: "门店", dataIndex: "leads" }, { title: "未完成任务", dataIndex: "open_tasks" }, { title: "草稿", dataIndex: "drafts" }, { title: "到期待跟进", dataIndex: "followups_due" }, { title: "最近沟通", render: (_, r) => r.last_communication_at ? new Date(r.last_communication_at).toLocaleString() : "暂无" }]} /> }]} />
       <Space direction="vertical" style={{ width: "100%", marginTop: 16 }}>
         <span>接收业务成员</span>
-        {!members.length && !busy && <Alert type="info" message="暂无有效业务成员，请管理员在用户管理中添加或启用业务成员。管理员和销售总监不作为接收业务成员。" />}
+        {!members.length && !busy && <Alert type="info" message="暂无有效业务成员，请管理员或销售总监在用户管理中添加或启用业务成员。管理员和销售总监不作为接收业务成员。" />}
         <Select aria-label="门店接收人" placeholder="选择业务成员或收回为未分配" value={target} disabled={busy || !!results} style={{ width: "100%" }} options={[{ value: "__unassigned", label: "收回为未分配" }, ...members.map((m) => ({ value: m.username, label: `${m.display_name ? `${m.display_name}（${m.username}）` : m.username} · ${m.leads} 家门店 · ${m.open_tasks} 项未完成任务` }))]} onChange={setTarget} />
         <Input.TextArea aria-label="分配原因" placeholder="分配或转交原因（必填）" value={reason} maxLength={1000} disabled={busy || !!results} onChange={(e) => setReason(e.target.value)} />
       </Space>

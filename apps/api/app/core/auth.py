@@ -119,25 +119,24 @@ def enforce_permissions(request: Request, op: Operator) -> None:
     if personal:
         return
     writes = request.method not in {"GET", "HEAD", "OPTIONS"}
-    admin_only = path.startswith("/api/users") or (
-        writes
-        and (
-            path in {"/api/lead-policy", "/api/outreach-profile"}
-            or path.startswith("/api/directory/")
-            or path
-            in {
-                "/api/gmail/credentials",
-                "/api/gmail/configure",
-                "/api/gmail/check",
-                "/api/gmail/test/preview",
-                "/api/gmail/test/send",
-                "/api/gmail/connect",
-                "/api/gmail/disconnect",
-                "/api/gmail/policy",
-            }
-            or path == "/api/outreach/app"
-            or path.startswith("/api/outreach/accounts")
-        )
+    if (path == "/api/users" or path.startswith("/api/users/")) and op.role not in {"admin", "director"}:
+        raise HTTPException(403, "此操作需要管理员或销售总监权限")
+    admin_only = writes and (
+        path in {"/api/lead-policy", "/api/outreach-profile"}
+        or path.startswith("/api/directory/")
+        or path
+        in {
+            "/api/gmail/credentials",
+            "/api/gmail/configure",
+            "/api/gmail/check",
+            "/api/gmail/test/preview",
+            "/api/gmail/test/send",
+            "/api/gmail/connect",
+            "/api/gmail/disconnect",
+            "/api/gmail/policy",
+        }
+        or path == "/api/outreach/app"
+        or path.startswith("/api/outreach/accounts")
     )
     if admin_only and op.role != "admin":
         raise HTTPException(403, "此操作需要管理员权限")
