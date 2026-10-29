@@ -53,7 +53,11 @@ def ready(client, identity):
 def test_director_permissions_and_optimistic_transfer(client, db, team):
     identity, boss, alice, _ = team
     assert {p["username"] for p in boss.get("/api/assignment/members").json()} == {"alice", "bob"}
-    assert boss.get("/api/users").status_code == 403
+    users = boss.get("/api/users")
+    assert users.status_code == 200
+    assert {p["username"] for p in users.json()} == {"alice", "bob"}
+    assert all(p["role"] == "member" for p in users.json())
+    assert alice.get("/api/users").status_code == 403
     assert boss.post("/api/gmail/disconnect").status_code == 403
     assert boss.put("/api/lead-policy", json={}).status_code == 403
     assert alice.get("/api/assignment/members").status_code == 403
