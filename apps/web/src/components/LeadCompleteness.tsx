@@ -25,7 +25,7 @@ export default function LeadCompleteness({ id, summary, returnTo }: { id: string
       const detail = key === "contacts" ? summary?.channels.map((c) => channelLabel(c)).join("／") : "";
       return <Tooltip key={key} title={`${title}：${state.text}。${help}；${({ website: "最近核验", contacts: "最近查找", menus: "最近获取", analysis: "分析创建" })[key]}：${displayTime(summary?.activity_times?.[key])}${detail ? `；${detail}` : ""}`}>
         <Link href={`/leads/${id}?returnTo=${encodeURIComponent(returnTo)}&section=${key}`} aria-label={`${title}：${state.text}`} style={{ color: state.color, whiteSpace: "nowrap" }}>
-          <span aria-hidden style={{ marginRight: 5 }}>{state.icon}</span>{title}{["failed", "running", "not_found"].includes(summary?.completeness?.[key] || "") ? ` · ${state.text}` : ""}
+          <span aria-hidden style={{ marginRight: 5 }}>{state.icon}</span>{title}
         </Link>
       </Tooltip>;
     })}
