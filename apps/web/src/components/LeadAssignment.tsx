@@ -50,3 +50,19 @@ export function AssignmentHistory({ leadId }: { leadId: string }) {
   const [busy, setBusy] = useState(false);
   return <><Button onClick={async () => { setOpen(true); setError(undefined); setBusy(true); try { setRows(await api(`/api/leads/${leadId}/assignment-history`)); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }}>分配记录</Button><Modal title="门店分配记录" open={open} footer={null} width={780} onCancel={() => setOpen(false)}>{error && <Alert type="error" message={error} />}<Table rowKey={(r) => `${r.at}-${r.operator}`} loading={busy} dataSource={rows} pagination={{ pageSize: 10 }} columns={[{ title: "时间", render: (_, r) => new Date(r.at).toLocaleString() }, { title: "操作人", dataIndex: "operator" }, { title: "原负责人", render: (_, r) => r.before?.assigned_to || "未分配" }, { title: "新负责人", render: (_, r) => r.after?.assigned_to || "未分配" }, { title: "原因", render: (_, r) => r.after?.reason }]} /></Modal></>;
 }
+
+export type AssignmentReturn = { returned_by: string; returned_at: string; category: string; reason: string };
+
+export function ReturnAssignment({ leadId, onReturned }: { leadId: string; onReturned: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState<string>();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  return <><Button size="small" onClick={() => { setOpen(true); setError(undefined); }}>退回门店</Button><Modal title="退回门店" open={open} okText="确认退回" cancelText="取消" confirmLoading={busy} okButtonProps={{ disabled: busy || !category || !reason.trim() }} onCancel={() => { if (!busy) setOpen(false); }} onOk={async () => {
+    if (busy || !category || !reason.trim()) return;
+    setBusy(true); setError(undefined);
+    try { await api(`/api/leads/${leadId}/return-assignment`, json({ category, reason: reason.trim() })); setOpen(false); onReturned(); }
+    catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  }}><p>退回后由销售总监重新分配。资料和沟通记录会保留，未发送任务将暂停，门店会移出你的名单。</p>{error && <Alert type="error" showIcon message={error} />}<Space direction="vertical" style={{ width: "100%" }}><Select aria-label="退回原因" placeholder="选择退回原因" value={category} disabled={busy} style={{ width: "100%" }} onChange={setCategory} options={["业务不匹配", "联系困难", "区域不合适", "重复线索", "其他"].map(value => ({ value, label: value }))} /><Input.TextArea aria-label="退回说明" placeholder="说明具体情况，方便重新分配（必填）" value={reason} disabled={busy} maxLength={1000} rows={4} onChange={e => setReason(e.target.value)} /></Space></Modal></>;
+}

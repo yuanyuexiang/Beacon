@@ -153,6 +153,8 @@ def transfer(db: Session, lead: Lead, target: str | None, by: Operator, reason: 
     ):
         draft.assigned_to = target
     lead.assigned_to = target
+    if target is not None and (lead.raw or {}).get("assignment_return"):
+        lead.raw = {k: v for k, v in (lead.raw or {}).items() if k != "assignment_return"}
     audit.record(
         db,
         by,
@@ -162,6 +164,48 @@ def transfer(db: Session, lead: Lead, target: str | None, by: Operator, reason: 
         before={"assigned_to": before},
         after={"assigned_to": target, "reason": reason},
     )
+
+
+class ReturnIn(BaseModel):
+    category: str = Field(min_length=1, max_length=50)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+@router.post("/leads/{lead_id}/return-assignment")
+def return_assignment(
+    lead_id: uuid.UUID,
+    body: ReturnIn,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
+    for key in (470012, 480012):
+        db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+    lock_current(db, op)
+    if op.role != "member":
+        raise HTTPException(403, "仅业务成员可退回自己的门店")
+    if body.category not in {"业务不匹配", "联系困难", "区域不合适", "重复线索", "其他"} or not body.reason.strip():
+        raise HTTPException(422, "请选择退回原因并填写说明")
+    lead = db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update().execution_options(populate_existing=True))
+    if lead is None or lead.assigned_to != op.username:
+        raise HTTPException(409, "门店已退回或负责人已变化，请返回名单刷新")
+    # 仅在锁定并验证归属后允许本次受控交接；一般业务写入仍禁止改负责人。
+    scope = db.info.pop("member_scope", None)
+    try:
+        transfer(db, lead, None, op, f"退回：{body.category}；{body.reason.strip()}")
+        lead.raw = {
+            **(lead.raw or {}),
+            "assignment_return": {
+                "returned_by": op.username,
+                "returned_at": datetime.now(UTC).isoformat(),
+                "category": body.category,
+                "reason": body.reason.strip(),
+            },
+        }
+        db.commit()
+    finally:
+        if scope:
+            db.info["member_scope"] = scope
+    return {"status": "returned"}
 
 
 @router.post("/assignment/apply")

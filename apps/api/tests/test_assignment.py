@@ -263,3 +263,60 @@ def test_worker_rechecks_current_owner_and_disabled_assignee(client, db, team):
     db.commit()
     with pytest.raises(service.SalesError, match="停用"):
         service.check_task_owner(db, task)
+
+
+def test_member_returns_store_and_director_reassigns(client, db, team):
+    identity, boss, alice, bob = team
+    assert assign(boss, identity, "alice").status_code == 200
+    body = {"category": "联系困难", "reason": "多次电话无人接听"}
+    assert bob.post(f"/api/leads/{identity}/return-assignment", json=body).status_code == 409
+    assert boss.post(f"/api/leads/{identity}/return-assignment", json=body).status_code == 403
+    assert alice.post(f"/api/leads/{identity}/return-assignment", json={**body, "reason": " "}).status_code == 422
+    result = alice.post(f"/api/leads/{identity}/return-assignment", json=body)
+    assert result.status_code == 200, result.text
+    stored = boss.get(f"/api/leads/{identity}").json()
+    assert stored["assigned_to"] is None
+    assert stored["assignment_return"]["returned_by"] == "alice"
+    assert stored["assignment_return"]["reason"] == body["reason"]
+    assert alice.get(f"/api/leads/{identity}").status_code == 404
+    assert alice.post(f"/api/leads/{identity}/return-assignment", json=body).status_code == 409
+    assert assign(boss, identity, "bob").status_code == 200
+    assert bob.get(f"/api/leads/{identity}").json()["assignment_return"] is None
+    history = boss.get(f"/api/leads/{identity}/assignment-history").json()
+    assert any("多次电话无人接听" in row["after"].get("reason", "") for row in history)
+
+
+@pytest.mark.parametrize("status", ["queued", "sending", "unknown"])
+def test_return_handles_pending_delivery(client, db, team, status):
+    from app.modules.gmail.models import EmailDelivery
+
+    identity, boss, alice, _ = team
+    assign(boss, identity, "alice")
+    _, _, task = ready(client, identity)
+    delivery = EmailDelivery(
+        task_id=uuid.UUID(task["id"]),
+        status=status,
+        payload={},
+        approval_token="old",
+        expires_at=datetime.now(UTC),
+        request_key="return-test",
+    )
+    db.add(delivery)
+    db.commit()
+    delivery_id = delivery.id
+    response = alice.post(
+        f"/api/leads/{identity}/return-assignment", json={"category": "其他", "reason": "需要其他同事跟进"}
+    )
+    assert response.status_code == (200 if status == "queued" else 409)
+    db.info.pop("member_scope", None)
+    db.expire_all()
+    lead = db.get(Lead, uuid.UUID(identity))
+    stored = db.get(EmailDelivery, delivery_id)
+    if status == "queued":
+        assert lead.assigned_to is None
+        assert stored.status == "cancelled" and stored.approval_token is None
+        assert db.get(ManualTask, uuid.UUID(task["id"])).status == TaskStatus.paused
+    else:
+        assert lead.assigned_to == "alice"
+        assert stored.status == status
+        assert not (lead.raw or {}).get("assignment_return")

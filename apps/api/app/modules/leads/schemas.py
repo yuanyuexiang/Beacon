@@ -30,6 +30,7 @@ class BatchOut(BatchIn):
 
 class LeadOut(BaseModel):
     assigned_to: str | None = None
+    assignment_return: dict | None = None
     id: uuid.UUID
     source_key: str
     source_name: str
@@ -65,6 +66,7 @@ class LeadOut(BaseModel):
             row = {k: getattr(value, k) for k in cls.model_fields if hasattr(value, k)}
             row.update(
                 manual_entry={k: v for k, v in raw.get("manual_entry", {}).items() if k != "request_hash"} or None,
+                assignment_return=raw.get("assignment_return"),
                 operating_type=raw.get("operating_type"),
                 website_research=raw.get("website_research"),
                 google_enrichment=raw.get("places_enrichment"),
