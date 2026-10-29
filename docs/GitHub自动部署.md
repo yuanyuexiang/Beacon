@@ -123,3 +123,5 @@ D57（2026-10-15，本地已准备、服务器未发布）：新增 directory-wo
 2026-10-22：用户确认本地测试发送成功并授权发布。[Actions 39742889480](https://github.com/yuanyuexiang/Beacon/actions/runs/39742889480) 成功发布 `8df200acbbaf39a4fa47be9ef99755fc40d697cf`，包含 Gmail Web OAuth、测试邮件预览确认和错误诊断。修复测试回调 mypy 错误后全部检查及五镜像构建通过。公网 Web/API SHA 一致，数据库仍为 `d170a0010001`，9 个业务容器正常、备份完整、pending 为空。云端保留原 Desktop 凭据但未连接，未导入本机 Token；需在设置页配置云端 Web 客户端，回调 `https://beacon.ai-onestep.com/api/gmail/oauth/callback`。发送与批量队列保持暂停，未发送邮件。验证记录位于受控 `data/devops/release-20261022-verification.json`。
 
 2026-10-28 后续更新：Meta 连接诊断新增迁移 `d177a0010001`（可空 JSONB 字段），部署 head 已同步更新。跨 revision 自动回滚范围仍为空，未扩大旧版本兼容声明。
+
+2026-10-29：AI模型连接新增迁移 `d178a0010001`，部署声明同步。AI凭据恢复同时需要数据库及数据卷 `ai/encryption.key`；现有数据卷备份需保留该文件。跨 revision 自动回滚范围仍为空。

@@ -294,7 +294,7 @@ def save_reply_draft(
         version=content._next_version(db, lead.id, ContentKind.message_short),
         template_name=content.INQUIRY_TEMPLATE,
         template_version="reply-ai-1",
-        engine="deepseek",
+        engine=f"ai:{result.get('model', 'unknown')}"[:64],
         spec=spec,
         body_text=text,
         content_hash=digest,

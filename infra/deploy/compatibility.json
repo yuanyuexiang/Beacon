@@ -1,5 +1,5 @@
 {
-  "migration_head": "d177a0010001",
+  "migration_head": "d178a0010001",
   "rollback_compatible_from": [],
   "provider_storage_compatible": true,
   "directory_worker": true

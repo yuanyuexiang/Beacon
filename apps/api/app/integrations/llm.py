@@ -337,11 +337,17 @@ def _pdf_pages_png(data: bytes, max_pages: int = 4, resolution: int = 110) -> li
 
 
 def get_provider() -> MenuProvider:
-    name = get_settings().llm_provider
-    if name == "fake":
-        return FakeProvider()
-    if name == "anthropic":
-        return AnthropicProvider()
-    if name == "deepseek":
-        return DeepSeekProvider()
-    raise ProviderUnavailable(f"未实现或未配置的模型 provider：{name}（可用：fake、anthropic、deepseek）")
+    from app.integrations import ai_runtime
+
+    if ai_runtime.selected("vision"):
+        return ai_runtime.MenuProvider()
+    if not ai_runtime.managed():
+        name = get_settings().llm_provider
+        if name == "fake":
+            return FakeProvider()
+        if name == "anthropic":
+            return AnthropicProvider()  # 保留缺少旧环境凭据时的明确诊断。
+        if name == "deepseek":
+            return DeepSeekProvider()
+        raise ProviderUnavailable(f"未实现或未配置的模型 provider：{name}")
+    raise ProviderUnavailable("尚未选择可用 AI 模型，请在设置中选择默认连接或菜单识别连接")

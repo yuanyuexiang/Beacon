@@ -30,6 +30,12 @@ def observe(purpose: str, model: str, version: str):
     except Exception as exc:
         row["status"] = "failed"
         row["error_type"] = type(exc).__name__
+        from app.integrations.llm import ProviderUnavailable
+
+        if isinstance(exc, ProviderUnavailable):
+            row["error"] = str(exc)[:500]
+        else:
+            row["error"] = "模型输出校验未通过，请检查输入资料或重试"
         raise
     finally:
         row["at"] = datetime.now(UTC).isoformat()

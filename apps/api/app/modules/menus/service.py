@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.files import resolve_within, store_bytes
-from app.integrations import fetcher
+from app.integrations import ai_runtime, fetcher
 from app.integrations.llm import ProviderUnavailable, get_provider
 from app.modules.menus import analysis as rules
 from app.modules.menus.models import AnalysisStatus, AssetKind, FetchStatus, MenuAnalysis, MenuAsset
@@ -102,6 +102,7 @@ def latest_analysis(db: Session, asset_id: uuid.UUID) -> MenuAnalysis | None:
     )
 
 
+@ai_runtime.call_scope
 def run_analysis(
     db: Session, asset: MenuAsset, engine: str = "rules", force: bool = False
 ) -> tuple[MenuAnalysis, bool]:
@@ -112,7 +113,7 @@ def run_analysis(
         try:
             data = resolve_within(asset.storage_path).read_bytes()
             needs_model = asset.kind == AssetKind.image or (asset.kind == AssetKind.pdf and _pdf_has_no_text(data))
-            if not needs_model and get_settings().llm_provider == "deepseek":
+            if not needs_model and ai_runtime.available("vision"):
                 probe = rules.analyze(asset.kind.value, data, asset.final_url or asset.source_url)
                 # 有文本却没有提取到条目才升级；菜单索引页仍交给链接发现，不误作菜单转录。
                 needs_model = not probe.items and not (
@@ -123,16 +124,20 @@ def run_analysis(
         if needs_model and get_provider().name == "fake":
             raise ProviderUnavailable("图片或扫描菜单需要配置真实 AI；可先保存资料与准备草稿")
         engine = "provider" if needs_model else "rules"
+    provider_metadata = None
     engine_version = rules.RULES_VERSION if engine == "rules" else None
     if engine != "rules":
         provider = get_provider()
         engine, engine_version = provider.name, str(getattr(provider, "model", "0"))
+        if isinstance(provider, ai_runtime.MenuProvider):
+            provider_metadata = ai_runtime.metadata(provider.client)
     latest = latest_analysis(db, asset.id)
     if (
         latest is not None
         and not force
         and latest.engine == engine
         and latest.engine_version == engine_version
+        and (latest.measurements or {}).get("ai") == provider_metadata
         and latest.input_sha256 == asset.sha256
         and latest.status != AnalysisStatus.failed
     ):
@@ -175,6 +180,8 @@ def run_analysis(
     from app.modules.menus.quality import assess
 
     a.measurements = {**(a.measurements or {}), "extraction_quality": assess(a.items or [])}
+    if provider_metadata:
+        a.measurements = {**a.measurements, "ai": provider_metadata}
     db.commit()
     db.refresh(a)
     return a, True

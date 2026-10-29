@@ -3,11 +3,10 @@
 import json
 from typing import Literal, TypeVar
 
-import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.config import get_settings
-from app.integrations.llm import DeepSeekProvider, ProviderUnavailable
+from app.integrations.ai_runtime import client as model_client
+from app.integrations.ai_runtime import metadata
 
 PROMPT_VERSION = "research-2"
 
@@ -94,9 +93,7 @@ Use review when insufficient. Explain the reason in Chinese. Do not output a con
 
 class ResearchJudge:
     def __init__(self, transport=None):
-        if get_settings().llm_provider != "deepseek":
-            raise ProviderUnavailable("自动研究需要配置真实 DeepSeek；Fake 模型不能自动采用官网或菜单")
-        self.provider = DeepSeekProvider(transport=transport)
+        self.provider = model_client("research", transport=transport)
         self.model = self.provider.model
         self.usage: list[dict] = []
 
@@ -169,6 +166,7 @@ class ResearchJudge:
         from app.integrations.ai_observation import observe
 
         with observe(schema.__name__, self.model, PROMPT_VERSION) as record:
+            record.update(metadata(self.provider))
             start = len(self.usage)
             try:
                 return self._execute(task, documents, schema, system, max_tokens)
@@ -195,20 +193,9 @@ class ResearchJudge:
             ],
         }
         for attempt in range(2):
-            with httpx.Client(
-                base_url=self.provider.base_url, timeout=90, transport=self.provider._transport
-            ) as client:
-                response = client.post(
-                    "/chat/completions", json=body, headers={"Authorization": f"Bearer {self.provider.key}"}
-                )
-            if response.status_code != 200:
-                raise ProviderUnavailable(f"AI 证据判断失败：HTTP {response.status_code}")
-            data = response.json()
-            self.usage.append(data.get("usage") or {})
-            choice = data["choices"][0]
-            if choice.get("finish_reason") != "stop":
-                raise ValueError("AI 输出未完成，不能自动通过")
-            verdict = schema.model_validate_json(choice["message"]["content"])
+            response = self.provider.complete(body["messages"], schema, max_tokens)
+            self.usage.append(response.usage)
+            verdict = schema.model_validate_json(response.text)
             texts = {d["id"]: d["text"] for d in documents}
             invalid = [
                 c.model_dump()

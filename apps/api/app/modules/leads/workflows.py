@@ -18,6 +18,8 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.core.models_base import Base, Timestamped, UUIDPk
+from app.integrations.ai_runtime import revision as ai_revision
+from app.integrations.ai_runtime import workflow_scope
 from app.modules.directory import service as directory
 from app.modules.leads import policy, runs, service
 from app.modules.leads.models import Batch
@@ -151,6 +153,7 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
         if body.kind != "enrich" or body.phase != "review" or not set(body.lead_ids) <= members:
             raise HTTPException(422, "Selected stores must belong to this review list")
         params["lead_ids"] = [str(x) for x in dict.fromkeys(body.lead_ids)]
+    params["ai_revision"] = ai_revision(db)
     params["phase"] = body.phase if body.kind == "enrich" else "sync"
     params["policy"] = policy.current(db).model_dump()
     task = Workflow(
@@ -190,6 +193,7 @@ def save_progress(db: Session, task: Workflow) -> None:
     db.refresh(task)
 
 
+@workflow_scope
 def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
     if task.status in {"completed", "cancelled"}:
         return task

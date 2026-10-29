@@ -1,4 +1,5 @@
 "use client";
+import AiSettings from "@/components/AiSettings";
 import AiObservations from "@/components/AiObservations";
 import { Alert, Card, Select, Tag, Typography } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -11,6 +12,7 @@ import { SettingsState } from "@/components/SettingsState";
 
 const groups = [
   { title: "业务设置", items: [{ key: "profile", label: "我们的服务", note: "AI 起草使用的真实服务资料" }, { key: "screen", label: "客户筛选与准入", note: "筛选规则及自动准入策略" }, { key: "data", label: "数据补充", note: "来源查询与结果复用" }] },
+  { title: "AI 设置", items: [{key: "ai", label: "AI 模型", note: "模型连接、用途分配与调用记录"}] },
   { title: "渠道连接", items: [{ key: "gmail", label: "Gmail", note: "邮箱授权、测试与发送" }, { key: "meta", label: "Facebook / Instagram", note: "本方账号及已连接会话" }, { key: "manual", label: "TikTok / LinkedIn", note: "人工渠道" }] },
   { title: "帮助说明", items: [{ key: "guide", label: "操作指南", note: "从建立名单到沟通跟进" }, { key: "faq", label: "常见问题", note: "缺项、重试与授权" }, { key: "technical", label: "技术文档", note: "部署与接口参考" }] },
 ];
@@ -86,6 +88,7 @@ export default function SettingsPage() {
         {!active && <p>正在打开设置…</p>}
         {visited.includes("profile") && <div hidden={active !== "profile"}><OutreachProfileSettings /></div>}
         {policyVisited && <div hidden={active !== "screen" && active !== "data"}><LeadPolicySettings section={active === "data" ? "data" : "screen"} /></div>}
+        {visited.includes("ai") && <div hidden={active !== "ai"}><AiSettings /></div>}
         {visited.includes("gmail") && <div hidden={active !== "gmail"}><GmailSettings /></div>}
         {visited.includes("meta") && <div hidden={active !== "meta"}><SocialSettings /></div>}
         {active && ["manual", "guide", "faq", "technical"].includes(active) && <Help section={active} />}

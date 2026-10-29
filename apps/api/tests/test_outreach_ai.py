@@ -69,7 +69,7 @@ def test_inquiry_subject_revision_and_profile_change_invalidate_confirmation(cli
     assert response.status_code == 201, response.text
     piece = response.json()
     assert not seen[0]["has_reviewed_menu"]
-    assert piece["engine"] == "deepseek:test-model" and not piece["approval_valid"]
+    assert piece["engine"] == "ai:test-model" and not piece["approval_valid"]
     assert IDENT in piece["body_text"] and OPTOUT in piece["body_text"]
     assert piece["spec"]["subject"] == "Menu design and printing"
     approved = client.post(f"/api/content/{piece['id']}/approve", json={"decision": "approved"})
@@ -154,10 +154,8 @@ def test_social_message_and_profile_permissions(client, db, monkeypatch):
     assert client.put("/api/outreach-profile", json=saved).status_code == 403
 
 
-def test_fake_provider_never_generates_ai_message(monkeypatch):
-    from types import SimpleNamespace
+def test_fake_provider_never_generates_ai_message(db, monkeypatch):
 
-    monkeypatch.setattr(outreach_ai, "get_settings", lambda: SimpleNamespace(llm_provider="fake"))
     with pytest.raises(ProviderUnavailable):
         outreach_ai.generate({})
 
@@ -193,8 +191,7 @@ def test_message_cannot_be_reused_for_different_recipient(client, db, monkeypatc
 
 
 @pytest.mark.parametrize("finish", ["stop", "length"])
-def test_real_provider_protocol_uses_structured_output_without_network(monkeypatch, finish):
-    from types import SimpleNamespace
+def test_real_provider_protocol_uses_structured_output_without_network(db, monkeypatch, finish):
 
     import httpx
 
@@ -208,15 +205,19 @@ def test_real_provider_protocol_uses_structured_output_without_network(monkeypat
             200, json={"choices": [{"finish_reason": finish, "message": {"content": result()[0].model_dump_json()}}]}
         )
 
-    monkeypatch.setattr(outreach_ai, "get_settings", lambda: SimpleNamespace(llm_provider="deepseek"))
     monkeypatch.setattr(
         outreach_ai,
-        "DeepSeekProvider",
-        lambda: SimpleNamespace(
-            model="test-model",
-            base_url="https://model.example",
-            key="test",
-            _transport=httpx.MockTransport(respond),
+        "model_client",
+        lambda purpose: __import__("app.integrations.ai_runtime", fromlist=["Client"]).Client(
+            {
+                "provider": "deepseek",
+                "protocol": "chat",
+                "model": "test-model",
+                "base_url": "https://model.example",
+                "key": "test",
+                "json_mode": True,
+            },
+            httpx.MockTransport(respond),
         ),
     )
     if finish == "stop":

@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.core.models_base import Base, Timestamped, UUIDPk
+from app.integrations import ai_runtime
 from app.modules.leads.models import Batch, BatchLead, Lead
 from app.modules.menus import analysis as rules
 from app.modules.menus import service as menu_service
@@ -83,10 +84,9 @@ def _needs_contact_scan(lead: Lead | None) -> bool:
     if not lead.website and not (raw.get("overture") or {}).get("matched"):
         return False
     scan = raw.get("contacts_scan")
-    from app.core.config import get_settings
     from app.modules.sales.contact_ranking import VERSION
 
-    configured = get_settings().llm_provider == "deepseek" and bool(get_settings().deepseek_api_key)
+    configured = ai_runtime.available()
     if not scan or scan.get("ranking_version") != VERSION or (configured and scan.get("ai_status") != "completed"):
         return True
     # 官网换了、没有读到页面或部分页面失败：允许再次查找，已记录联系方式不会重复新增。

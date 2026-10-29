@@ -125,6 +125,8 @@ def get_file(rel_path: str, op: Operator = Depends(current_operator), db: Sessio
         p = resolve_within(rel_path)
     except UnsafePathError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+    if p.is_relative_to(get_settings().data_dir.resolve() / "ai"):
+        raise HTTPException(404, "文件不存在")
     if op.role == "member":
         from sqlalchemy import or_
 

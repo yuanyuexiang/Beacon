@@ -19,7 +19,7 @@ from app.core.auth import current_operator
 from app.core.config import get_settings
 from app.core.db import get_db, get_sessionmaker
 from app.core.models import Operator
-from app.integrations import fetcher
+from app.integrations import ai_runtime, fetcher
 from app.integrations import maps_menu_browser as browser
 from app.modules.leads.models import Lead
 from app.modules.menus import service
@@ -363,8 +363,7 @@ def finish(
 ) -> dict:
     lead, run = checked(db, lead_id, run_id, body.lease)
     capture_status = body.capture_status if body.capture_status in browser.MESSAGES else "failed"
-    settings = get_settings()
-    can_analyze = settings.llm_provider == "deepseek" and bool(settings.deepseek_api_key)
+    can_analyze = ai_runtime.available("vision")
     analyze = can_analyze and any(item["created"] for item in run["images"])
     run.update(
         status="analyzing"

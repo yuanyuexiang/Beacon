@@ -5,15 +5,15 @@ import re
 import uuid
 from typing import Literal
 
-import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core import audit
-from app.core.config import get_settings
 from app.core.models import AuditLog, Operator
-from app.integrations.llm import DeepSeekProvider, ProviderUnavailable
+from app.integrations.ai_runtime import call_scope, metadata
+from app.integrations.ai_runtime import client as model_client
+from app.integrations.llm import ProviderUnavailable
 from app.modules.content import service
 from app.modules.content.models import ContentKind, ContentPiece, ContentStatus
 from app.modules.leads.models import Lead
@@ -86,6 +86,7 @@ class GenerateIn(BaseModel):
 
 
 class GeneratedMessage(BaseModel):
+    _ai_metadata: dict = PrivateAttr(default_factory=dict)
     subject: str = Field(default="", max_length=200)
     body: str = Field(min_length=1, max_length=5000)
     cited_ids: list[str] = Field(max_length=30)
@@ -182,42 +183,29 @@ def validate_generated(result: GeneratedMessage) -> None:
         raise service.ContentError("AI 文案包含未填写的身份占位符，请重新生成")
 
 
+@call_scope
 def generate(task: dict, *, retry_invalid: bool = True) -> tuple[GeneratedMessage, str]:
-    if get_settings().llm_provider != "deepseek":
-        raise ProviderUnavailable("AI 起草需要已配置的真实 DeepSeek，未调用模板替代")
-    provider = DeepSeekProvider()
+    provider = model_client("writing")
     from app.integrations.ai_observation import observe
 
     with observe("outreach_message", provider.model, "outreach-2-en-GB") as record:
         try:
-            with httpx.Client(base_url=provider.base_url, timeout=90, transport=provider._transport) as client:
-                response = client.post(
-                    "/chat/completions",
-                    headers={"Authorization": f"Bearer {provider.key}"},
-                    json={
-                        "model": provider.model,
-                        "thinking": {"type": "disabled"},
-                        "max_tokens": 2500,
-                        "response_format": {"type": "json_object"},
-                        "messages": [
-                            {"role": "system", "content": SYSTEM},
-                            {
-                                "role": "user",
-                                "content": json.dumps(
-                                    {"data": task, "output_schema": GeneratedMessage.model_json_schema()},
-                                    ensure_ascii=False,
-                                ),
-                            },
-                        ],
+            record.update(metadata(provider))
+            response = provider.complete(
+                [
+                    {"role": "system", "content": SYSTEM},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {"data": task, "output_schema": GeneratedMessage.model_json_schema()}, ensure_ascii=False
+                        ),
                     },
-                )
-            if response.status_code != 200:
-                raise ProviderUnavailable(f"AI 起草失败（HTTP {response.status_code}），已有消息未修改")
-            record["usage"] = response.json().get("usage", {})
-            choice = response.json()["choices"][0]
-            if choice.get("finish_reason") != "stop":
-                raise ValueError("AI 输出不完整")
-            result = GeneratedMessage.model_validate_json(choice["message"]["content"])
+                ],
+                GeneratedMessage,
+                2500,
+            )
+            record["usage"] = response.usage
+            result = GeneratedMessage.model_validate_json(response.text)
             try:
                 validate_generated(result)
             except service.ContentError as exc:
@@ -231,8 +219,9 @@ def generate(task: dict, *, retry_invalid: bool = True) -> tuple[GeneratedMessag
                         retry_invalid=False,
                     )
                 raise ProviderUnavailable("AI 未返回合格的英文消息，已保留原文案，请重试") from exc
+            result._ai_metadata = metadata(provider)
             return result, provider.model
-        except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+        except (ValueError, KeyError, IndexError) as exc:
             raise ProviderUnavailable("AI 起草暂不可用或输出不完整，已有消息未修改，请重试") from exc
 
 
@@ -363,6 +352,7 @@ def create(db: Session, lead: Lead, request: GenerateIn, by: str) -> ContentPiec
     spec = {
         "mode": "menu_analysis" if a else "menu_inquiry",
         "template": "ai_outreach_v1",
+        "ai": result._ai_metadata,
         "sender_identity": request.sender_identity.strip(),
         "opt_out_text": request.opt_out_text.strip(),
         "subject": result.subject.strip() if request.channel == "email" else "",
@@ -389,7 +379,7 @@ def create(db: Session, lead: Lead, request: GenerateIn, by: str) -> ContentPiec
         version=service._next_version(db, lead.id, ContentKind.message_short),
         template_name=service.MESSAGE_TEMPLATE if a else service.INQUIRY_TEMPLATE,
         template_version="ai-v1",
-        engine=f"deepseek:{model}"[:64],
+        engine=f"{result._ai_metadata.get('provider', 'ai')}:{model}"[:64],
         spec=spec,
         body_text=body,
         content_hash=service._sha({"body": body, "spec": spec}),

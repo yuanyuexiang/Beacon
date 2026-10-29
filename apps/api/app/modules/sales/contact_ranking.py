@@ -6,8 +6,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import get_settings
-from app.integrations import research_judge, website_contacts
+from app.integrations import ai_runtime, research_judge, website_contacts
 from app.integrations.llm import ProviderUnavailable
 
 VERSION = "contact-ranking-2"
@@ -136,8 +135,7 @@ def rank(lead: Any, found: dict) -> dict:
             c["assessment"] = {**result, "method": "ai", "confirmed_at": meta["checked_at"], "model": judge.model}
         return {**meta, "model": judge.model, "usage": judge.usage}
     except ProviderUnavailable as exc:
-        settings = get_settings()
-        if settings.llm_provider != "deepseek" or not get_settings().deepseek_api_key:
+        if not ai_runtime.available():
             reason = "尚未配置真实 AI，候选已保留，可配置后重试或人工选择"
         else:
             import re

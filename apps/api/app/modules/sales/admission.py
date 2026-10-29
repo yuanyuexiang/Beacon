@@ -10,8 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core import audit
-from app.core.config import get_settings
-from app.integrations import research_judge, website_contacts, website_entity
+from app.integrations import ai_runtime, research_judge, website_contacts, website_entity
 from app.modules.leads import entity, policy
 from app.modules.leads.models import Lead
 from app.modules.sales import contact_ranking
@@ -103,7 +102,7 @@ def prepare(lead: Lead, found: dict, p: policy.Policy) -> dict:
         return {**result, "reason": "当前没有邮箱，无需识别邮件订户类型"}
     if not lead.website:
         return {**result, "reason": "缺少官网，不能核验公司主体"}
-    if get_settings().llm_provider != "deepseek" or not get_settings().deepseek_api_key:
+    if not ai_runtime.available():
         return {**result, "status": "retry", "reason": "真实 AI 未配置，暂不能自动识别公司订户"}
     docs = list((found.get("website") or {}).get("identity_documents") or [])
     try:
@@ -164,7 +163,7 @@ def prepare(lead: Lead, found: dict, p: policy.Policy) -> dict:
             **verdict.model_dump(),
             "status": "verified" if verified else "insufficient",
             "subscriber_type": "corporate" if verified else "unknown",
-            "provider": "deepseek",
+            "provider": getattr(getattr(judge, "provider", None), "name", "deepseek"),
             "model": judge.model,
             "citations": [
                 {**c.model_dump(), "url": pages[c.document_id]["url"]}
@@ -303,7 +302,8 @@ def apply(db: Session, lead: Lead, prepared: dict | None = None, expected_policy
             if (
                 subscriber.get("status") != "verified"
                 or subscriber.get("subscriber_type") != "corporate"
-                or subscriber.get("provider") != "deepseek"
+                or not subscriber.get("provider")
+                or subscriber.get("provider") == "fake"
                 or subscriber.get("website") != lead.website
                 or subscriber.get("version") != SUBSCRIBER_VERSION
                 or not fresh

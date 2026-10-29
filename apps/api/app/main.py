@@ -66,6 +66,7 @@ async def places_no_store(request: Request, call_next):
     if (
         request.url.path.startswith(
             (
+                "/api/ai",
                 "/api/auth",
                 "/api/users",
                 "/api/leads",
@@ -104,6 +105,7 @@ def health_db() -> dict:
 
 api.include_router(core_router)
 protected = APIRouter(prefix="/api", dependencies=[Depends(current_operator)])
+from app.modules.ai.routes import router as ai_router  # noqa: E402
 from app.modules.content.routes import router as content_router  # noqa: E402
 from app.modules.directory.routes import router as directory_router  # noqa: E402
 from app.modules.gmail.routes import callback_router as gmail_callback_router  # noqa: E402
@@ -119,6 +121,7 @@ from app.modules.outreach.routes import public_router as outreach_public_router 
 from app.modules.outreach.routes import router as outreach_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
+protected.include_router(ai_router)
 protected.include_router(users_router)
 protected.include_router(avatars_router)
 protected.include_router(outreach_router)
@@ -171,8 +174,11 @@ include_module_routers()
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/ai"):
+        return JSONResponse(status_code=422, content={"detail": "AI 配置格式无效，请核对必填项和字段长度"})
     if request.url.path.startswith(
         (
+            "/api/ai",
             "/api/auth",
             "/api/users",
             "/api/leads",

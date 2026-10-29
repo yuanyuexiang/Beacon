@@ -163,7 +163,6 @@ def test_service_facts_do_not_contain_internal_instructions():
 
 def test_real_generation_retries_invalid_language_once(db, monkeypatch):
     import json
-    from types import SimpleNamespace
 
     import httpx
     import pytest
@@ -186,9 +185,17 @@ def test_real_generation_retries_invalid_language_once(db, monkeypatch):
     monkeypatch.setattr(get_settings(), "llm_provider", "deepseek")
     monkeypatch.setattr(
         outreach_ai,
-        "DeepSeekProvider",
-        lambda: SimpleNamespace(
-            base_url="https://model.example", key="test", model="fake-test", _transport=httpx.MockTransport(handle)
+        "model_client",
+        lambda purpose: __import__("app.integrations.ai_runtime", fromlist=["Client"]).Client(
+            {
+                "provider": "deepseek",
+                "protocol": "chat",
+                "model": "fake-test",
+                "base_url": "https://model.example",
+                "key": "test",
+                "json_mode": True,
+            },
+            httpx.MockTransport(handle),
         ),
     )
     generated, _ = outreach_ai.generate({"language": "en-GB"})

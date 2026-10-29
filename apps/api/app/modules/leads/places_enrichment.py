@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.models import Operator
+from app.integrations import ai_runtime
 from app.integrations import google_places as google
 from app.modules.leads import google_places, policy, service, source_sync, website_review
 from app.modules.leads.models import Batch, Lead
@@ -56,7 +57,7 @@ def verify_website(db: Session, lead: Lead, place: google.Place, operator: Opera
 def review_one(
     db: Session, lead: Lead, operator: Operator, selected: policy.Policy, workflow_id: str, force: bool = False
 ) -> str:
-    configured = get_settings().llm_provider == "deepseek" and bool(get_settings().deepseek_api_key)
+    configured = ai_runtime.available()
     google_enabled = selected.google_mode != "off" and bool(get_settings().google_places_api_key)
     cached = source_sync.fresh(lead, selected.stale_days)
     lookup = google_enabled and not cached and (force or needed(lead, selected))
@@ -216,7 +217,7 @@ def advance(db: Session, batch: Batch, task: "Workflow") -> dict:
         state.setdefault(key, value)
     if state.get("google_exhausted"):
         selected = selected.model_copy(update={"google_mode": "off"})
-    configured = get_settings().llm_provider == "deepseek" and bool(get_settings().deepseek_api_key)
+    configured = ai_runtime.available()
     google_enabled = selected.google_mode != "off" and bool(get_settings().google_places_api_key)
     if not google_enabled and not configured:
         return {**state, "done": True, "note": "未配置 AI；Google 补充未启用或未配置，已跳过"}

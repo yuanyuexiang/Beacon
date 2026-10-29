@@ -18,7 +18,7 @@ from app.core.auth import current_operator
 from app.core.config import get_settings
 from app.core.db import get_db, get_sessionmaker
 from app.core.models import Operator
-from app.integrations import fetcher, research_judge, website_menus
+from app.integrations import ai_runtime, fetcher, research_judge, website_menus
 from app.modules.leads import google_places
 from app.modules.leads.models import Lead
 from app.modules.menus import analysis, service
@@ -84,7 +84,7 @@ def state(lead_id: uuid.UUID, db: Session = Depends(get_db)) -> dict:
     lead = locked(db, lead_id)
     recover(lead)
     result = {
-        "configured": get_settings().llm_provider == "deepseek" and bool(get_settings().deepseek_api_key),
+        "configured": ai_runtime.available(),
         "run": run_of(lead),
     }
     db.commit()
@@ -114,6 +114,7 @@ def start(
     run: dict = {
         "id": uuid.uuid4().hex,
         "process": PROCESS,
+        "ai_revision": ai_runtime.revision(db),
         "status": "queued",
         "stage": "等待开始",
         "started_at": now(),
@@ -231,6 +232,17 @@ def text_of(result) -> str:
 
 
 def execute(lead_id: uuid.UUID, run_id: str, operator_id: uuid.UUID) -> None:
+    with get_sessionmaker()() as db:
+        lead = db.get(Lead, lead_id)
+        run = run_of(lead) if lead else None
+        if not run or run["id"] != run_id:
+            return
+        frozen = run.get("ai_revision") or ai_runtime.revision(db)
+    with ai_runtime.scope(frozen):
+        _execute(lead_id, run_id, operator_id)
+
+
+def _execute(lead_id: uuid.UUID, run_id: str, operator_id: uuid.UUID) -> None:
     with get_sessionmaker()() as db:
         lead = db.get(Lead, lead_id)
         if not lead:
@@ -391,7 +403,7 @@ def execute(lead_id: uuid.UUID, run_id: str, operator_id: uuid.UUID) -> None:
                     content = text_of(r)
                     # 扫描件/图片暂存于内存，由现有视觉接口转录；不自动作为事实批准。
                     if len(content.strip()) < 50 and r.kind in {"pdf", "image"}:
-                        transcription = judge.provider.analyze_image(r.body, {"media_type": r.content_type})
+                        transcription = ai_runtime.MenuProvider().analyze_image(r.body, {"media_type": r.content_type})
                         content = "\n".join(
                             str(i.get("name", "")) + " " + str(i.get("price_text", i.get("price", "")))
                             for i in transcription.items

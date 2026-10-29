@@ -2,6 +2,7 @@
 
 from app.core.models import AuditLog, Operator  # noqa: F401
 from app.core.models_base import Base
+from app.modules.ai.models import AIConfiguration  # noqa: F401
 from app.modules.content.models import Approval, ContentPiece  # noqa: F401
 from app.modules.directory.models import Authority, Change, Entry, Region, SyncRun, WorkerStatus  # noqa: F401
 from app.modules.gmail.models import EmailDelivery  # noqa: F401

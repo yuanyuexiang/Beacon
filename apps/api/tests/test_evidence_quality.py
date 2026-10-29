@@ -82,6 +82,7 @@ def test_text_menu_empty_rules_escalates_only_to_real_provider(client, db, monke
 
     monkeypatch.setattr(get_settings(), "llm_provider", "deepseek")
     monkeypatch.setattr(service, "get_provider", lambda: Provider())
+    monkeypatch.setattr(service.ai_runtime, "available", lambda *args: True)
     second, _ = service.run_analysis(db, asset, engine="auto")
     assert calls and second.engine == "deepseek" and second.status.value == "needs_review"
     assert first.review_state is None and second.review_state is None

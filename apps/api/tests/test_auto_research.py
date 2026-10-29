@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from app.integrations import fetcher, research_judge
 from app.integrations.google_places import Place
+from app.integrations.llm import ProviderUnavailable
 from app.modules.leads import auto_research as workflow
 from app.modules.leads.models import Lead
 from app.modules.menus.models import MenuAsset
@@ -209,7 +210,7 @@ def test_judge_json_and_finish_reason(monkeypatch):
     judge.provider._transport = httpx.MockTransport(
         lambda _: httpx.Response(200, json={"choices": [{"finish_reason": "length"}]})
     )
-    with pytest.raises(ValueError, match="未完成"):
+    with pytest.raises(ProviderUnavailable, match="未完成"):
         judge.judge({}, [])
 
 

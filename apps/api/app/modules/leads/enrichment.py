@@ -14,6 +14,8 @@ from app.core import audit
 from app.core.auth import current_operator
 from app.core.db import get_db
 from app.core.models import Operator
+from app.integrations.ai_runtime import revision as ai_revision
+from app.integrations.ai_runtime import workflow_scope
 from app.modules.leads import policy, runs, service, website_review, workflows
 from app.modules.leads.models import Batch, BatchLead, Lead
 from app.modules.menus import service as menus
@@ -185,6 +187,7 @@ def start(
             step=0,
             steps=selected,
             params={
+                "ai_revision": ai_revision(db),
                 "lead_ids": [str(lead.id)],
                 "mode": body.mode,
                 "background": True,
@@ -292,6 +295,7 @@ def execute_item(db: Session, batch: Batch, task: workflows.Workflow, lead: Lead
     return "菜单分析已准备，请核对新版本；历史分析与沟通记录保留"
 
 
+@workflow_scope
 def advance(db: Session, batch: Batch, task: workflows.Workflow, op: Operator) -> None:
     from app.integrations.page_cache import fresh_read
 
