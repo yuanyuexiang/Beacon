@@ -3,7 +3,7 @@ import Button from "@/components/AccessButton";
 import { Alert, Checkbox, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
-import { ChannelAccount, Conversation, SocialDelivery, deliveryLabels, replyCandidates } from "@/lib/outreach";
+import { ChannelAccount, Conversation, SocialDelivery, deliveryLabels, replyCandidates, replyIssue } from "@/lib/outreach";
 import { channelLabel } from "@/lib/format";
 
 type Task = { id: string; lead_id: string; eligibility_id: string; channel: string; status: string };
@@ -35,13 +35,15 @@ export default function SocialOutreach({ tasks, name, onChanged, focusTaskId }: 
   const candidates = tasks.filter((t) => conversations.some((c) => replyCandidates([t], c, accounts.find((a) => a.id === c.account_id)).length));
   const previewTask = async (task: Task) => {
     const choices = conversations.filter((c) => replyCandidates([task], c, accounts.find((a) => a.id === c.account_id)).length);
+    if (!choices.length) throw new Error(replyIssue(task, conversations, accounts) || "没有可回复的会话");
     if (choices.length !== 1) throw new Error("该任务关联多个发送账号，请从会话表明确选择账号后预览");
     return api<SocialDelivery>("/api/outreach/preview", json({ task_id: task.id, conversation_id: choices[0].id }));
   };
   return <>
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
-    <Typography.Paragraph>Facebook / Instagram 支持已收到消息的普通文字回复。先核对会话并关联门店准入，再创建或恢复对应任务；公开主页不能直接发送。<a href="/settings">管理发送账号</a>。</Typography.Paragraph>
+    <Typography.Paragraph>Facebook / Instagram 支持已收到消息的普通文字回复。先核对会话并关联门店准入，再创建或恢复对应任务；公开主页不能直接发送。<a href="/settings?section=meta">管理发送账号</a>。</Typography.Paragraph>
     {!accounts.length && <Alert type="info" message="尚未添加发送账号，可先在设置中建立账号，授权以后补齐。" style={{ marginBottom: 12 }} />}
+    {accounts.some(a => a.connected) && !conversations.length && <Alert type="info" showIcon message="账号已连接，但尚未收到会话" description="测试时，请用测试用户账号向本方 Facebook 公共主页发送一条消息，再刷新这里。若消息没有出现，请检查 Meta 的 messages 订阅和 Webhook 接收情况。" style={{ marginBottom: 12 }} />}
     <Typography.Title level={5}>收到的会话</Typography.Title>
     <Table<Conversation> size="small" rowKey="id" dataSource={focusTaskId ? conversations.filter((c) => !c.lead_id || tasks.some((t) => t.lead_id === c.lead_id)) : conversations} pagination={{ pageSize: 10 }} columns={[
       { title: "发送账号", render: (_, c) => accounts.find((a) => a.id === c.account_id)?.label || c.account_id },
@@ -53,10 +55,10 @@ export default function SocialOutreach({ tasks, name, onChanged, focusTaskId }: 
         {replyCandidates(tasks, c, accounts.find((a) => a.id === c.account_id)).map((t) => <Button key={t.id} size="small" loading={busy} onClick={() => act(async () => { setPreviews([await api<SocialDelivery>("/api/outreach/preview", json({ task_id: t.id, conversation_id: c.id }))]); setConfirmed(false); })}>预览回复</Button>)}
       </Space> },
     ]} />
-    <Typography.Title level={5}>可回复的任务</Typography.Title>
-    <Space style={{ marginBottom: 12 }}><Button disabled={!selected.length} loading={busy} onClick={() => act(async () => { const rows: SocialDelivery[] = []; for (const id of selected) { const t = candidates.find((t) => t.id === id); if (!t) throw new Error("任务条件已变化，请刷新后选择"); rows.push(await previewTask(t)); } setPreviews(rows); setConfirmed(false); })}>预览选中任务</Button><Button onClick={() => act(refresh)}>刷新</Button></Space>
-    <Table<Task> size="small" rowKey="id" dataSource={candidates} pagination={{ pageSize: 10 }} rowSelection={{ selectedRowKeys: selected, onChange: setSelected }} columns={[
-      { title: "门店", render: (_, t) => name(t.lead_id) }, { title: "渠道", render: (_, t) => channelLabel(t.channel) }, { title: "任务", dataIndex: "id", ellipsis: true },
+    <Typography.Title level={5}>任务与回复条件</Typography.Title>
+    <Space style={{ marginBottom: 12 }}><Button disabled={!selected.length || selected.some(id => !candidates.some(t => t.id === id))} loading={busy} onClick={() => act(async () => { const rows: SocialDelivery[] = []; for (const id of selected) { const t = candidates.find((t) => t.id === id); if (!t) throw new Error("任务条件已变化，请刷新后选择"); rows.push(await previewTask(t)); } setPreviews(rows); setConfirmed(false); })}>预览选中任务</Button><Button onClick={() => act(refresh)}>刷新</Button></Space>
+    <Table<Task> size="small" rowKey="id" dataSource={tasks.filter(t => ["facebook", "instagram"].includes(t.channel))} pagination={{ pageSize: 10 }} rowSelection={{ selectedRowKeys: selected, onChange: setSelected, getCheckboxProps: (t) => ({ disabled: !candidates.some(c => c.id === t.id) }) }} columns={[
+      { title: "门店", render: (_, t) => name(t.lead_id) }, { title: "渠道", render: (_, t) => channelLabel(t.channel) }, { title: "回复条件", render: (_, t) => replyIssue(t, conversations, accounts) || "可预览回复" },
     ]} />
     <Typography.Title level={5}>发送记录</Typography.Title>
     <Table<SocialDelivery> size="small" rowKey="id" dataSource={deliveries.filter((d) => tasks.some((t) => t.id === d.task_id))} pagination={{ pageSize: 10 }} columns={[
