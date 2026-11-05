@@ -4,7 +4,7 @@ React Native + Expo SDK 58。网页与后端仍是现有 Beacon；此 App 是 Wh
 
 ## 当前实现
 
-- 网页创建短时单次配对码；Android Keystore 加密设备凭据。
+- 网页创建短时单次二维码／6 位备用码，手机扫码核对服务器和账号后确认；Android Keystore 加密设备凭据。
 - 手机检查 WhatsApp、无障碍和解锁状态；本方账号由用户在官方应用核对后填写。
 - 网页现有 WhatsApp 业务任务 → 手机预览确认 → 主动领取 → 手机逐条确认执行。
 - 本地 SQLite 先记录、后点击；结果先落盘、再上传；中断恢复仅回填，不重复发送。
@@ -38,9 +38,9 @@ cd apps/mobile-agent/android
 
 ## 连接本机 Beacon
 
-后端先执行 `cd apps/api && uv run alembic upgrade head`。网页“设置 → 手机执行”生成配对码。云端使用 HTTPS 根地址。
+后端先执行 `cd apps/api && uv run alembic upgrade head`。网页“设置 → 手机执行”点击“绑定新手机”，手机“设备与账号 → 扫码配对”，首次允许相机，扫描后核对服务器和绑定账号，点击“确认绑定”。相机被拒绝时可打开系统权限设置或选择手动配对。二维码 5 分钟有效、只能使用一次，刷新使旧码失效。云端自动使用当前 HTTPS 根地址。
 
-USB 本地验证可执行 `adb reverse tcp:8000 tcp:8000`，手机填写 `http://127.0.0.1:8000`；只允许此回环地址明文通信，其余地址要求 HTTPS。配对码从同一后端的网页生成。手机不接收模型 API Key 或社媒密码。
+USB 本地验证可执行 `adb reverse tcp:8000 tcp:8000`，二维码会自动填写 `http://127.0.0.1:8000`（手动入口仍可填写）；只允许此回环地址明文通信，其余地址要求 HTTPS。配对码从同一后端的网页生成。手机不接收模型 API Key 或社媒密码。
 
 ## 实机步骤
 
@@ -52,3 +52,11 @@ USB 本地验证可执行 `adb reverse tcp:8000 tcp:8000`，手机填写 `http:/
 首版不会清除第三方聊天里已有的草稿，不会解锁手机，不从私人聊天列表批量采集内容。
 
 调试注意：Mobile MCP／UIAutomator 的 UiAutomation 会话可能压制普通无障碍服务。实测出现“系统已启用，但 Beacon 检测未连接”时，先退出该调试会话，再用 `adb shell dumpsys accessibility` 检查 Bound services 是否包含 Beacon。不能仅依据浮动图标判断服务已连接；实际执行期间不要同时运行会占用该通道的手机 UI 检查工具。
+
+## 品牌素材
+
+App 复用 `apps/web/public/brand/logo.png` 与 `banner.jpg`，移动端副本位于 `assets/brand/`，离线可展示。图标按原比例置于 1024 方形白底，标识宽 620，预留 Android 圆形裁切安全区；启动页使用 Expo SplashScreen 白底居中 logo（不人为延时），banner 仅作顶部低对比背景。Android 12+ 由系统控制启动页结构。
+
+macOS 更新原图后运行 `sh scripts/prepare_mobile_brand.sh`，再执行 Expo prebuild 与 release APK 构建；修改图标或启动配置仅热更新 JS 不会生效。
+
+App 各页面内容底部显示“© 当前年份 南京小当家文化咨询有限公司”，年份随设备日期自动更新。

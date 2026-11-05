@@ -37,6 +37,11 @@ class Vault(val c: Context) {
     }
     return mapOf("server" to (prefs.getString("server", "") ?: ""), "token" to String(cipher.doFinal(Base64.decode(encoded, Base64.NO_WRAP))))
   }
+  fun rememberAccount(account: String) {
+    check(account.matches(Regex("^\\+[1-9][0-9]{6,14}$"))) { "请输入完整国际电话号码" }
+    check(prefs.edit().putString("account", account).commit())
+  }
+  fun account(): String = prefs.getString("account", "") ?: ""
 }
 
 class Journal(c: Context) : SQLiteOpenHelper(c, "beacon-execution.db", null, 1) {
@@ -46,6 +51,9 @@ class Journal(c: Context) : SQLiteOpenHelper(c, "beacon-execution.db", null, 1) 
     writableDatabase.execSQL("INSERT OR REPLACE INTO journal (id,value) VALUES (?,?)", arrayOf(j.getString("id"), j.toString()))
   }
   fun latest(): String = readableDatabase.rawQuery("SELECT value FROM journal ORDER BY rowid DESC LIMIT 1", null).use { if (it.moveToFirst()) it.getString(0) else "" }
+  fun recent(): List<String> = readableDatabase.rawQuery("SELECT value FROM journal ORDER BY rowid DESC LIMIT 20", null).use {
+    val rows = mutableListOf<String>(); while (it.moveToNext()) rows.add(it.getString(0)); rows
+  }
   fun unfinished(): List<JSONObject> = readableDatabase.rawQuery("SELECT value FROM journal", null).use {
     val rows = mutableListOf<JSONObject>()
     while (it.moveToNext()) { val j = JSONObject(it.getString(0)); if (!j.optBoolean("reported")) rows.add(j) }

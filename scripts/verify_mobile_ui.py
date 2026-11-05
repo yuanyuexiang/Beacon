@@ -1,6 +1,7 @@
 """Phone settings regression with mocked APIs; never pairs a real device or sends."""
 import asyncio
 import json
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from urllib.parse import urlsplit
 from playwright.async_api import async_playwright, expect
@@ -15,7 +16,7 @@ async def main():
         if path == "/api/auth/me":
             data = dict(id="tester", username="tester", role="admin", must_change_password=False)
         elif path == "/api/mobile/devices": data = [device]
-        elif path == "/api/mobile/pairing": data = dict(code="mock-pairing-code-not-a-secret", expires_at="2026-11-05T23:00:00Z")
+        elif path == "/api/mobile/pairing": data = dict(code="123456", expires_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(), owner="tester")
         elif path.endswith("/revoke"):
             device["status"] = "revoked"
             data = device
@@ -29,7 +30,10 @@ async def main():
         await page.goto("http://localhost:3001/settings?section=mobile")
         await expect(page.get_by_text("验证手机", exact=True)).to_be_visible()
         await page.get_by_role("button", name="绑定新手机", exact=True).click()
-        await expect(page.get_by_text("mock-pairing-code-not-a-secret", exact=True)).to_be_visible()
+        await expect(page.get_by_text("123456", exact=True)).to_be_visible()
+        await expect(page.locator(".ant-qrcode")).to_be_visible()
+        await expect(page.get_by_text("绑定账号：tester", exact=True)).to_be_visible()
+        await expect(page.get_by_text("http://127.0.0.1:8000", exact=True)).to_be_visible()
         await expect(page.get_by_role("button", name="刷新手机", exact=True)).not_to_have_class("ant-btn-loading")
         out = Path("data/devchecks/mobile"); out.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(out / "settings-desktop.png"), full_page=True)

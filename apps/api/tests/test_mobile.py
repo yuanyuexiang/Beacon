@@ -192,3 +192,24 @@ def test_sender_change_cancels_prepared_job(client, db):
     )
     assert client.get(f"/api/mobile/tasks/{tid}").json()["status"] == "cancelled"
     assert client.post("/api/mobile/device/claim", headers=headers).json()["job"] is None
+
+
+def test_device_state_restores_account_and_counts_only_pending(client, db):
+    tid, device, headers, _ = setup(client, db)
+    state = client.post("/api/mobile/device/state", headers=headers).json()
+    assert state["account"] == "+447700900001" and state["pending_count"] == 0
+    enqueue(client, tid, device)
+    assert client.post("/api/mobile/device/state", headers=headers).json()["pending_count"] == 1
+    client.post("/api/mobile/device/claim", headers=headers)
+    assert client.post("/api/mobile/device/state", headers=headers).json()["pending_count"] == 0
+    assert client.post("/api/mobile/device/state").status_code == 401
+
+
+def test_pairing_refresh_expires_previous_code_and_returns_owner(client, db):
+    setup(client, db)
+    first = client.post("/api/mobile/pairing").json()
+    second = client.post("/api/mobile/pairing").json()
+    assert second["owner"] == "tester" and second["code"] != first["code"]
+    assert client.post("/api/mobile/device/pair", json={"code": first["code"], "label": "old"}).status_code == 409
+    paired = client.post("/api/mobile/device/pair", json={"code": second["code"], "label": "scan"})
+    assert paired.status_code == 200 and paired.json()["owner"] == "tester"

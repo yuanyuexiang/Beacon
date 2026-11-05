@@ -11,7 +11,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.auth import current_operator, may_send
@@ -124,10 +124,13 @@ def create_pairing(db: Session = Depends(get_db), op: Operator = Depends(current
     code = f"{secrets.randbelow(1_000_000):06d}"
     while db.scalar(select(Pairing.id).where(Pairing.code_hash == digest(code))):
         code = f"{secrets.randbelow(1_000_000):06d}"
+    # Refresh replaces unused codes for this operator only.
+    for previous in db.scalars(select(Pairing).where(Pairing.owner == op.username, Pairing.used_at.is_(None))):
+        previous.expires_at = service.now()
     expiry = service.now() + timedelta(minutes=5)
     db.add(Pairing(owner=op.username, code_hash=digest(code), expires_at=expiry))
     db.commit()
-    return {"code": code, "expires_at": expiry}
+    return {"code": code, "expires_at": expiry, "owner": op.username}
 
 
 @worker_router.post("/pair")
@@ -141,7 +144,7 @@ def pair(body: PairIn, db: Session = Depends(get_db)):
     db.add(d)
     row.used_at = service.now()
     db.commit()
-    return {"device_id": str(d.id), "token": token, "protocol": 1}
+    return {"device_id": str(d.id), "token": token, "protocol": 1, "owner": row.owner}
 
 
 @router.get("/devices")
@@ -178,7 +181,15 @@ def heartbeat(body: Heartbeat, d: Device = Depends(device_auth), db: Session = D
     d.capabilities = body.model_dump(exclude={"account"})
     d.status = "ready" if body.ready and body.accessibility else "paired"
     db.commit()
-    return {"status": d.status}
+    return device_state(d, db)
+
+
+@worker_router.post("/state")
+def device_state(d: Device = Depends(device_auth), db: Session = Depends(get_db)):
+    count = db.scalar(
+        select(func.count()).select_from(Execution).where(Execution.device_id == d.id, Execution.status == "queued")
+    )
+    return {"status": d.status, "account": d.account, "label": d.label, "pending_count": count or 0}
 
 
 def task_for(db: Session, identity: uuid.UUID) -> ManualTask:

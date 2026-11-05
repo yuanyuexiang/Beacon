@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -174,6 +175,58 @@ def list_eligibility(lead_id: uuid.UUID, db: Session = Depends(get_db), op: Oper
         }
         for row in rows
     ]
+
+
+class WhatsAppFromPhoneIn(BaseModel):
+    contact_ref: str = Field(min_length=7, max_length=64)
+
+
+@router.post("/leads/{lead_id}/eligibility/{identity}/whatsapp", response_model=EligibilityOut)
+def whatsapp_from_phone(
+    lead_id: uuid.UUID,
+    identity: uuid.UUID,
+    body: WhatsAppFromPhoneIn,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
+    _lead(db, lead_id)
+    db.scalar(select(Lead).where(Lead.id == lead_id).with_for_update())
+    source = db.get(ChannelEligibility, identity)
+    if not source or source.lead_id != lead_id or source.channel != Channel.phone:
+        raise HTTPException(404, "原电话联系方式不存在")
+    if source.contact_usable == ContactUsable.invalid or source.eligibility == Eligibility.blocked:
+        raise HTTPException(409, "原电话已标记无效或不应联系，请先核对")
+    number = re.sub(r"[\s()\-]", "", body.contact_ref)
+    if number.startswith("00"):
+        number = "+" + number[2:]
+    if not re.fullmatch(r"\+[1-9][0-9]{6,14}", number):
+        raise HTTPException(400, "请确认含国际区号的完整号码，例如 +44…")
+    if service.is_suppressed(db, lead_id, number):
+        raise HTTPException(409, "该门店或号码已在抑制名单")
+    existing = db.scalar(
+        select(ChannelEligibility).where(
+            ChannelEligibility.lead_id == lead_id,
+            ChannelEligibility.channel == Channel.whatsapp,
+            ChannelEligibility.contact_ref == number,
+        )
+    )
+    if existing:
+        return existing
+    row = service.upsert_eligibility(
+        db,
+        lead_id,
+        {
+            "channel": "whatsapp",
+            "contact_ref": number,
+            "contact_source": f"由电话候选转换，用户确认号码；原记录 {source.id}",
+            "contact_usable": "unknown",
+            "eligibility": "unknown",
+        },
+        op.username,
+    )
+    audit.record(db, op, "phone_to_whatsapp", "channel_eligibility", row.id, after={"source_id": str(source.id)})
+    db.commit()
+    return row
 
 
 class ContactItem(BaseModel):

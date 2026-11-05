@@ -97,6 +97,8 @@ class PhoneService : AccessibilityService() {
     val message = nodes(r, "message_text").lastOrNull { it.text?.toString() == body } ?: return false
     var parent: AccessibilityNodeInfo? = message.parent
     repeat(4) {
+      // A surrounding message list may contain older "read" receipts; never use those.
+      if (parent?.let { nodes(it, "message_text").size > 1 } == true) return false
       val statuses = parent?.let { nodes(it, "status") } ?: emptyList()
       if (statuses.any { n -> n.contentDescription?.toString() in setOf("已发送", "已送达", "已读", "Sent", "Delivered", "Read") }) return true
       parent = parent?.parent
