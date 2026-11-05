@@ -14,13 +14,14 @@ import { channelLabel, label } from "@/lib/format";
 import { HeroBand } from "@/components/ui";
 import PrepareOutreach from "@/components/PrepareOutreach";
 import GmailOutreach from "@/components/GmailOutreach";
+import { MobileTask } from "@/components/MobileChannel";
 import SocialOutreach from "@/components/SocialOutreach";
 
 type Customer = { id: string; name: string; postcode: string | null; progress: Progress };
 type Activity = { timeline: { id: string; channel: string | null; direction: string; at: string; summary: string; source: string; status: string }[]; deliveries: { id: string; task_id: string; channel: string; status: string; source: string; at: string; error?: string | null; message_id?: string | null }[]; conversations: { id: string; channel: string; at: string; summary: string; source: string }[] };
 type ManualPreview = { task_id: string; channel: string; url: string | null; address?: string; text: string };
 const EMPTY_ACTIVITY: Activity = { timeline: [], deliveries: [], conversations: [] };
-const SOURCE: Record<string, string> = { manual: "人工记录", gmail: "Gmail 同步（回复仅邮件头）", meta: "平台同步" };
+const SOURCE: Record<string, string> = { manual: "人工记录", gmail: "Gmail 同步（回复仅邮件头）", meta: "平台同步", mobile: "手机执行" };
 const ACTIVE = ["pending", "opened", "paused"];
 
 function TasksInner() {
@@ -98,7 +99,7 @@ function TasksInner() {
                 <Typography.Paragraph>{d.blockers.length ? d.blockers.join("；") : "条件已齐备，可确认并创建执行任务"}</Typography.Paragraph>
                 <Space><Link href={`/leads/${d.lead_id}?returnTo=${encodeURIComponent(back)}`}>继续准备</Link><Button disabled={busy} onClick={() => act(async () => { await api(`/api/communication/drafts/${d.id}`, json({queued:false}, "PATCH")); })}>移出待办</Button></Space>
               </Card>)}
-              {!tasks.length && !context.drafts?.some(d => d.queued) ? <Empty description="当前筛选下没有任务，可查看客户会话和发送记录。" /> : tasks.map((t) => <Card key={t.id} size="small" style={{ marginBottom: 12, borderColor: selectedTask?.id === t.id ? "#cf010e" : undefined }} title={<Space wrap><span>{channelLabel(t.channel)}</span><Tag>{label(t.status)}</Tag><Typography.Text type="secondary">{t.execution_mode === "manual" ? "人工执行" : t.execution_mode === "gmail" ? "Gmail 接口" : "已授权社媒会话"}</Typography.Text></Space>}>
+              {!tasks.length && !context.drafts?.some(d => d.queued) ? <Empty description="当前筛选下没有任务，可查看客户会话和发送记录。" /> : tasks.map((t) => <Card key={t.id} size="small" style={{ marginBottom: 12, borderColor: selectedTask?.id === t.id ? "#cf010e" : undefined }} title={<Space wrap><span>{channelLabel(t.channel)}</span><Tag>{label(t.status)}</Tag><Typography.Text type="secondary">{t.execution_mode === "mobile" ? "手机执行" : t.execution_mode === "manual" ? "人工执行" : t.execution_mode === "gmail" ? "Gmail 接口" : "已授权社媒会话"}</Typography.Text></Space>}>
                 <Typography.Paragraph type="secondary">负责人：{<UserIdentity username={t.assigned_to} />}{t.follow_up_at ? ` · 跟进提醒：${new Date(t.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
                 {t.status_reason && <Alert type="warning" message={t.status_reason} style={{ marginBottom: 12 }} />}
                 {inflight(t) && <Alert type="info" message="已有接口发送记录，请先核对排队、发送或未知结果，避免人工重复发送。" style={{ marginBottom: 12 }} />}
@@ -108,11 +109,12 @@ function TasksInner() {
                   return <Alert style={{marginBottom:12}} type={d?.error ? "warning" : "info"} showIcon message={d ? states[d.status] || d.status : "待确认发送"} description={d?.error || (!d || ["preview","expired"].includes(d.status) ? "点击下方“预览发送／查看进度”，确认后发送。" : undefined)} />;
                 })()}
                 <Space wrap>
-                  <Select aria-label={`任务执行方式-${t.id}`} style={{ width: 185 }} value={t.execution_mode} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={MODES.filter((m) => m.value === "manual" || (m.value === "gmail" && t.channel === "email") || (m.value === "social" && ["facebook", "instagram"].includes(t.channel)))} onChange={(execution_mode) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ execution_mode }, "PATCH")); })} />
+                  <Select aria-label={`任务执行方式-${t.id}`} style={{ width: 185 }} value={t.execution_mode} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={(t.execution_mode === "mobile" ? [{ value: "mobile", label: "手机执行", disabled: true }, ...MODES] : MODES).filter((m) => m.value === "mobile" || m.value === "manual" || (m.value === "gmail" && t.channel === "email") || (m.value === "social" && ["facebook", "instagram"].includes(t.channel)))} onChange={(execution_mode) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ execution_mode }, "PATCH")); })} />
                   <Select aria-label={`任务负责人-${t.id}`} allowClear placeholder="负责人" value={t.assigned_to || undefined} style={{ width: 145 }} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={owners.map((o) => ({ value: o.username, label: o.display_name || o.username }))} onChange={(assigned_to) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ assigned_to: assigned_to || null }, "PATCH")); })} />
                   <DatePicker showTime aria-label={`任务跟进提醒-${t.id}`} placeholder="提醒时间" value={t.follow_up_at ? dayjs(t.follow_up_at) : null} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} onChange={(v) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ follow_up_at: v?.toISOString() || null }, "PATCH")); })} />
                   {["pending", "opened"].includes(t.status) && t.execution_mode === "manual" && <Button disabled={busy || inflight(t)} onClick={() => act(() => openManual(t))}>开始人工执行</Button>}
-                  {t.execution_mode !== "manual" && <Button disabled={busy} onClick={() => { setApiTask(t); navigate({ task: t.id }); }}>预览发送／查看进度</Button>}
+                  {t.channel === "whatsapp" && <MobileTask taskId={t.id} onChanged={refresh} />}
+                  {!["manual", "mobile"].includes(t.execution_mode) && <Button disabled={busy} onClick={() => { setApiTask(t); navigate({ task: t.id }); }}>预览发送／查看进度</Button>}
                   {t.status === "paused" && <Button disabled={busy || inflight(t)} onClick={() => act(async () => { await api(`/api/tasks/${t.id}/resume`, json({ reason: "负责人查看回复后明确继续" })); setSuccess("已重新复核并恢复任务，尚未发送"); })}>核对后恢复</Button>}
                   {ACTIVE.includes(t.status) && <Button danger disabled={busy || inflight(t)} onClick={() => act(async () => { await api(`/api/tasks/${t.id}/cancel`, json({ reason: "负责人结束本次触达" })); })}>结束任务</Button>}
                 </Space>
@@ -131,7 +133,8 @@ function TasksInner() {
               </Card>
             </> },
             { key: "records", label: "发送记录", children: <>
-              <Table<Activity["deliveries"][number]> size="small" rowKey="id" pagination={{ pageSize: 10 }} dataSource={[...activity.deliveries, ...activity.timeline.filter((e) => e.direction === "outbound" && e.source === "manual").map((e) => ({ id: e.id, task_id: e.id.replace("task:", ""), channel: e.channel || "", status: e.status, source: "manual", at: e.at, error: undefined, message_id: undefined }))]} columns={[{ title: "渠道", dataIndex: "channel", render: (v) => channelLabel(v) }, { title: "状态", dataIndex: "status", render: (v) => <Tag>{label(v)}</Tag> }, { title: "来源", dataIndex: "source", render: (v) => v === "manual" ? "人工回填" : v }, { title: "发生时间", dataIndex: "at", render: (v) => new Date(v).toLocaleString("zh-CN") }, { title: "详情", render: (_, r) => <>{r.error || r.message_id || "—"}{r.source !== "manual" && <Button readOnlySafe size="small" onClick={() => setApiTask(context.tasks.find((t) => t.id === r.task_id))}>查询／处理</Button>}</> }]} />
+              <Table<Activity["deliveries"][number]> size="small" rowKey="id" pagination={{ pageSize: 10 }} dataSource={[...activity.deliveries, ...activity.timeline.filter((e) => e.direction === "outbound" && e.source === "manual").map((e) => ({ id: e.id, task_id: e.id.replace("task:", ""), channel: e.channel || "", status: e.status, source: "manual", at: e.at, error: undefined, message_id: undefined }))]} columns={[{ title: "渠道", dataIndex: "channel", render: (v) => channelLabel(v) }, { title: "状态", dataIndex: "status", render: (v) => <Tag>{label(v)}</Tag> }, { title: "来源", dataIndex: "source", render: (v) => v === "manual" ? "人工回填" : v }, { title: "发生时间", dataIndex: "at", render: (v) => new Date(v).toLocaleString("zh-CN") }, { title: "详情", render: (_, r) => <>{r.error || r.message_id || "—"}{r.source === "mobile" && <MobileTask taskId={r.task_id} onChanged={refresh} />}
+                {!["manual", "mobile"].includes(r.source) && <Button readOnlySafe size="small" onClick={() => setApiTask(context.tasks.find((t) => t.id === r.task_id))}>查询／处理</Button>}</> }]} />
             </> },
           ]} />
         </>}

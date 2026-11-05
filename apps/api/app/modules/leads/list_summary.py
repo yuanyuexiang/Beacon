@@ -46,8 +46,8 @@ def summarize(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]
         .order_by(MenuAnalysis.version.desc())
     )
     latest: dict[uuid.UUID, MenuAnalysis] = {}
-    for analysis in analyses:
-        latest.setdefault(analysis.asset_id, analysis)
+    for item_analysis in analyses:
+        latest.setdefault(item_analysis.asset_id, item_analysis)
     rank = {
         "missing": 0,
         "failed": 1,
@@ -62,13 +62,13 @@ def summarize(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]
         state = "failed" if asset.fetch_status == FetchStatus.failed else "fetching"
         if asset.fetch_status == FetchStatus.fetched:
             state = "obtained"
-            current = latest.get(asset.id)
-            if current:
-                if current.status in {"succeeded", "needs_review"}:
-                    state = "reviewed" if current.review_state == "reviewed" else "needs_review"
-                elif current.status == "failed":
+            latest_analysis = latest.get(asset.id)
+            if latest_analysis:
+                if latest_analysis.status in {"succeeded", "needs_review"}:
+                    state = "reviewed" if latest_analysis.review_state == "reviewed" else "needs_review"
+                elif latest_analysis.status == "failed":
                     state = "analysis_failed"
-                elif current.status in {"pending", "running"}:
+                elif latest_analysis.status in {"pending", "running"}:
                     state = "analyzing"
         previous = result[asset.lead_id]["menu_status"]
         if rank[state] > rank[previous]:

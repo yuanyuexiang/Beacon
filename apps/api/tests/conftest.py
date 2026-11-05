@@ -80,6 +80,9 @@ def db(migrated_db: str) -> Iterator[Session]:
         # 每个测试后清空业务表，保证独立
         with eng.begin() as c:
             for t in [
+                "mobile_execution",
+                "mobile_pairing",
+                "mobile_device",
                 "ai_configuration",
                 "outreach_delivery",
                 "social_conversation_event",

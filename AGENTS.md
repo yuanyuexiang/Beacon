@@ -155,3 +155,5 @@ D73（2026-10-22）：Gmail 网页授权为主入口，分开发送与回复 met
 2026-10-26 简化客户沟通：MessageComposer 共用单家／批量编辑；/communication/drafts/{id}/message 自动保存，/preview 只读，/confirm 最终确认绑定快照并批准／创建／提交，重复确认复用任务。专项 tests/test_sendflow.py；模拟界面 scripts/verify_simple_send_ui.py 替代旧独立审批／创建任务场景。无迁移，不自动发送或发布。见 plan/simple-outreach.md。
 
 2026-10-29 AI模型配置：设置页 /settings?section=ai，管理员维护加密连接／默认及用途路由／固定样本能力测试／调用诊断。统一 ai_runtime，后台任务绑定配置revision；环境配置可导入，网页配置不静默回退。迁移 d178a0010001；主密钥位于数据卷 ai/encryption.key，须随数据库一起备份。专项 tests/test_ai_settings.py，模拟UI scripts/verify_ai_settings_ui.py，不真实发送。详见 plan/ai-model-settings.md，本地验证后由用户推送发布。
+
+2026-11-05 手机渠道第一轮：在现有 API 内新增 `app/modules/mobile`，短时单次配对、设备凭据摘要、本人设备管理、WhatsApp 既有任务预览确认、领取／发送前复核／幂等结果／取消与未知核对。迁移 `d180a0010001`，compatibility 同步，保守不声明旧版本回滚兼容。网页设置 `section=mobile` 与任务手机面板；Expo 客户端位于 `apps/mobile-agent`，原生本地模块负责执行日志及 WhatsApp 控件操作。真实 APK 验收状态见 [实施计划](plan/mobile-channel.md)，不要将 USB 测试等同原生 APK 验收。验证：API `tests/test_mobile.py`；Web 原有 typecheck/test/build；`pnpm --filter beacon-mobile typecheck`、`pnpm --filter beacon-mobile export`；模拟设置页 `scripts/verify_mobile_ui.py`（localhost:3001，全 API 模拟，不配对或发送）。不代用户提交推送，不新增真实客户测试发送。

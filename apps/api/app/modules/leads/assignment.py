@@ -140,6 +140,14 @@ def transfer(db: Session, lead: Lead, target: str | None, by: Operator, reason: 
     )
     if any(d.status in {"sending", "unknown"} for d in deliveries):
         raise HTTPException(409, "该门店有发送中或结果未知记录，完成对账后才能交接")
+    from app.modules.mobile.models import Execution
+
+    phones = list(db.scalars(select(Execution).where(Execution.lead_id == lead.id).with_for_update()))
+    if any(j.status in {"sending", "unknown"} for j in phones):
+        raise HTTPException(409, "该门店有手机发送中或结果待核对记录，请先核对")
+    for j in phones:
+        if j.status in {"queued", "claimed"}:
+            j.status, j.error = "cancelled", "门店已交接，请由新负责人重新确认"
     before = lead.assigned_to
     for d in deliveries:
         if d.status in {"preview", "ready", "queued", "queued_paused", "blocked", "expired"}:

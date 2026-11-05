@@ -1,5 +1,6 @@
 packages:
   - "apps/web"
+  - "apps/mobile-agent"
   - "packages/*"
 
 # 允许运行安装期构建脚本的依赖（pnpm 11 的 allowBuilds）

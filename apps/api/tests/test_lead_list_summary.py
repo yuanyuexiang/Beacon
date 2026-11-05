@@ -17,7 +17,14 @@ def test_list_menu_uses_latest_version_and_preserves_other_valid_file(client, db
         row = next(r for r in client.get("/api/leads?batch_key=b1").json() if r["id"] == str(lead.id))
         return row["list_summary"]
 
-    assert summary() == {"menu_status": "missing", "channels": []}
+    initial = summary()
+    assert initial["menu_status"] == "missing" and initial["channels"] == []
+    assert initial["completeness"] == {
+        "website": "pending",
+        "contacts": "pending",
+        "menus": "pending",
+        "analysis": "pending",
+    }
     asset = MenuAsset(lead_id=lead.id, fetch_status=FetchStatus.fetched)
     db.add(asset)
     db.flush()

@@ -47,3 +47,4 @@ services/gmail/.venv/
 
 # Google OAuth client downloads contain private credentials.
 client_secret*.json
+apps/mobile-agent/modules/beacon-executor/android/build/*

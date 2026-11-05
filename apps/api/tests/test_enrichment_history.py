@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from uuid import uuid4
 
 from app.modules.leads import workflows
@@ -8,7 +7,7 @@ from tests.test_list_workflows import _new, setup  # noqa: F401
 
 
 def test_history_does_not_invent_completion_time():
-    task = SimpleNamespace(
+    task = workflows.Workflow(
         id=uuid4(),
         finished_at=None,
         history_scope=None,

@@ -1,4 +1,5 @@
 """Record explicit completion timestamps without guessing historical values."""
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql

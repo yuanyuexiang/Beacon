@@ -243,7 +243,12 @@ def open_task(db: Session, t: ManualTask, by: str) -> ManualTask:
 
 def check_gmail_in_flight(db: Session, t: ManualTask) -> None:
     from app.modules.gmail.models import EmailDelivery
+    from app.modules.mobile.models import Execution
     from app.modules.outreach.models import OutreachDelivery
+
+    mobile = db.scalar(select(Execution).where(Execution.task_id == t.id))
+    if mobile and mobile.status in {"queued", "claimed", "sending", "unknown", "sent"}:
+        raise SalesError("已有手机执行记录，请先在手机执行面板核对或取消")
 
     social = db.scalar(select(OutreachDelivery).where(OutreachDelivery.task_id == t.id))
     if social and social.status in {"ready", "queued", "sending", "unknown", "sent"}:

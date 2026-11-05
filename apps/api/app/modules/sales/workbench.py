@@ -873,6 +873,21 @@ def activity(lead_id: uuid.UUID, db: Session = Depends(get_db)):
                 "message_id": d.gmail_message_id if isinstance(d, EmailDelivery) else d.platform_message_id,
             }
         )
+    from app.modules.mobile.models import Execution
+
+    for phone_job in db.scalars(select(Execution).where(Execution.task_id.in_(ids))):
+        deliveries.append(
+            {
+                "id": str(phone_job.id),
+                "task_id": str(phone_job.task_id),
+                "channel": "whatsapp",
+                "status": phone_job.status,
+                "source": "mobile",
+                "at": phone_job.finished_at or phone_job.created_at,
+                "error": phone_job.error,
+                "message_id": None,
+            }
+        )
     conversations = [
         {
             "id": str(c.id),

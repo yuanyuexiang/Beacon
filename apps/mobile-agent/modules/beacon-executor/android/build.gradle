@@ -1,0 +1,8 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+group = 'com.beacon.executor'
+version = '0.1.0'
+android {
+  namespace 'com.beacon.executor'
+  defaultConfig { minSdkVersion 30 }
+}

@@ -22,3 +22,10 @@ infra/secrets/
 **/*.key
 **/id_ed25519*
 **/id_rsa*
+
+# Mobile native outputs and local signing material are not server image inputs.
+apps/mobile-agent/android/
+apps/mobile-agent/ios/
+apps/mobile-agent/.expo/
+apps/mobile-agent/dist/
+**/*.jks

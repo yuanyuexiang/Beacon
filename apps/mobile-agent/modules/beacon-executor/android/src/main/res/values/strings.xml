@@ -1,0 +1,4 @@
+<resources>
+  <string name="beacon_accessibility_label">Beacon 手机执行</string>
+  <string name="beacon_accessibility_description">在你确认任务后，核对 WhatsApp 目标、填写并发送已确认文字，读取发送结果。可随时在 Beacon 手机助手暂停。</string>
+</resources>

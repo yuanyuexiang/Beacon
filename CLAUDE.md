@@ -134,3 +134,5 @@ D73（2026-10-22）：网页 Gmail OAuth，设置页 Web 客户端向导／分�
 2026-10-26 简化客户沟通：MessageComposer 共用单家／批量编辑；/communication/drafts/{id}/message 自动保存，/preview 只读，/confirm 最终确认绑定快照并批准／创建／提交，重复确认复用任务。专项 tests/test_sendflow.py；模拟界面 scripts/verify_simple_send_ui.py 替代旧独立审批／创建任务场景。无迁移，不自动发送或发布。见 plan/simple-outreach.md。
 
 2026-10-29 AI模型配置：设置页 /settings?section=ai，管理员维护加密连接／默认及用途路由／固定样本能力测试／调用诊断。统一 ai_runtime，后台任务绑定配置revision；环境配置可导入，网页配置不静默回退。迁移 d178a0010001；主密钥位于数据卷 ai/encryption.key，须随数据库一起备份。专项 tests/test_ai_settings.py，模拟UI scripts/verify_ai_settings_ui.py，不真实发送。详见 plan/ai-model-settings.md，本地验证后由用户推送发布。
+
+2026-11-05 手机执行渠道：用户授权扩展现有 Beacon，第一轮 WhatsApp；后端 mobile 模块、网页手机设置及任务执行面板、React Native + Expo 本地原生执行模块，迁移 d180a0010001。见 [实施计划](plan/mobile-channel.md) 与 [客户端说明](apps/mobile-agent/README.md)。原生构建、安装及实机闭环按实际结果验收；USB 已发一条自有会话测试不等同 APK 验收，不重复发送该消息。不提交推送或发布。
