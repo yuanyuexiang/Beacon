@@ -8,6 +8,10 @@ export function formatRatio(r: Ratio): string {
 
 export const STATUS_LABEL: Record<string, string> = {
   pending: "待处理",
+  needs_action: "需要手机处理",
+  unavailable: "暂不可联系",
+  request_submitted: "请求已提交",
+  sent: "已发送",
   running: "运行中",
   succeeded: "成功",
   needs_review: "需人工",
@@ -41,6 +45,8 @@ export const CHANNEL_LABEL: Record<string, string> = {
   tiktok: "TikTok",
   linkedin: "LinkedIn",
   other_social: "社交平台",
+  youtube: "YouTube",
+  x: "X",
   contact_form: "联系表单",
   post: "邮寄",
 };

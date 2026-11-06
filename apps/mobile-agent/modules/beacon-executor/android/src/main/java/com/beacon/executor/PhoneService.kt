@@ -18,6 +18,7 @@ import kotlin.concurrent.thread
 
 class PhoneService : AccessibilityService() {
   companion object { @Volatile var instance: PhoneService? = null }
+  @Volatile private var platform = "whatsapp"
   @Volatile var running = false
   @Volatile var stopRequested = false
   private val main = Handler(Looper.getMainLooper())
@@ -33,7 +34,7 @@ class PhoneService : AccessibilityService() {
   private fun root(): AccessibilityNodeInfo {
     check(!getSystemService(KeyguardManager::class.java).isKeyguardLocked) { "手机已锁屏" }
     val r = rootInActiveWindow ?: error("无法读取页面")
-    check(r.packageName?.toString() == "com.whatsapp") { "当前不在 WhatsApp，请人工接管" }
+    check(r.packageName?.toString() in (PlatformAdapters.packages[platform] ?: emptyList())) { "当前不在目标社媒应用，请人工接管" }
     return r
   }
   private fun nodes(r: AccessibilityNodeInfo, id: String) = r.findAccessibilityNodeInfosByViewId("com.whatsapp:id/$id")
@@ -123,6 +124,11 @@ class PhoneService : AccessibilityService() {
       var clickAttempted = false
       try {
         val snapshot = j.getJSONObject("snapshot"); val body = snapshot.getString("body")
+        platform = snapshot.optString("channel", "whatsapp")
+        if (platform != "whatsapp") {
+          executeSocial(j, snapshot)
+          return@thread
+        }
         val number = snapshot.getString("target").removePrefix("+")
         // Reuse an already open, verified conversation before requesting a fresh number lookup.
         ui {
@@ -165,9 +171,95 @@ class PhoneService : AccessibilityService() {
       } catch (e: Exception) {
         // If result upload failed, preserve the already observed outcome.
         if (!j.has("outcome")) {
-          try { settle(j, if (clickAttempted) "unknown" else "failed", e.message?.take(500) ?: "执行中断") } catch (_: Exception) { }
+          try { settle(j, if (clickAttempted || j.optString("phase") == "click_attempted") "unknown" else if (e is NeedsPhoneAction) "needs_action" else "failed", e.message?.take(500) ?: "执行中断") } catch (_: Exception) { }
         }
       } finally { running = false }
+    }
+  }
+  private fun executeSocial(j: JSONObject, snapshot: JSONObject) {
+    val body = snapshot.getString("body")
+    val action = snapshot.optString("action", "direct_message")
+    ui { PlatformAdapters.open(this, snapshot) }
+    Thread.sleep(1500)
+    if (ChannelPolicy.manualAction(action)) {
+      throw NeedsPhoneAction(if (action == "contact_discovery") "已打开频道。请检查消息邀请、商务邮箱或外链；不会自动评论" else "已打开目标主页。请人工确认连接邀请或 InMail 入口及费用；不会自动申请或付费")
+    }
+    var verified = false
+    repeat(40) {
+      if (!verified) { Thread.sleep(500); verified = ui { try { PlatformAdapters.header(root(), snapshot) != null } catch (_: Exception) { false } } }
+    }
+    if (!verified) throw NeedsPhoneAction("已打开主页，但无法从页面核对目标用户名。请人工核对目标并进入私信；本次未发送")
+    ui {
+      val r = root()
+      if (PlatformAdapters.input(r) == null) PlatformAdapters.messageButton(r)?.let { PlatformAdapters.click(it) }
+    }
+    var composerReady = false
+    repeat(40) {
+      if (!composerReady) { Thread.sleep(500); composerReady = ui { try { PlatformAdapters.input(root()) != null } catch (_: Exception) { false } } }
+    }
+    if (!composerReady) throw NeedsPhoneAction("聊天尚未出现私信输入框；首次聊天的开始按钮可能向对方发送事件，请在手机确认后再继续")
+    val before = ui {
+      val r = root()
+      if (PlatformAdapters.header(r, snapshot) == null) throw NeedsPhoneAction("进入聊天后无法再次核对目标用户名，请人工处理")
+      if (PlatformAdapters.requestScreen(r) && action != "message_request") throw NeedsPhoneAction("平台当前是消息请求入口，请在网页选择消息请求后重新准备，不能记为普通私信")
+      val count = PlatformAdapters.count(r, body)
+      PlatformAdapters.fill(r, body)
+      count
+    }
+    // ACTION_SET_TEXT changes the composer asynchronously (e.g. Like becomes Send).
+    // Re-read the tree instead of testing the pre-fill AccessibilityNodeInfo snapshot.
+    var sendReady = false
+    repeat(20) {
+      if (!sendReady) {
+        Thread.sleep(250)
+        sendReady = ui {
+          val fresh = root()
+          !stopRequested && PlatformAdapters.header(fresh, snapshot) != null &&
+            PlatformAdapters.input(fresh)?.text?.toString() == body &&
+            PlatformAdapters.sendButton(fresh) != null
+        }
+      }
+    }
+    if (!sendReady) throw NeedsPhoneAction("消息已填入但未找到唯一发送按钮，请人工核对；系统未点击发送")
+    check(!stopRequested) { "执行已暂停" }
+    j.put("phase", "preflight"); Journal(this).save(j)
+    request("/jobs/${j.getString("id")}/start", attempt(j))
+    ui {
+      val r = root()
+      check(!stopRequested && PlatformAdapters.header(r, snapshot) != null) { "目标改变或已暂停" }
+      check(PlatformAdapters.input(r)?.text?.toString() == body) { "消息已改变" }
+      val send = PlatformAdapters.sendButton(r) ?: error("发送按钮已变化")
+      j.put("phase", "click_attempted"); Journal(this).save(j)
+      check(PlatformAdapters.click(send)) { "发送点击未完成" }
+    }
+    var observed = false
+    repeat(20) {
+      if (!observed) { Thread.sleep(500); observed = ui { try { val r = root(); PlatformAdapters.header(r, snapshot) != null && PlatformAdapters.count(r, body) > before && PlatformAdapters.sent(r, body) } catch (_: Exception) { false } } }
+    }
+    check(observed) { "无法确认平台发送结果，请核对聊天；不会自动重发" }
+    settle(j, ChannelPolicy.sentOutcome(action), if (action == "message_request") "已观察到消息请求提交，请等待对方接受" else "已在目标私信观察到新增消息和发送状态")
+  }
+  fun captureReplies(raw: String): String {
+    check(!running) { "正在执行，请稍后读取回复" }
+    val snapshot = JSONObject(raw).getJSONObject("snapshot")
+    val channel = snapshot.optString("channel", "whatsapp")
+    ui {
+      val pkg = PlatformAdapters.packages[channel]?.firstOrNull { try { packageManager.getPackageInfo(it, 0); true } catch (_: Exception) { false } } ?: error("未安装目标应用")
+      val launch = packageManager.getLaunchIntentForPackage(pkg) ?: error("无法打开目标应用")
+      startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+    Thread.sleep(1000)
+    return ui {
+    check(!running) { "正在执行，请稍后读取回复" }
+    val j = JSONObject(raw); val snapshot = j.getJSONObject("snapshot")
+    platform = snapshot.optString("channel", "whatsapp")
+    val r = root()
+    check(if (platform == "whatsapp") target(r, j) else PlatformAdapters.header(r, snapshot) != null) { "当前聊天无法与目标关联，请核对后人工填写回复" }
+    val texts = PlatformAdapters.flatten(r).filter { n ->
+      !n.isEditable && !n.text.isNullOrBlank() && n.text.toString() != snapshot.optString("body") &&
+      (n.viewIdResourceName ?: "").contains(Regex("incoming_message|received_text|message_in_text"))
+    }.map { it.text.toString() }.distinct().takeLast(5)
+    org.json.JSONArray(texts).toString()
     }
   }
   @Synchronized fun recover() {

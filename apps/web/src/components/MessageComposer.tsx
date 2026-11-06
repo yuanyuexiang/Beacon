@@ -4,6 +4,8 @@ import Link from "next/link";
 import dayjs from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import Button from "@/components/AccessButton";
+import { mobilePlatform } from "@/lib/mobile-channels";
+import { MobileTask } from "./MobileChannel";
 import ChannelConditions from "./ChannelConditions";
 import { api, json } from "@/lib/api";
 import { Assignee, Draft, MODES, taskLink } from "@/lib/communication";
@@ -69,11 +71,11 @@ export default function MessageComposer({ draft, assignees, returnTo, sender, op
     if (!p.issues.length) setPreview(p);
   };
   const issue = nextSendIssue(issues);
-  const modes = MODES.filter(m => m.value === "manual" || draft.channel === "email" && m.value === "gmail" || ["facebook","instagram"].includes(draft.channel) && m.value === "social");
-  const actionLabel = draft.execution_mode === "manual" ? draft.channel === "phone" ? "查看拨打准备" : "预览并打开联系入口" : "预览并发送";
+  const modes = MODES.filter(m => m.value === "manual" || m.value === "mobile" && !!mobilePlatform(draft.channel, contact?.contact_ref) || draft.channel === "email" && m.value === "gmail" || ["facebook","instagram"].includes(draft.channel) && m.value === "social");
+  const actionLabel = draft.execution_mode === "mobile" ? "准备手机执行" : draft.execution_mode === "manual" ? draft.channel === "phone" ? "查看拨打准备" : "预览并打开联系入口" : "预览并发送";
   return <Card size="small" title="收件人与消息">
     {error && !preview && <Alert type="error" showIcon message={error} style={{marginBottom:12}} />}
-    {result ? <><Alert type="info" message={result.message} action={<Link href={taskLink({lead:draft.lead_id,task:result.task_id,returnTo})}>查看沟通记录</Link>} />{manual && <Space wrap style={{marginTop:12}}><Button onClick={() => navigator.clipboard.writeText(manual.text).catch(() => setError("复制失败，请选择正文手动复制"))}>复制消息</Button>{manual.url && <a href={manual.url} target="_blank" rel="noreferrer">打开联系入口 ↗</a>}{manual.address && <Typography.Text>{manual.address}</Typography.Text>}<Typography.Text type="secondary">完成后在沟通记录中回填结果。</Typography.Text></Space>}</> : <>
+    {result ? <>{result.status === "mobile" && <MobileTask taskId={result.task_id} platform={mobilePlatform(draft.channel, contact?.contact_ref)} onChanged={() => { void refresh(); }} />}<Alert type="info" message={result.message} action={<Link href={taskLink({lead:draft.lead_id,task:result.task_id,returnTo})}>查看沟通记录</Link>} />{manual && <Space wrap style={{marginTop:12}}><Button onClick={() => navigator.clipboard.writeText(manual.text).catch(() => setError("复制失败，请选择正文手动复制"))}>复制消息</Button>{manual.url && <a href={manual.url} target="_blank" rel="noreferrer">打开联系入口 ↗</a>}{manual.address && <Typography.Text>{manual.address}</Typography.Text>}<Typography.Text type="secondary">完成后在沟通记录中回填结果。</Typography.Text></Space>}</> : <>
       <Form layout="vertical">
         {draft.channel === "email" && <Form.Item label="发送方式"><Select aria-label="邮件发送方式" value={draft.execution_mode} options={modes} disabled={busy || readOnly} onChange={execution_mode => act(() => patch({execution_mode}))} />{draft.execution_mode === "manual" && <Typography.Text type="secondary">当前只打开邮箱客户端；要由系统发送，请选择 Gmail 接口。</Typography.Text>}</Form.Item>}
         <Form.Item label="发给谁"><Space.Compact style={{width:"100%"}}><Select aria-label="收件人" placeholder="选择联系方式" style={{flex:1,minWidth:0,width:0}} value={draft.eligibility_id || undefined} disabled={busy || readOnly} options={draft.context.contacts.filter(c => c.channel === draft.channel).sort((a,b) => contactRank(a.recommendation)-contactRank(b.recommendation)).map(c => ({value:c.id,label:`${c.contact_ref || "未填写"}${c.recommendation?.owner ? ` · ${c.recommendation.owner}` : ""}${c.suppressed ? " · 已拒收" : ""}`}))} onChange={id => act(() => patch({eligibility_id:id}))} /><Button disabled={busy || readOnly} onClick={() => setSection(["contact"])}>添加</Button></Space.Compact></Form.Item>
@@ -87,7 +89,7 @@ export default function MessageComposer({ draft, assignees, returnTo, sender, op
       </>} style={{marginBottom:12}} />}
       <Space wrap style={{display:"flex",marginBottom:16}}><Button type="primary" loading={busy} disabled={readOnly || busy} onClick={() => act(inspect)}>{busy ? "正在准备…" : actionLabel}</Button><Button disabled={busy || readOnly} onClick={() => act(() => patch({queued:!draft.queued}))}>{draft.queued ? "移出准备待办" : "稍后处理"}</Button>{draft.queued && <Link href={taskLink({lead:draft.lead_id,returnTo})}>查看待办</Link>}</Space>
       <Collapse size="small" activeKey={section} onChange={keys => setSection(typeof keys === "string" ? [keys] : keys)} items={[
-        {key:"options",label:`更多选项 · ${draft.execution_mode === "gmail" ? "Gmail 发送" : draft.execution_mode === "social" ? "已连接社媒发送" : "人工联系"}`,children:<Space wrap>
+        {key:"options",label:`更多选项 · ${draft.execution_mode === "gmail" ? "Gmail 发送" : draft.execution_mode === "social" ? "已连接社媒发送" : draft.execution_mode === "mobile" ? "手机执行" : "人工联系"}`,children:<Space wrap>
           {draft.channel !== "email" && <Select aria-label="执行方式" value={draft.execution_mode} options={modes} disabled={busy || readOnly} style={{width:200}} onChange={execution_mode => act(() => patch({execution_mode}))} />}
           <Select aria-label="负责人" value={draft.assigned_to || undefined} options={assignees.map(a => ({value:a.username,label:a.display_name || a.username}))} disabled={busy || readOnly} style={{width:150}} onChange={assigned_to => act(() => patch({assigned_to}))} />
           <DatePicker showTime placeholder="跟进提醒" value={draft.follow_up_at ? dayjs(draft.follow_up_at) : null} onChange={v => act(() => patch({follow_up_at:v?.toISOString() || null}))} />
@@ -105,9 +107,9 @@ export default function MessageComposer({ draft, assignees, returnTo, sender, op
         ...(piece?.rationale ? [{key:"evidence",label:"AI 起草依据",children:<><p>{piece.rationale}</p>{piece.missing?.map(x => <p key={x}>{x}</p>)}</>}] : []),
       ]} />
     </>}
-    <Modal title={preview?.payload.mode === "manual" ? "确认联系内容" : "确认发送"} open={!!preview} width={720} onCancel={() => { if(!busy) setPreview(undefined); }} styles={{body:{maxHeight:"65vh",overflowY:"auto"}}} footer={<Button type="primary" disabled={!confirmed || busy} loading={busy} onClick={() => act(async () => { const r=await api<{task_id:string;status:string;message:string}>(`/api/communication/drafts/${draft.id}/confirm`,json({preview_hash:preview!.preview_hash,confirmed:true})); setResult(r); setPreview(undefined); if(r.status === "manual") setManual(await api(`/api/communication/tasks/${r.task_id}/manual-open`,{method:"POST"})); })}>{preview?.payload.mode === "manual" ? "确认并准备联系" : "确认发送"}</Button>}>
+    <Modal title={preview?.payload.mode === "mobile" ? "准备手机执行内容" : preview?.payload.mode === "manual" ? "确认联系内容" : "确认发送"} open={!!preview} width={720} onCancel={() => { if(!busy) setPreview(undefined); }} styles={{body:{maxHeight:"65vh",overflowY:"auto"}}} footer={<Button type="primary" disabled={!confirmed || busy} loading={busy} onClick={() => act(async () => { const r=await api<{task_id:string;status:string;message:string}>(`/api/communication/drafts/${draft.id}/confirm`,json({preview_hash:preview!.preview_hash,confirmed:true})); setResult(r); setPreview(undefined); if(r.status === "manual") setManual(await api(`/api/communication/tasks/${r.task_id}/manual-open`,{method:"POST"})); })}>{preview?.payload.mode === "mobile" ? "确认内容并选择手机" : preview?.payload.mode === "manual" ? "确认并准备联系" : "确认发送"}</Button>}>
       {error && <Alert type="error" showIcon message={error} style={{marginBottom:12}} />}
-      {preview && <><Typography.Paragraph>发件账号：{preview.payload.from || "人工联系"}</Typography.Paragraph><Typography.Paragraph strong>收件人：{preview.payload.to}</Typography.Paragraph>{preview.payload.subject && <Typography.Paragraph strong>主题：{preview.payload.subject}</Typography.Paragraph>}<Typography.Paragraph style={{whiteSpace:"pre-wrap"}}>{preview.payload.body}</Typography.Paragraph><Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已核对收件人和完整内容，确认{preview.payload.mode === "manual" ? "用于本次联系" : "发送"}</Checkbox></>}
+      {preview && <><Typography.Paragraph>发件账号：{preview.payload.from || (preview.payload.mode === "mobile" ? "下一步选择手机及本方账号" : "人工联系")}</Typography.Paragraph><Typography.Paragraph strong>收件人：{preview.payload.to}</Typography.Paragraph>{preview.payload.subject && <Typography.Paragraph strong>主题：{preview.payload.subject}</Typography.Paragraph>}<Typography.Paragraph style={{whiteSpace:"pre-wrap"}}>{preview.payload.body}</Typography.Paragraph><Checkbox checked={confirmed} onChange={e => setConfirmed(e.target.checked)}>我已核对收件人和完整内容，确认{preview.payload.mode === "manual" ? "用于本次联系" : "发送"}</Checkbox></>}
     </Modal>
   </Card>;
 }

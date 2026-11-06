@@ -1,10 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.INTERNET" />
-  <queries><package android:name="com.whatsapp" /></queries>
+  <queries><package android:name="com.whatsapp" /><package android:name="com.facebook.katana" /><package android:name="com.facebook.orca" /><package android:name="com.instagram.android" /><package android:name="com.linkedin.android" /><package android:name="com.zhiliaoapp.musically" /><package android:name="com.ss.android.ugc.trill" /><package android:name="com.google.android.youtube" /><package android:name="com.twitter.android" /></queries>
   <application android:networkSecurityConfig="@xml/beacon_network_security">
     <service android:name=".PhoneService" android:label="@string/beacon_accessibility_label" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
       <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
       <meta-data android:name="android.accessibilityservice" android:resource="@xml/beacon_accessibility" />
+    </service>
+    <service android:name=".NotificationMonitor" android:label="Beacon 客户回复通知" android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" android:exported="true">
+      <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
     </service>
   </application>
 </manifest>

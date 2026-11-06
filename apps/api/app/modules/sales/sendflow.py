@@ -213,6 +213,12 @@ def confirm(
             social.approve(db, [delivery_social.id], {str(delivery_social.id): delivery_social.request_key}, False, op)
             return {"task_id": str(task.id), "status": "ready", "message": "已提交发送，请在沟通记录查看结果"}
         db.commit()
+        if d.execution_mode == "mobile":
+            return {
+                "task_id": str(task.id),
+                "status": "mobile",
+                "message": "消息已准备，请选择手机并确认执行；尚未发送",
+            }
         return {"task_id": str(task.id), "status": "manual", "message": "已准备好，请打开联系入口并在完成后记录结果"}
     except (content.ContentError, service.SalesError, gmail_client.GmailServiceError, ProviderError) as exc:
         db.rollback()

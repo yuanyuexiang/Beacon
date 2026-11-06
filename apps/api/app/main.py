@@ -118,12 +118,15 @@ from app.modules.leads.website_search import router as website_search_router  # 
 from app.modules.menus.maps import router as maps_menu_router  # noqa: E402
 from app.modules.menus.maps import worker_router as maps_worker_router  # noqa: E402
 from app.modules.menus.routes import router as menus_router  # noqa: E402
+from app.modules.mobile.notifications import router as mobile_notifications_router  # noqa: E402
+from app.modules.mobile.notifications import worker_router as mobile_notifications_worker_router  # noqa: E402
 from app.modules.mobile.routes import router as mobile_router  # noqa: E402
 from app.modules.mobile.routes import worker_router as mobile_worker_router  # noqa: E402
 from app.modules.outreach.routes import public_router as outreach_public_router  # noqa: E402
 from app.modules.outreach.routes import router as outreach_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
+protected.include_router(mobile_notifications_router)
 protected.include_router(mobile_router)
 protected.include_router(ai_router)
 protected.include_router(users_router)
@@ -170,6 +173,7 @@ def include_module_routers() -> None:
     app.include_router(protected)
     app.include_router(maps_worker_router)
     app.include_router(mobile_worker_router)
+    app.include_router(mobile_notifications_worker_router)
     app.include_router(gmail_callback_router)
     app.include_router(outreach_public_router)
 

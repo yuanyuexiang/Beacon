@@ -19,6 +19,7 @@ from app.core.db import get_db
 from app.core.models import Operator
 from app.modules.content.models import ContentPiece
 from app.modules.leads.models import Lead
+from app.modules.mobile.channels import PLATFORMS, destination
 from app.modules.mobile.models import Device, Execution, Pairing
 from app.modules.sales import service
 from app.modules.sales.models import ChannelEligibility, ManualTask, TaskStatus
@@ -45,16 +46,21 @@ class PairIn(Input):
 
 
 class Heartbeat(Input):
-    account: str = Field(pattern=r"^\+[1-9][0-9]{6,14}$")
+    account: str = Field(default="", max_length=64)
+    accounts: dict[str, str] = Field(default_factory=dict)
+    installed: list[str] = Field(default_factory=list, max_length=10)
     ready: bool = False
     accessibility: bool = False
     app_version: str = Field(max_length=64)
-    protocol: Literal[1] = 1
+    protocol: Literal[1, 2] = 1
 
 
 class QueueIn(Input):
     device_id: uuid.UUID
     preview_hash: str = Field(min_length=64, max_length=64)
+    action: Literal["direct_message", "message_request", "connection_request", "inmail", "contact_discovery"] = (
+        "direct_message"
+    )
 
 
 class AttemptIn(Input):
@@ -63,7 +69,7 @@ class AttemptIn(Input):
 
 
 class ResultIn(AttemptIn):
-    status: Literal["sent", "failed", "unknown"]
+    status: Literal["sent", "failed", "unknown", "needs_action", "request_submitted", "unavailable"]
     detail: str = Field(default="", max_length=1000)
 
 
@@ -147,6 +153,11 @@ def pair(body: PairIn, db: Session = Depends(get_db)):
     return {"device_id": str(d.id), "token": token, "protocol": 1, "owner": row.owner}
 
 
+@router.get("/channels")
+def channel_catalog(op: Operator = Depends(current_operator)):
+    return PLATFORMS
+
+
 @router.get("/devices")
 def devices(db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
     return [
@@ -171,14 +182,25 @@ def revoke(identity: uuid.UUID, db: Session = Depends(get_db), op: Operator = De
 
 @worker_router.post("/heartbeat")
 def heartbeat(body: Heartbeat, d: Device = Depends(device_auth), db: Session = Depends(get_db)):
-    # Changing the sender invalidates all not-yet-started confirmations.
-    if d.account and d.account != body.account:
+    if body.protocol == 1 and not re.fullmatch(r"\+[1-9][0-9]{6,14}", body.account):
+        raise HTTPException(422, "请填写本方 WhatsApp 国际号码")
+    accounts = body.accounts if body.protocol == 2 else {"whatsapp": body.account}
+    if any(p not in PLATFORMS or not v.strip() or len(v) > 256 for p, v in accounts.items()):
+        raise HTTPException(422, "请填写有效的平台账号")
+    if "whatsapp" in accounts:
+        try:
+            destination("whatsapp", accounts["whatsapp"])
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+    # Changing any sender invalidates not-yet-started confirmations.
+    old_accounts = (d.capabilities or {}).get("accounts", {"whatsapp": d.account})
+    if d.account and d.account != body.account or body.protocol == 2 and old_accounts != accounts:
         for j in db.scalars(
             select(Execution).where(Execution.device_id == d.id, Execution.status.in_(["queued", "claimed"]))
         ):
             j.status, j.error = "cancelled", "本方账号改变，请重新确认"
     d.account, d.last_seen_at = body.account, service.now()
-    d.capabilities = body.model_dump(exclude={"account"})
+    d.capabilities = {**body.model_dump(exclude={"account"}), "accounts": accounts}
     d.status = "ready" if body.ready and body.accessibility else "paired"
     db.commit()
     return device_state(d, db)
@@ -189,7 +211,13 @@ def device_state(d: Device = Depends(device_auth), db: Session = Depends(get_db)
     count = db.scalar(
         select(func.count()).select_from(Execution).where(Execution.device_id == d.id, Execution.status == "queued")
     )
-    return {"status": d.status, "account": d.account, "label": d.label, "pending_count": count or 0}
+    return {
+        "status": d.status,
+        "account": d.account,
+        "accounts": (d.capabilities or {}).get("accounts", {"whatsapp": d.account} if d.account else {}),
+        "label": d.label,
+        "pending_count": count or 0,
+    }
 
 
 def task_for(db: Session, identity: uuid.UUID) -> ManualTask:
@@ -199,11 +227,10 @@ def task_for(db: Session, identity: uuid.UUID) -> ManualTask:
     return t
 
 
-def checks(db: Session, t: ManualTask, d: Device, confirmed_by: str) -> dict:
+def checks(db: Session, t: ManualTask, d: Device, confirmed_by: str, action: str = "direct_message") -> dict:
     db.scalar(select(Lead).where(Lead.id == t.lead_id).with_for_update().execution_options(populate_existing=True))
     db.refresh(t)
-    if t.channel.value != "whatsapp":
-        raise HTTPException(409, "首轮手机执行仅支持 WhatsApp")
+
     if t.status not in {TaskStatus.pending, TaskStatus.opened}:
         raise HTTPException(409, "任务已暂停、结束或发送，请刷新")
     if (t.assigned_to or t.created_by) != d.owner or not may_send(db, confirmed_by):
@@ -214,32 +241,42 @@ def checks(db: Session, t: ManualTask, d: Device, confirmed_by: str) -> dict:
     service.check_can_contact(db, e, p)
     if t.content_hash != p.content_hash:
         raise HTTPException(409, "消息已变化，请重新确认")
-    phone = re.sub(r"[\s()\-]", "", e.contact_ref or "")
-    if not re.fullmatch(r"\+[1-9][0-9]{6,14}", phone):
-        raise HTTPException(409, "请填写包含国际区号的 WhatsApp 电话号码")
-    if (
-        d.status != "ready"
-        or not d.account
-        or not d.last_seen_at
-        or d.last_seen_at < service.now() - timedelta(seconds=90)
-    ):
+    try:
+        platform, target = destination(t.channel.value, e.contact_ref)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    if action not in PLATFORMS[platform]["actions"]:
+        raise HTTPException(409, "该渠道不支持此联系动作")
+    capabilities = d.capabilities or {}
+    modern = capabilities.get("protocol", 1) >= 2
+    if platform != "whatsapp" and not modern:
+        raise HTTPException(409, "请更新手机助手并配置此平台账号")
+    sender = (capabilities.get("accounts") or {}).get(platform) if modern else d.account
+    current_app = modern and platform != "whatsapp" and not sender
+    if current_app:
+        sender = str(PLATFORMS[platform]["label"]) + " 当前登录账号"
+    if not sender or modern and platform not in capabilities.get("installed", []):
+        raise HTTPException(409, "请先在手机确认该平台账号并检查应用安装状态")
+    if d.status != "ready" or not d.last_seen_at or d.last_seen_at < service.now() - timedelta(seconds=90):
         raise HTTPException(409, "请在手机上完成运行检查并开启执行")
     lead = db.get(Lead, t.lead_id)
     return {
-        "target": phone,
-        "sender": d.account,
+        "target": target,
+        "sender": sender,
         "body": p.body_text,
         "content_hash": p.content_hash,
         "lead_name": lead.name if lead else "",
         "owner": d.owner,
-        "channel": "whatsapp",
-        "protocol": 1,
+        "channel": platform,
+        "protocol": 2 if modern else 1,
+        **({"action": action} if modern else {}),
+        **({"sender_mode": "current_app"} if current_app else {}),
     }
 
 
-def checked(db: Session, t: ManualTask, d: Device, by: str) -> dict:
+def checked(db: Session, t: ManualTask, d: Device, by: str, action: str = "direct_message") -> dict:
     try:
-        return checks(db, t, d, by)
+        return checks(db, t, d, by, action)
     except service.SalesError as exc:
         raise HTTPException(409, str(exc)) from None
 
@@ -257,7 +294,7 @@ def preview(
 ):
     lock(db)
     t, d = task_for(db, identity), operator_device(db, body.device_id, op)
-    payload = checked(db, t, d, op.username)
+    payload = checked(db, t, d, op.username, body.action)
     key = digest(json.dumps({"task": str(t.id), "device": str(d.id), **payload}, sort_keys=True))
     return {"payload": payload, "preview_hash": key}
 
@@ -322,7 +359,7 @@ def claim(d: Device = Depends(device_auth), db: Session = Depends(get_db)):
     if not j:
         return {"job": None}
     try:
-        payload = checked(db, task_for(db, j.task_id), d, j.confirmed_by)
+        payload = checked(db, task_for(db, j.task_id), d, j.confirmed_by, j.snapshot.get("action", "direct_message"))
         db.refresh(j)
         if j.status != "queued":
             raise HTTPException(409, "任务已取消或已交接")
@@ -358,7 +395,7 @@ def attempt(db: Session, identity: uuid.UUID, d: Device, b: AttemptIn) -> Execut
 @worker_router.post("/jobs/{identity}/start")
 def start(identity: uuid.UUID, body: AttemptIn, d: Device = Depends(device_auth), db: Session = Depends(get_db)):
     j = attempt(db, identity, d, body)
-    payload = checked(db, task_for(db, j.task_id), d, j.confirmed_by)
+    payload = checked(db, task_for(db, j.task_id), d, j.confirmed_by, j.snapshot.get("action", "direct_message"))
     db.refresh(j)
     if j.status != "claimed" or not j.lease_until or j.lease_until < service.now():
         raise HTTPException(409, "执行已过期或已开始，不能再次发送")
@@ -386,9 +423,27 @@ def result(identity: uuid.UUID, body: ResultIn, d: Device = Depends(device_auth)
         if j.result != payload:
             raise HTTPException(409, "该尝试已有结果，请人工核对，不能覆盖")
         return public_job(j)
-    if body.status == "sent" and not j.started_at:
+    if body.status in {"sent", "request_submitted"} and not j.started_at:
         raise HTTPException(409, "未完成发送前检查，不能记录已发送")
     j.status, j.result, j.finished_at, j.error = body.status, payload, service.now(), body.detail or None
+    if body.status == "request_submitted" and j.snapshot.get("action") not in {
+        "message_request",
+        "connection_request",
+        "inmail",
+    }:
+        raise HTTPException(409, "本次快照不是请求动作，不能记录请求已提交")
+    if body.status == "sent" and j.snapshot.get("action") in {"connection_request", "contact_discovery"}:
+        raise HTTPException(409, "此动作不能记录为私信已发送")
+    if body.status in {"needs_action", "unavailable", "request_submitted"}:
+        task = task_for(db, j.task_id)
+        task.status_reason = (
+            body.detail
+            or {
+                "needs_action": "请在手机处理",
+                "unavailable": "该目标暂不可联系",
+                "request_submitted": "联系请求已提交，等待对方接受",
+            }[body.status]
+        )
     if body.status == "sent":
         t = task_for(db, j.task_id)
         t.status, t.sent_at, t.sent_recorded_at, t.sent_by = (
@@ -426,3 +481,48 @@ def resolve(
         t.status_reason = "人工核对手机发送结果：" + body.reason
     db.commit()
     return public_job(j)
+
+
+class InboundIn(Input):
+    body: str = Field(min_length=1, max_length=4000)
+    confirmed_incoming: Literal[True]
+
+
+@worker_router.post("/jobs/{identity}/inbound")
+def inbound(identity: uuid.UUID, body: InboundIn, d: Device = Depends(device_auth), db: Session = Depends(get_db)):
+    from app.core.models import Operator
+
+    j = db.get(Execution, identity)
+    if not j or j.device_id != d.id:
+        raise HTTPException(404, "执行记录不存在")
+    t = task_for(db, j.task_id)
+    lead = db.get(Lead, j.lead_id)
+    owner = db.scalar(select(Operator).where(Operator.username == d.owner))
+    if (
+        (t.assigned_to or t.created_by) != d.owner
+        or owner
+        and owner.role == "member"
+        and lead
+        and lead.assigned_to != d.owner
+    ):
+        raise HTTPException(403, "门店已交接，不能回填此会话")
+    if body.body.strip() == j.snapshot.get("body", "").strip():
+        raise HTTPException(409, "内容与本方发出的消息一致，请只记录客户真实回复")
+    key = "mobile:" + str(j.id) + ":" + digest(body.body.strip())[:32]
+    event, created = service.record_event(
+        db,
+        j.lead_id,
+        {
+            "event_key": key,
+            "kind": "reply",
+            "channel": t.channel.value,
+            "payload": {
+                "summary": body.body.strip(),
+                "source": "mobile",
+                "task_id": str(t.id),
+                "confirmed_incoming": True,
+            },
+        },
+        d.owner,
+    )
+    return {"id": str(event.id), "created": created}

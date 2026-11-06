@@ -16,4 +16,4 @@ from app.modules.sales.preparation import Preparation  # noqa: F401
 
 __all__ = ["Base"]
 
-from app.modules.mobile.models import Device, Execution, Pairing  # noqa: F401, E402
+from app.modules.mobile.models import Device, Execution, Pairing, ReplyNotification, ReplyThread  # noqa: F401, E402

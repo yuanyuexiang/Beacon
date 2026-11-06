@@ -5,4 +5,4 @@
  android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
  android:canRetrieveWindowContent="true"
  android:notificationTimeout="100"
- android:packageNames="com.whatsapp" />
+ android:packageNames="com.whatsapp,com.facebook.katana,com.facebook.orca,com.instagram.android,com.linkedin.android,com.zhiliaoapp.musically,com.ss.android.ugc.trill,com.google.android.youtube,com.twitter.android" />

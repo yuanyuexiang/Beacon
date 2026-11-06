@@ -1,13 +1,21 @@
 import { requireNativeModule } from 'expo';
-export type PhoneStatus = { accessibility: boolean; whatsapp: boolean; unlocked: boolean; running: boolean; journal: string; history: string[]; savedAccount: string };
+export type PhoneStatus = { accessibility: boolean; whatsapp: boolean; unlocked: boolean; running: boolean; journal: string; history: string[]; savedAccount: string; savedAccounts: string; installed: string[] };
 export default requireNativeModule<{
   status(): PhoneStatus;
+  notificationStatus(): { granted: boolean; connected: boolean; channels: string; pending: number; error: string; synced: number };
+  notificationSettings(): void;
+  notificationChannels(raw: string): void;
+  syncNotifications(): Promise<void>;
   permissions(): void;
   configure(server: string, token: string): void;
   credentials(): { server: string; token: string };
+  rememberAccounts(raw: string): void;
   rememberAccount(account: string): void;
   stage(job: string): void;
   execute(job: string): void;
+  captureReplies(raw: string): Promise<string>;
+  openTarget(raw: string): void;
+  copyMessage(body: string): void;
   pause(): void;
   recover(): void;
 }>('BeaconExecutor');

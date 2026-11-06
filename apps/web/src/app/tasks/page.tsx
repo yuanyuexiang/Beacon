@@ -14,6 +14,8 @@ import { channelLabel, label } from "@/lib/format";
 import { HeroBand } from "@/components/ui";
 import PrepareOutreach from "@/components/PrepareOutreach";
 import GmailOutreach from "@/components/GmailOutreach";
+import { mobilePlatform } from "@/lib/mobile-channels";
+import MobileReplies from "@/components/MobileReplies";
 import { MobileTask } from "@/components/MobileChannel";
 import SocialOutreach from "@/components/SocialOutreach";
 
@@ -78,6 +80,7 @@ function TasksInner() {
     <HeroBand kicker="COMMUNICATION" title="触达任务与回复" subtitle="从名单加入准备待办或创建触达任务，在这里继续准备、执行与跟进。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回来源页面</Button></Link><Button readOnlySafe onClick={() => refresh().catch((e) => setError(e.message))}>刷新进展</Button><Button readOnlySafe onClick={() => api<Record<string, string>[]>("/api/suppressions").then(setSuppression).catch((e) => setError(e.message))}>抑制名单</Button></Space>} />
     {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
     {success && <Alert type="success" showIcon message={success} style={{ marginBottom: 12 }} />}
+    <MobileReplies onChanged={refresh} />
     <Space wrap style={{ marginBottom: 16 }}>
       <Select aria-label="来源名单" allowClear placeholder="全部名单" value={batch} style={{ width: 200 }} options={batches.map((b) => ({ value: b.batch_key, label: b.batch_key }))} onChange={(v) => navigate({ batch: v, lead: undefined, task: undefined, draft: undefined, preparation: undefined, page: "1", returnTo: v ? `/leads?batch=${encodeURIComponent(v)}` : "/leads" })} />
       <Select aria-label="沟通渠道筛选" allowClear placeholder="全部渠道" value={channel} options={CHANNELS} style={{ width: 170 }} onChange={(v) => navigate({ channel: v, page: "1" })} />
@@ -109,11 +112,11 @@ function TasksInner() {
                   return <Alert style={{marginBottom:12}} type={d?.error ? "warning" : "info"} showIcon message={d ? states[d.status] || d.status : "待确认发送"} description={d?.error || (!d || ["preview","expired"].includes(d.status) ? "点击下方“预览发送／查看进度”，确认后发送。" : undefined)} />;
                 })()}
                 <Space wrap>
-                  <Select aria-label={`任务执行方式-${t.id}`} style={{ width: 185 }} value={t.execution_mode} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={(t.execution_mode === "mobile" ? [{ value: "mobile", label: "手机执行", disabled: true }, ...MODES] : MODES).filter((m) => m.value === "mobile" || m.value === "manual" || (m.value === "gmail" && t.channel === "email") || (m.value === "social" && ["facebook", "instagram"].includes(t.channel)))} onChange={(execution_mode) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ execution_mode }, "PATCH")); })} />
+                  <Select aria-label={`任务执行方式-${t.id}`} style={{ width: 185 }} value={t.execution_mode} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={MODES.filter((m) => m.value === "mobile" && !!mobilePlatform(t.channel, context.contacts.find(c => c.id === t.eligibility_id)?.contact_ref) || m.value === "manual" || (m.value === "gmail" && t.channel === "email") || (m.value === "social" && ["facebook", "instagram"].includes(t.channel)))} onChange={(execution_mode) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ execution_mode }, "PATCH")); })} />
                   <Select aria-label={`任务负责人-${t.id}`} allowClear placeholder="负责人" value={t.assigned_to || undefined} style={{ width: 145 }} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={owners.map((o) => ({ value: o.username, label: o.display_name || o.username }))} onChange={(assigned_to) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ assigned_to: assigned_to || null }, "PATCH")); })} />
                   <DatePicker showTime aria-label={`任务跟进提醒-${t.id}`} placeholder="提醒时间" value={t.follow_up_at ? dayjs(t.follow_up_at) : null} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} onChange={(v) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ follow_up_at: v?.toISOString() || null }, "PATCH")); })} />
                   {["pending", "opened"].includes(t.status) && t.execution_mode === "manual" && <Button disabled={busy || inflight(t)} onClick={() => act(() => openManual(t))}>开始人工执行</Button>}
-                  {t.channel === "whatsapp" && <MobileTask taskId={t.id} onChanged={refresh} />}
+                  {mobilePlatform(t.channel, context.contacts.find(c => c.id === t.eligibility_id)?.contact_ref) && <MobileTask taskId={t.id} platform={mobilePlatform(t.channel, context.contacts.find(c => c.id === t.eligibility_id)?.contact_ref)} onChanged={refresh} />}
                   {!["manual", "mobile"].includes(t.execution_mode) && <Button disabled={busy} onClick={() => { setApiTask(t); navigate({ task: t.id }); }}>预览发送／查看进度</Button>}
                   {t.status === "paused" && <Button disabled={busy || inflight(t)} onClick={() => act(async () => { await api(`/api/tasks/${t.id}/resume`, json({ reason: "负责人查看回复后明确继续" })); setSuccess("已重新复核并恢复任务，尚未发送"); })}>核对后恢复</Button>}
                   {ACTIVE.includes(t.status) && <Button danger disabled={busy || inflight(t)} onClick={() => act(async () => { await api(`/api/tasks/${t.id}/cancel`, json({ reason: "负责人结束本次触达" })); })}>结束任务</Button>}
@@ -133,7 +136,7 @@ function TasksInner() {
               </Card>
             </> },
             { key: "records", label: "发送记录", children: <>
-              <Table<Activity["deliveries"][number]> size="small" rowKey="id" pagination={{ pageSize: 10 }} dataSource={[...activity.deliveries, ...activity.timeline.filter((e) => e.direction === "outbound" && e.source === "manual").map((e) => ({ id: e.id, task_id: e.id.replace("task:", ""), channel: e.channel || "", status: e.status, source: "manual", at: e.at, error: undefined, message_id: undefined }))]} columns={[{ title: "渠道", dataIndex: "channel", render: (v) => channelLabel(v) }, { title: "状态", dataIndex: "status", render: (v) => <Tag>{label(v)}</Tag> }, { title: "来源", dataIndex: "source", render: (v) => v === "manual" ? "人工回填" : v }, { title: "发生时间", dataIndex: "at", render: (v) => new Date(v).toLocaleString("zh-CN") }, { title: "详情", render: (_, r) => <>{r.error || r.message_id || "—"}{r.source === "mobile" && <MobileTask taskId={r.task_id} onChanged={refresh} />}
+              <Table<Activity["deliveries"][number]> size="small" rowKey="id" pagination={{ pageSize: 10 }} dataSource={[...activity.deliveries, ...activity.timeline.filter((e) => e.direction === "outbound" && e.source === "manual").map((e) => ({ id: e.id, task_id: e.id.replace("task:", ""), channel: e.channel || "", status: e.status, source: "manual", at: e.at, error: undefined, message_id: undefined }))]} columns={[{ title: "渠道", dataIndex: "channel", render: (v) => channelLabel(v) }, { title: "状态", dataIndex: "status", render: (v) => <Tag>{label(v)}</Tag> }, { title: "来源", dataIndex: "source", render: (v) => v === "manual" ? "人工回填" : v }, { title: "发生时间", dataIndex: "at", render: (v) => new Date(v).toLocaleString("zh-CN") }, { title: "详情", render: (_, r) => <>{r.error || r.message_id || "—"}{r.source === "mobile" && <MobileTask taskId={r.task_id} platform={mobilePlatform(r.channel, context.contacts.find(c => c.id === context.tasks.find(t => t.id === r.task_id)?.eligibility_id)?.contact_ref)} onChanged={refresh} />}
                 {!["manual", "mobile"].includes(r.source) && <Button readOnlySafe size="small" onClick={() => setApiTask(context.tasks.find((t) => t.id === r.task_id))}>查询／处理</Button>}</> }]} />
             </> },
           ]} />

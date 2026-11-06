@@ -1,18 +1,20 @@
-# Beacon 手机助手（第一轮开发版）
+# Beacon 手机助手（多渠道开发版）
 
-React Native + Expo SDK 58。网页与后端仍是现有 Beacon；此 App 是 WhatsApp 执行终端。
+React Native + Expo SDK 58。网页与后端仍是现有 Beacon；此 App 是社媒执行终端，邮件继续使用 Gmail。
 
 ## 当前实现
 
 - 网页创建短时单次二维码／6 位备用码，手机扫码核对服务器和账号后确认；Android Keystore 加密设备凭据。
-- 手机检查 WhatsApp、无障碍和解锁状态；本方账号由用户在官方应用核对后填写。
+- 手机检查已安装应用、无障碍和解锁状态；FB 等直接使用官方 App 当前登录账号，无需手工填写。WhatsApp 本方号码用于本人会话识别。
 - 网页现有 WhatsApp 业务任务 → 手机预览确认 → 主动领取 → 手机逐条确认执行。
 - 本地 SQLite 先记录、后点击；结果先落盘、再上传；中断恢复仅回填，不重复发送。
 - 目标只有电话号码标题或可明确识别的“给自己发消息”时自动操作；仅昵称且无法核对的目标转人工。
 - 发送后必须观察到新增文字及已发送／送达／已读状态，才回填已发送。
 - 网页查询、停止和未知结果人工核对。失败记录保留，可切回人工执行。
 
-尚未实现 FB／Instagram 适配、自动巡检回复、多设备调度和无人值守常驻。USB 发送验证不等同此 APK 实机验收；实际构建和测试状态见 [实施计划](../../plan/mobile-channel.md)。
+2026-11-06：增加协议 v2 分平台账号及安装检查，Facebook／Messenger、Instagram、LinkedIn、TikTok、YouTube、X 目标入口、语义私信适配和人工接管。现有 WhatsApp v1 兼容。连接邀请、InMail、YouTube 联系发现交给用户处理；消息请求单独记录“请求已提交”，不计为私信已发送。
+
+回复支持当前会话可识别入站候选或手动粘贴，由用户确认回填并去重；不支持自动巡检回复、多设备调度和无人值守常驻。通用语义控件尚未在其余真实社媒上验收，无法核对用户名、输入框或回执时转人工。开发与验收状态见 [多渠道实施计划](../../plan/mobile-multichannel.md)。本轮按用户要求仅模拟验证，不安装或执行真实平台测试。
 
 2026-11-05：独立 APK 已在 Xiaomi 14 Pro（Android 16）完成本人 WhatsApp 会话单条发送和真实后台回填。陌生号码跳转曾出现 WhatsApp“无法连接”，不属于已通过范围。执行器可进入唯一匹配的近期号码会话或明确标注“你”的本人会话，进入后仍核对目标；不会凭普通昵称认定联系人。
 
@@ -31,7 +33,7 @@ pnpm --filter beacon-mobile android
 
 ```sh
 cd apps/mobile-agent/android
-./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+./gradlew :beacon-executor:testDebugUnitTest :app:assembleRelease -PreactNativeArchitectures=arm64-v8a
 ```
 
 生成目录 `android/` 不提交，发布签名需另行配置受控密钥；模板默认的调试签名仅供内部验证，不作为正式分发签名。Android 禁止系统备份设备凭据和执行日志。
@@ -60,3 +62,10 @@ App 复用 `apps/web/public/brand/logo.png` 与 `banner.jpg`，移动端副本�
 macOS 更新原图后运行 `sh scripts/prepare_mobile_brand.sh`，再执行 Expo prebuild 与 release APK 构建；修改图标或启动配置仅热更新 JS 不会生效。
 
 App 各页面内容底部显示“© 当前年份 南京小当家文化咨询有限公司”，年份随设备日期自动更新。
+
+
+### 回复通知
+
+设备与账号 → 客户回复通知：选择渠道，给 **Beacon 手机助手** 开启系统“通知使用权”（不在系统列表找 Facebook）。默认未选择渠道；本轮先开 Facebook。网页“触达任务与回复 → 手机回复”关联首条通知；稳定 shortcut 会话后续入站通知自动回填，普通通知／无稳定标识继续人工确认。群聊／汇总／本方消息不自动记录，不自动打开应用或回复。
+
+新消息通知不等于完整会话，静音／隐藏正文／系统后台限制可能漏收。手机保留加密待上传队列与重试；关闭清除本机待传，换账号先在网页解除通知会话关联。细节见 [实施计划](../../plan/mobile-notifications.md)。

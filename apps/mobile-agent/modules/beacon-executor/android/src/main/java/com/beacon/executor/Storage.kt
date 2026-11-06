@@ -24,6 +24,15 @@ class Vault(val c: Context) {
         .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
     }.generateKey()
   }
+  fun encrypt(value: String): String {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
+    return Base64.encodeToString(cipher.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(value.toByteArray()), Base64.NO_WRAP)
+  }
+  fun decrypt(value: String): String {
+    val parts = value.split(":", limit = 2)
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP))) }
+    return String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)))
+  }
   fun save(server: String, token: String) {
     val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
     val encrypted = cipher.doFinal(token.toByteArray())
@@ -41,12 +50,35 @@ class Vault(val c: Context) {
     check(account.matches(Regex("^\\+[1-9][0-9]{6,14}$"))) { "请输入完整国际电话号码" }
     check(prefs.edit().putString("account", account).commit())
   }
+  fun rememberAccounts(raw: String) {
+    val obj = JSONObject(raw)
+    check(obj.keys().asSequence().all { it in PlatformAdapters.packages }) { "未知渠道" }
+    check(prefs.edit().putString("accounts", raw).commit())
+  }
+  fun accounts(): String = prefs.getString("accounts", "{}") ?: "{}"
   fun account(): String = prefs.getString("account", "") ?: ""
 }
 
-class Journal(c: Context) : SQLiteOpenHelper(c, "beacon-execution.db", null, 1) {
-  override fun onCreate(db: SQLiteDatabase) { db.execSQL("CREATE TABLE journal (id TEXT PRIMARY KEY, value TEXT NOT NULL)") }
-  override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {}
+class Journal(private val c: Context) : SQLiteOpenHelper(c, "beacon-execution.db", null, 2) {
+  override fun onCreate(db: SQLiteDatabase) { db.execSQL("CREATE TABLE journal (id TEXT PRIMARY KEY, value TEXT NOT NULL)"); noticesTable(db) }
+  override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) { if (old < 2) noticesTable(db) }
+  private fun noticesTable(db: SQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS notices (id TEXT PRIMARY KEY, value TEXT NOT NULL, created INTEGER NOT NULL, reported INTEGER NOT NULL DEFAULT 0)") }
+  fun notice(value: JSONObject) {
+    val db = writableDatabase
+    db.execSQL("DELETE FROM notices WHERE created < ?", arrayOf(System.currentTimeMillis() - 7L * 86400000))
+    db.execSQL("INSERT OR IGNORE INTO notices (id,value,created,reported) VALUES (?,?,?,0)", arrayOf(value.getString("event_key"), Vault(c).encrypt(value.toString()), System.currentTimeMillis()))
+    db.execSQL("DELETE FROM notices WHERE id NOT IN (SELECT id FROM notices ORDER BY created DESC LIMIT 200)")
+  }
+  fun pendingNotices(): List<JSONObject> {
+    writableDatabase.execSQL("DELETE FROM notices WHERE created < ?", arrayOf(System.currentTimeMillis() - 7L * 86400000))
+    return readableDatabase.rawQuery("SELECT value FROM notices WHERE reported=0 AND created>=? ORDER BY created LIMIT 20", arrayOf((System.currentTimeMillis() - 7L * 86400000).toString())).use {
+    val rows = mutableListOf<JSONObject>(); while (it.moveToNext()) rows.add(JSONObject(Vault(c).decrypt(it.getString(0)))); rows
+  }
+  }
+  fun noticeUploaded(id: String) { writableDatabase.execSQL("UPDATE notices SET reported=1,value='' WHERE id=?", arrayOf(id)) }
+  fun noticeCount(): Int = readableDatabase.rawQuery("SELECT count(*) FROM notices WHERE reported=0", null).use { it.moveToFirst(); it.getInt(0) }
+  fun clearNotices() { writableDatabase.execSQL("DELETE FROM notices") }
+
   fun save(j: JSONObject) {
     writableDatabase.execSQL("INSERT OR REPLACE INTO journal (id,value) VALUES (?,?)", arrayOf(j.getString("id"), j.toString()))
   }

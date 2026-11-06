@@ -37,7 +37,7 @@ from app.modules.sales.models import (
 from app.modules.sales.preparation import Preparation
 
 router = APIRouter(prefix="/communication", tags=["communication"])
-Mode = Literal["manual", "gmail", "social"]
+Mode = Literal["manual", "gmail", "social", "mobile"]
 SENT = (TaskStatus.sent_manual, TaskStatus.sent_email, TaskStatus.sent_social)
 
 
@@ -96,6 +96,8 @@ def owner(db: Session, username: str | None) -> None:
 
 
 def check_mode(channel: str, mode: str) -> None:
+    if mode == "mobile" and channel not in {"whatsapp", "facebook", "instagram", "linkedin", "tiktok", "other_social"}:
+        raise HTTPException(422, "该渠道不支持手机执行")
     if (mode == "gmail" and channel != "email") or (mode == "social" and channel not in {"facebook", "instagram"}):
         raise HTTPException(422, "该渠道不支持所选接口执行方式，请选择人工执行")
 
@@ -194,6 +196,11 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
     email_records = {
         d.task_id: d for d in db.scalars(select(EmailDelivery).where(EmailDelivery.task_id.in_([t.id for t in tasks])))
     }
+    from app.modules.mobile.models import Execution
+
+    mobile_jobs = {
+        j.task_id: j for j in db.scalars(select(Execution).where(Execution.task_id.in_([t.id for t in tasks])))
+    }
     conversation_ids = set(db.scalars(select(Conversation.lead_id).where(Conversation.lead_id.in_(identities))))
     for identity in identities:
         ts = [t for t in tasks if t.lead_id == identity]
@@ -208,6 +215,18 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
             state = "replied"
         elif active:
             state = "paused" if active.status == TaskStatus.paused else "pending"
+            if active.execution_mode == "mobile" and active.status != TaskStatus.paused:
+                phone_job = mobile_jobs.get(active.id)
+                state = {
+                    "queued": "queued",
+                    "claimed": "sending",
+                    "sending": "sending",
+                    "unknown": "send_unknown",
+                    "failed": "send_failed",
+                    "needs_action": "phone_action",
+                    "unavailable": "phone_action",
+                    "request_submitted": "waiting_acceptance",
+                }.get(phone_job.status if phone_job else "", "awaiting_send")
             if active.execution_mode == "gmail" and active.status != TaskStatus.paused:
                 delivery = email_records.get(active.id)
                 state = {
@@ -367,7 +386,7 @@ def assess(db: Session, draft: Preparation, *, require_approval: bool = True, co
             blockers.append("联系方式无效")
         if not relaxed_email and elig.review_due_at and elig.review_due_at < service.now():
             blockers.append("渠道准入复核已到期")
-        if draft.execution_mode == "manual" and not manual_target(draft.channel, elig.contact_ref):
+        if draft.execution_mode in {"manual", "mobile"} and not manual_target(draft.channel, elig.contact_ref):
             blockers.append("缺少有效邮箱、电话或该平台的 HTTPS 主页链接")
     if not piece:
         blockers.append("尚未确认触达消息")
@@ -841,7 +860,15 @@ def activity(lead_id: uuid.UUID, db: Session = Depends(get_db)):
                 }
             )
     for e in db.scalars(select(Event).where(Event.lead_id == lead_id)):
-        source = "gmail" if e.event_key.startswith("gmail") else "meta" if e.event_key.startswith("meta") else "manual"
+        source = (
+            "gmail"
+            if e.event_key.startswith("gmail")
+            else "meta"
+            if e.event_key.startswith("meta")
+            else "mobile"
+            if e.event_key.startswith("mobile:")
+            else "manual"
+        )
         items.append(
             {
                 "id": "event:" + str(e.id),
@@ -880,7 +907,7 @@ def activity(lead_id: uuid.UUID, db: Session = Depends(get_db)):
             {
                 "id": str(phone_job.id),
                 "task_id": str(phone_job.task_id),
-                "channel": "whatsapp",
+                "channel": phone_job.snapshot.get("channel", "whatsapp"),
                 "status": phone_job.status,
                 "source": "mobile",
                 "at": phone_job.finished_at or phone_job.created_at,

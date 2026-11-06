@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -46,3 +46,36 @@ class Execution(UUIDPk, Timestamped, Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     result: Mapped[dict | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class ReplyNotification(UUIDPk, Timestamped, Base):
+    __tablename__ = "mobile_reply_notification"
+    __table_args__ = (
+        UniqueConstraint("device_id", "event_key"),
+        Index("ix_mobile_reply_inbox", "device_id", "status", "created_at"),
+    )
+    device_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mobile_device.id", ondelete="CASCADE"))
+    event_key: Mapped[str] = mapped_column(String(64))
+    channel: Mapped[str] = mapped_column(String(24))
+    thread_key: Mapped[str | None] = mapped_column(String(64))
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    structured: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(24), default="pending")
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mobile_execution.id", ondelete="SET NULL")
+    )
+    event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("event.id", ondelete="SET NULL"))
+
+
+class ReplyThread(UUIDPk, Timestamped, Base):
+    __tablename__ = "mobile_reply_thread"
+    __table_args__ = (UniqueConstraint("device_id", "channel", "thread_key"),)
+    device_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("mobile_device.id", ondelete="CASCADE"))
+    channel: Mapped[str] = mapped_column(String(24))
+    thread_key: Mapped[str] = mapped_column(String(64))
+    execution_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("mobile_execution.id", ondelete="CASCADE")
+    )
