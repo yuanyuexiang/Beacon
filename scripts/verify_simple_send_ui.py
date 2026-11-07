@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -77,9 +78,9 @@ async def main():
         page = await browser.new_page(viewport={"width": 1500, "height": 1050})
         page.on("pageerror", lambda e: (errors.append(str(e)), print("PAGE ERROR:", e)))
         await page.route("**/api/**", handle)
-        await page.goto(f"http://localhost:3000/leads/{f.ID}")
+        await page.goto(f"{os.environ.get('BEACON_UI_URL', 'http://localhost:3000')}/leads/{f.ID}")
         await expect(
-            page.get_by_role("button", name=re.compile("预览并发送$"))
+            page.get_by_role("button", name=re.compile("预览邮件$"))
         ).to_be_visible()
         for label in [
             "保存并检查草稿",
@@ -99,7 +100,7 @@ async def main():
         await page.get_by_label("邮件主题", exact=True).scroll_into_view_if_needed()
         await page.screenshot(path="data/devchecks/simple-send-mobile.png")
         await page.set_viewport_size({"width": 1500, "height": 1050})
-        await page.get_by_role("button", name=re.compile("预览并发送$")).click()
+        await page.get_by_role("button", name=re.compile("预览邮件$")).click()
         dialog = page.get_by_role("dialog", name="确认发送", exact=True)
         await expect(dialog).to_be_visible()
         await expect(
@@ -112,7 +113,7 @@ async def main():
         await dialog.get_by_role("button", name="Close").click()
         assert "confirm" not in actions
         issues = ["尚缺职务邮箱说明；缺少公司订户证据"]
-        await page.get_by_role("button", name=re.compile("预览并发送$")).click()
+        await page.get_by_role("button", name=re.compile("预览邮件$")).click()
         await expect(
             page.get_by_role("button", name="补充确认", exact=True)
         ).to_be_visible()
@@ -121,7 +122,7 @@ async def main():
         ).not_to_be_visible()
         await page.screenshot(path="data/devchecks/simple-send-blocker.png")
         issues = ["缺少该联系方式属于目标门店的原文证据"]
-        await page.get_by_role("button", name=re.compile("预览并发送$")).click()
+        await page.get_by_role("button", name=re.compile("预览邮件$")).click()
         await expect(
             page.get_by_role("button", name="AI 补查联系方式", exact=True)
         ).to_be_visible()
@@ -131,9 +132,9 @@ async def main():
         await dialog.get_by_role("button", name="Close").click()
         issues = []
         await expect(
-            page.get_by_role("button", name=re.compile("预览并发送$"))
+            page.get_by_role("button", name=re.compile("预览邮件$"))
         ).to_be_visible()
-        await page.get_by_role("button", name=re.compile("预览并发送$")).click()
+        await page.get_by_role("button", name=re.compile("预览邮件$")).click()
         await dialog.get_by_role("checkbox").check()
         await dialog.get_by_role("button", name="确认发送", exact=True).click()
         await expect(

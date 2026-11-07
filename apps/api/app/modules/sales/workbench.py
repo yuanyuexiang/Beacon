@@ -594,9 +594,11 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                         Preparation.lead_id == identity,
                         Preparation.channel == body.channel.value,
                         Preparation.status == "draft",
-                        *([Preparation.eligibility_id == body.eligibility_id] if body.eligibility_id else []),
                     )
                 )
+                if d is not None and body.eligibility_id:
+                    d.eligibility_id = body.eligibility_id
+                    d.purpose = body.purpose
                 if d is None:
                     contacts = list(
                         db.scalars(

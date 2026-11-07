@@ -18,6 +18,8 @@ from app.modules.content import service as content
 from app.modules.content.models import ApprovalDecision, ContentPiece
 from app.modules.gmail import client as gmail_client
 from app.modules.gmail import service as gmail
+from app.modules.mobile import routes as mobile
+from app.modules.mobile.models import Execution
 from app.modules.outreach import service as social
 from app.modules.outreach.client import ProviderError
 from app.modules.outreach.models import ChannelAccount, Conversation
@@ -64,7 +66,13 @@ def save_message(
     return workbench.draft_public(db, d)
 
 
-def snapshot(db: Session, d: Preparation) -> dict:
+class MobileChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    device_id: uuid.UUID | None = None
+    action: str = Field(default="direct_message", max_length=32)
+
+
+def snapshot(db: Session, d: Preparation, choice: MobileChoice | None = None, op: Operator | None = None) -> dict:
     gaps = workbench.assess(db, d, require_approval=False, confirm_email=True)
     piece = db.get(ContentPiece, d.content_id) if d.content_id else None
     contact = db.get(ChannelEligibility, d.eligibility_id) if d.eligibility_id else None
@@ -111,6 +119,29 @@ def snapshot(db: Session, d: Preparation) -> dict:
                 "auth_version": account.auth_version,
                 "mapping_version": conv.mapping_version,
             }
+    mobile_context = None
+    if choice and choice.device_id and d.execution_mode != "mobile":
+        gaps.append("当前执行方式不是手机执行，请重新预览")
+    if d.execution_mode == "mobile" and choice and choice.device_id and op and contact and piece:
+        try:
+            device = mobile.operator_device(db, choice.device_id, op)
+            mobile_context = {
+                "device_id": str(device.id),
+                "device_label": device.label,
+                "payload": mobile.destination_payload(
+                    db,
+                    d.lead_id,
+                    d.channel,
+                    contact.contact_ref,
+                    piece,
+                    device,
+                    d.assigned_to or d.created_by,
+                    op.username,
+                    choice.action,
+                ),
+            }
+        except HTTPException as exc:
+            gaps.append(str(exc.detail))
     payload = {
         "draft_id": str(d.id),
         "content_id": str(d.content_id),
@@ -123,6 +154,7 @@ def snapshot(db: Session, d: Preparation) -> dict:
         "from": sender,
         "conversation_id": conversation_id,
         "social_context": social_context,
+        **({"mobile_context": mobile_context} if choice and choice.device_id else {}),
         "assigned_to": d.assigned_to,
         "follow_up_at": d.follow_up_at.isoformat() if d.follow_up_at else None,
     }
@@ -131,14 +163,19 @@ def snapshot(db: Session, d: Preparation) -> dict:
 
 
 @router.post("/{identity}/preview")
-def preview(identity: uuid.UUID, db: Session = Depends(get_db)):
+def preview(
+    identity: uuid.UUID,
+    body: MobileChoice | None = None,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
     d = load(db, identity)
     if d.status != "draft":
         raise HTTPException(409, "已生成沟通记录，请查看发送状态")
-    return snapshot(db, d)
+    return snapshot(db, d, body, op)
 
 
-class ConfirmIn(BaseModel):
+class ConfirmIn(MobileChoice):
     model_config = ConfigDict(extra="forbid")
     preview_hash: str = Field(min_length=64, max_length=64)
     confirmed: bool
@@ -150,6 +187,9 @@ def confirm(
 ):
     if not body.confirmed or not may_send(db, op.username):
         raise HTTPException(403, "请由有权限的用户确认完整消息")
+    # Mobile executors take the device lock before the lead lock.
+    if body.device_id:
+        mobile.lock(db)
     # Same lock ordering as the Gmail worker, before the per-lead lock.
     initial = load(db, identity)
     initial_mode = initial.execution_mode
@@ -173,7 +213,7 @@ def confirm(
         for t in workbench.tasks_for(db, d.lead_id)
     ):
         raise HTTPException(409, "该收件人已有沟通任务，请查看记录，避免重复联系")
-    check = snapshot(db, d)
+    check = snapshot(db, d, body, op)
     if check["preview_hash"] != body.preview_hash:
         raise HTTPException(409, "收件人、消息或发送账号已变化，请重新预览")
     if check["issues"]:
@@ -212,6 +252,27 @@ def confirm(
             delivery_social = social.preview(db, task.id, uuid.UUID(check["payload"]["conversation_id"]), op)
             social.approve(db, [delivery_social.id], {str(delivery_social.id): delivery_social.request_key}, False, op)
             return {"task_id": str(task.id), "status": "ready", "message": "已提交发送，请在沟通记录查看结果"}
+        if d.execution_mode == "mobile" and body.device_id:
+            device = mobile.operator_device(db, body.device_id, op)
+            actual = mobile.checked(db, task, device, op.username, body.action)
+            if actual != check["payload"]["mobile_context"]["payload"]:
+                raise HTTPException(409, "手机或内容已变化，请重新预览")
+            job = Execution(
+                task_id=task.id,
+                lead_id=task.lead_id,
+                device_id=device.id,
+                confirmed_by=op.username,
+                snapshot=actual,
+                status="queued",
+            )
+            db.add(job)
+            db.commit()
+            return {
+                "task_id": str(task.id),
+                "job_id": str(job.id),
+                "status": "mobile_queued",
+                "message": "已交给手机。请在手机领取并核对执行，结果将回到本门店；尚未发送",
+            }
         db.commit()
         if d.execution_mode == "mobile":
             return {

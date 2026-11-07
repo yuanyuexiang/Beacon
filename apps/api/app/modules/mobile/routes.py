@@ -241,8 +241,26 @@ def checks(db: Session, t: ManualTask, d: Device, confirmed_by: str, action: str
     service.check_can_contact(db, e, p)
     if t.content_hash != p.content_hash:
         raise HTTPException(409, "消息已变化，请重新确认")
+    return destination_payload(
+        db, t.lead_id, t.channel.value, e.contact_ref, p, d, t.assigned_to or t.created_by, confirmed_by, action
+    )
+
+
+def destination_payload(
+    db: Session,
+    lead_id: uuid.UUID,
+    channel: str,
+    contact_ref: str | None,
+    p: ContentPiece,
+    d: Device,
+    assigned_to: str | None,
+    confirmed_by: str,
+    action: str = "direct_message",
+) -> dict:
+    if assigned_to != d.owner or not may_send(db, confirmed_by):
+        raise HTTPException(409, "请使用任务负责人绑定的手机，确认人也须保持有效权限")
     try:
-        platform, target = destination(t.channel.value, e.contact_ref)
+        platform, target = destination(channel, contact_ref)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from None
     if action not in PLATFORMS[platform]["actions"]:
@@ -259,7 +277,7 @@ def checks(db: Session, t: ManualTask, d: Device, confirmed_by: str, action: str
         raise HTTPException(409, "请先在手机确认该平台账号并检查应用安装状态")
     if d.status != "ready" or not d.last_seen_at or d.last_seen_at < service.now() - timedelta(seconds=90):
         raise HTTPException(409, "请在手机上完成运行检查并开启执行")
-    lead = db.get(Lead, t.lead_id)
+    lead = db.get(Lead, lead_id)
     return {
         "target": target,
         "sender": sender,

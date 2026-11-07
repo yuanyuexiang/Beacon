@@ -12,3 +12,7 @@ export function mobilePlatform(channel: string, contact?: string | null): string
   if (channel !== 'other_social') return MOBILE_ACTIONS[channel] ? channel : undefined;
   try { const host = new URL(contact || '').hostname.toLowerCase().replace(/^(www|m)\./, ''); return host === 'youtube.com' ? 'youtube' : ['x.com', 'twitter.com'].includes(host) ? 'x' : undefined; } catch { return undefined; }
 }
+
+export function defaultExecutionMode(channel: string): string {
+  return channel === 'email' ? 'gmail' : MOBILE_ACTIONS[channel] || channel === 'other_social' ? 'mobile' : 'manual';
+}

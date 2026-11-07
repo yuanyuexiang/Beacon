@@ -14,13 +14,13 @@ import { SettingsState } from "@/components/SettingsState";
 const groups = [
   { title: "业务设置", items: [{ key: "profile", label: "我们的服务", note: "AI 起草使用的真实服务资料" }, { key: "screen", label: "客户筛选与准入", note: "筛选规则及自动准入策略" }, { key: "data", label: "数据补充", note: "来源查询与结果复用" }] },
   { title: "AI 设置", items: [{key: "ai", label: "AI 模型", note: "模型连接、用途分配与调用记录"}] },
-  { title: "渠道连接", items: [{ key: "gmail", label: "Gmail", note: "邮箱授权、测试与发送" }, { key: "meta", label: "Facebook / Instagram", note: "本方账号及已连接会话" }, { key: "mobile", label: "手机执行", note: "Android 手机配对与 WhatsApp" }, { key: "manual", label: "TikTok / LinkedIn", note: "人工渠道" }] },
+  { title: "触达方式与连接", items: [{ key: "gmail", label: "邮件 · Gmail", note: "邮箱授权、测试与发送" }, { key: "mobile", label: "手机设备", note: "WhatsApp、FB、INS 等共用设备" }, { key: "manual", label: "社媒触达说明", note: "平级渠道，手机或人工触达" }, { key: "meta", label: "Meta API（可选）", note: "FB／INS 已连接会话回复" }] },
   { title: "帮助说明", items: [{ key: "guide", label: "操作指南", note: "从建立名单到沟通跟进" }, { key: "faq", label: "常见问题", note: "缺项、重试与授权" }, { key: "technical", label: "技术文档", note: "部署与接口参考" }] },
 ];
 const items = groups.flatMap(g => g.items);
 const valid = (key: string | null) => items.some(i => i.key === key);
 function Help({ section }: { section: string }) {
-  if (section === "manual") return <Card title="TikTok / LinkedIn"><Alert type="info" showIcon message="当前以人工方式执行触达" description="可以记录门店的真实社媒主页，准备并确认文案后由业务成员在平台操作，再回填沟通结果。当前没有可用的自动私信连接入口，无需填写 API Key。" /></Card>;
+  if (section === "manual") return <Card title="社媒触达说明"><Typography.Paragraph>WhatsApp、Facebook、Instagram、LinkedIn、TikTok、YouTube 和 X 是平级渠道，各自记录联系方式、任务和回复。</Typography.Paragraph><Typography.Paragraph>在线索详情选择联系方式后，可选“手机触达”或“人工触达”。手机触达共用已配对设备；人工触达可复制消息并打开对应平台，自行发送后记录结果，无需配置社媒 API。</Typography.Paragraph><Typography.Paragraph type="secondary">YouTube 默认查看联系入口；是否能发送私信取决于平台和目标账号。Meta API 是 FB／INS 已连接会话的可选回复方式，不是其他社媒触达的前置条件。</Typography.Paragraph></Card>;
   if (section === "technical") return <><AiObservations /><Card title="技术文档"><Typography.Paragraph>接口文档供开发与运维人员查阅；日常业务操作无需配置接口。</Typography.Paragraph><a href="/api/docs" target="_blank" rel="noreferrer">打开 API 接口文档 ↗</a><Typography.Paragraph style={{ marginTop: 20 }}>部署与授权手册随项目维护：docs/操作手册.md、docs/Gmail邮件服务.md、docs/社媒API应用与授权配置指南.md。凭据由管理员在对应渠道配置。</Typography.Paragraph></Card></>;
   const rows = section === "faq" ? [
     ["没有菜单可以继续吗？", "可以上传其他渠道取得的菜单，也可以先生成询问菜单或负责人的消息。无需等待抓取成功。"],

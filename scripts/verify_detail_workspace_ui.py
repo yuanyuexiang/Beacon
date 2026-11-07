@@ -112,6 +112,8 @@ async def handle(route):
             )
             return
         data = {"assets": assets, "analyses": {"asset1": analyses} if assets else {}}
+    elif path.endswith("/enrichment-history"):
+        data = []
     elif path.endswith("/enrichment"):
         data = {"items": [], "task": None}
     elif path.endswith("/sales-brief"):
@@ -150,6 +152,7 @@ async def handle(route):
         data = [{"username": "ui", "display_name": "UI Tester"}]
     elif path == "/api/communication/prepare":
         created_draft, state = True, "preparing"
+        chosen_contact = body.get("eligibility_id", chosen_contact)
         data = {"items": [{"lead_id": ID, "name": "DOBBIES GARDEN WORLD – RESTAURANT & BAKERY", "draft": draft()}]}
     elif path == "/api/communication/drafts/draft1":
         chosen_contact = body.get("eligibility_id", chosen_contact)
@@ -310,7 +313,7 @@ async def main():
         await manual.get_by_role("button", name="保存联系方式", exact=True).click()
         await expect(manual).not_to_be_visible()
         await expect(page.get_by_role("link", name="+441234567890", exact=True)).to_be_visible()
-        await page.get_by_role("button", name="用于本次触达", exact=True).first.click()
+        await page.get_by_role("button", name="准备触达", exact=True).first.click()
         await expect(page.get_by_text("尚不能创建可执行任务，草稿已保存", exact=True)).to_be_visible()
         assert chosen_contact == "email1"
         before_reload = len(writes)
@@ -361,7 +364,7 @@ async def main():
         before = len(writes)
         await page.reload()
         await expect(page.get_by_role("button", name="处理客户回复", exact=True)).to_be_enabled()
-        await expect(page.get_by_role("button", name="用于本次触达", exact=True).first).to_be_disabled()
+        await expect(page.get_by_role("button", name="准备触达", exact=True).first).to_be_disabled()
         await page.get_by_role("tab", name="菜单资料", exact=True).click()
         await expect(page.get_by_label("当前菜单", exact=True).first).to_be_enabled()
         assert len(writes) == before

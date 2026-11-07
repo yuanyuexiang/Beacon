@@ -399,3 +399,10 @@
 .lead-enrichment-item-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .lead-enrichment-item { padding: 20px 0 !important; }
 @media (max-width: 760px) { .lead-enrichment-bar { align-items: flex-start; flex-direction: column; padding: 16px; } }
+
+/* 触达编辑：联系人只在左侧选择，右侧只处理当前消息。 */
+#sales-composer .outreach-editor { box-shadow: none; background: transparent; }
+#sales-composer .outreach-editor > .ant-card-body { padding: 0; }
+.outreach-recipient { padding: 14px 16px; margin-bottom: 20px; background: #faf8f5; border: 1px solid #ece6de; border-radius: 8px; }
+#sales-composer .ant-alert-info { background: #f6f8fa; border-color: #dfe5eb; }
+#sales-composer .ant-alert-info .ant-alert-icon { color: #64748b; }

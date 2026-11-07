@@ -21,9 +21,9 @@ export default function MobileSettings() {
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { if (!pairing) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [pairing]);
   async function action(key: string, fn: () => Promise<void>) { setBusy(old => ({ ...old, [key]: true })); try { await fn(); setError(undefined); } catch (e) { setError(String(e)); } finally { setBusy(old => ({ ...old, [key]: false })); } }
-  return <Card title="手机执行渠道" extra={<Button loading={busy.refresh} onClick={() => action("refresh", refresh)}>刷新手机</Button>}>
+  return <Card title="手机设备与执行" extra={<Button loading={busy.refresh} onClick={() => action("refresh", refresh)}>刷新手机</Button>}>
     <Typography.Paragraph>将 Android 手机绑定到自己的账号。确认消息后，手机领取任务并核对目标执行，结果回到沟通工作台。</Typography.Paragraph>
-    <Alert type="info" showIcon message="WhatsApp 已通过本人会话实测；Facebook、Instagram、LinkedIn、TikTok、YouTube、X 适配已开发，等待实机验收。手机需保持解锁并主动连接。" style={{ marginBottom: 16 }} />
+    <Alert type="info" showIcon message="WhatsApp、Facebook、Instagram、LinkedIn、TikTok、YouTube、X 共用手机设备，各渠道任务独立。WhatsApp 和 Facebook 已有实机测试，其他平台仍待验收；手机需保持解锁并主动连接。" style={{ marginBottom: 16 }} />
     {error && <Alert type="error" message={error} />}
     {writable && <Button type="primary" loading={busy.pair} onClick={() => action("pair", async () => setPairing(await api("/api/mobile/pairing", json({}))))}>绑定新手机</Button>}
     {pairing && <Card size="small" style={{ marginTop: 12 }} title="用 Beacon 手机助手扫码配对">
