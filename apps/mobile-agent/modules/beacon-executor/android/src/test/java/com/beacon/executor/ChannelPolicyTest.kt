@@ -33,6 +33,12 @@ class ChannelPolicyTest {
     assertFalse(ChannelPolicy.composer("search_edit", true))
     assertFalse(ChannelPolicy.composer("message_input", false))
   }
+  @Test fun receiptTextMustBelongToTheNewOutgoingBubble() {
+    assertTrue(ChannelPolicy.facebookReceipt("已发送", 930, 2130, 2170, 540, 2400, 2040, 2120))
+    assertFalse(ChannelPolicy.facebookReceipt("发送中", 930, 2130, 2170, 540, 2400, 2040, 2120))
+    assertFalse(ChannelPolicy.facebookReceipt("已发送", 30, 2130, 2170, 540, 2400, 2040, 2120))
+    assertFalse(ChannelPolicy.facebookReceipt("已发送", 930, 400, 440, 540, 2400, 2040, 2120))
+  }
   @Test fun invitationAndPaidActionsNeverEnterTheAutomaticSendPath() {
     for (action in listOf("connection_request", "inmail", "contact_discovery")) assertTrue(ChannelPolicy.manualAction(action))
     assertFalse(ChannelPolicy.manualAction("direct_message"))

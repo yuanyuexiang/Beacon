@@ -1,5 +1,5 @@
 import { requireNativeModule } from 'expo';
-export type PhoneStatus = { deviceName: string; accessibility: boolean; whatsapp: boolean; unlocked: boolean; running: boolean; journal: string; history: string[]; savedAccount: string; savedAccounts: string; installed: string[] };
+export type PhoneStatus = { autoEnabled: boolean; autoError: string; autoLastContact: number; deviceName: string; accessibility: boolean; whatsapp: boolean; unlocked: boolean; running: boolean; journal: string; history: string[]; savedAccount: string; savedAccounts: string; installed: string[] };
 export default requireNativeModule<{
   status(): PhoneStatus;
   inspectAccount(channel: string): Promise<string>;
@@ -20,6 +20,7 @@ export default requireNativeModule<{
   captureReplies(raw: string): Promise<string>;
   openTarget(raw: string): void;
   copyMessage(body: string): void;
+  startAutomatic(): void;
   pause(): void;
   recover(): void;
 }>('BeaconExecutor');

@@ -1,9 +1,9 @@
 """Multi-channel phone contracts are simulated; these tests never open or message real accounts."""
 
 import pytest
-
 from app.modules.mobile.channels import destination
 from app.modules.sales.models import Event, ManualTask, TaskStatus
+
 from tests.test_mobile import enqueue, setup
 from tests.test_sales import _elig
 
@@ -16,6 +16,7 @@ from tests.test_sales import _elig
         ("linkedin", "https://www.linkedin.com/in/test-person", "linkedin"),
         ("tiktok", "https://tiktok.com/@test.restaurant", "tiktok"),
         ("other_social", "https://youtube.com/@test.restaurant", "youtube"),
+        ("other_social", "https://youtube.com/user/testrestaurant", "youtube"),
         ("other_social", "https://x.com/test_restaurant", "x"),
     ],
 )

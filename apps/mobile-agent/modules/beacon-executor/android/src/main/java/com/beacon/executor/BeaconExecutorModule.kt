@@ -20,7 +20,7 @@ class BeaconExecutorModule : Module() {
       val deviceName = try { Settings.Global.getString(c.contentResolver, "device_name")?.trim() } catch (_: Exception) { null }
       val defaultName = deviceName?.takeIf { it.isNotBlank() && !it.equals("Android", true) }
         ?: (if (model.startsWith(brand, true)) model else "$brand $model").trim().ifBlank { "Android 手机" }
-      mapOf("deviceName" to defaultName, "accessibility" to (PhoneService.instance != null), "whatsapp" to installed,
+      mapOf("autoEnabled" to (PhoneService.instance?.autoEnabled ?: false), "autoError" to (PhoneService.instance?.autoError ?: ""), "autoLastContact" to (PhoneService.instance?.autoLastContact ?: 0L), "deviceName" to defaultName, "accessibility" to (PhoneService.instance != null), "whatsapp" to installed,
         "unlocked" to !c.getSystemService(KeyguardManager::class.java).isKeyguardLocked,
         "running" to (PhoneService.instance?.running ?: false), "journal" to Journal(c).latest(),
         "history" to Journal(c).recent(), "savedAccount" to Vault(c).account(), "savedAccounts" to Vault(c).accounts(),
@@ -64,7 +64,8 @@ class BeaconExecutorModule : Module() {
       val clipboard = context().getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
       clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Beacon 消息", body))
     }
-    Function("pause") { PhoneService.instance?.stopRequested = true }
+    Function("startAutomatic") { (PhoneService.instance ?: error("请先开启 Beacon 无障碍服务")).startAutomatic() }
+    Function("pause") { PhoneService.instance?.pauseAutomatic() }
     Function("recover") { (PhoneService.instance ?: error("请先开启无障碍服务")).recover() }
   }
 }

@@ -8,8 +8,9 @@ import android.view.accessibility.AccessibilityNodeInfo
 import org.json.JSONObject
 
 class NeedsPhoneAction(message: String) : Exception(message)
+class ContactUnavailable(message: String) : Exception(message)
 
-/** No coordinate taps, public comment fallback, paid actions or inferred account switching. */
+/** Platform semantics; visual navigation is isolated from the final send boundary. */
 object PlatformAdapters {
   val packages = linkedMapOf(
     "whatsapp" to listOf("com.whatsapp"),
@@ -54,13 +55,14 @@ object PlatformAdapters {
   private fun label(n: AccessibilityNodeInfo) = (n.text?.toString()?.takeIf { it.isNotBlank() } ?: n.contentDescription?.toString())?.trim() ?: ""
   fun header(r: AccessibilityNodeInfo, snapshot: JSONObject): String? {
     val uri = Uri.parse(snapshot.getString("target")); val handle = uri.lastPathSegment?.removePrefix("@") ?: return null
-    if (handle == "profile.php" || handle.all { it.isDigit() }) return null
+    val expectedName = snapshot.optString("_resolved_title").ifBlank { if (handle == "profile.php" || handle.all { it.isDigit() }) snapshot.optString("lead_name") else "" }
     val all = flatten(r)
     val facebook = r.packageName?.toString() in packages["facebook"].orEmpty()
     val rect = android.graphics.Rect().also { r.getBoundsInScreen(it) }
     val chat = all.any { ChannelPolicy.facebookComposer(it.hintText?.toString() ?: "", it.contentDescription?.toString() ?: "", it.isEditable) }
     return all.firstOrNull {
       val bounds = android.graphics.Rect().also { box -> it.getBoundsInScreen(box) }
+      (expectedName.isNotBlank() && !it.isEditable && NavigationPolicy.title(label(it), expectedName, bounds.top - rect.top, bounds.bottom - rect.top, rect.height())) ||
       ChannelPolicy.identity(id(it), label(it), handle) || facebook && !it.isEditable && ChannelPolicy.facebookTitle(label(it), handle, bounds.top - rect.top, bounds.bottom - rect.top, rect.height(), chat)
     }?.let { label(it) }
   }
@@ -68,7 +70,7 @@ object PlatformAdapters {
     label(it) in setOf("Message", "Send message", "发消息", "发送消息", "私信") && !it.isEditable
   }.mapNotNull { clickableNode(it) }.distinctBy { android.graphics.Rect().also { rect -> it.getBoundsInScreen(rect) }.toString() }.singleOrNull()
   fun input(r: AccessibilityNodeInfo): AccessibilityNodeInfo? = flatten(r).filter {
-    ChannelPolicy.composer(id(it), it.isEditable) || r.packageName?.toString() in packages["facebook"].orEmpty() && ChannelPolicy.facebookComposer(it.hintText?.toString() ?: "", it.contentDescription?.toString() ?: "", it.isEditable)
+    ChannelPolicy.composer(id(it), it.isEditable) || NavigationPolicy.privateComposer(it.hintText?.toString().orEmpty(), id(it), it.isEditable) || r.packageName?.toString() in packages["facebook"].orEmpty() && ChannelPolicy.facebookComposer(it.hintText?.toString() ?: "", it.contentDescription?.toString() ?: "", it.isEditable)
   }.singleOrNull()
   fun requestScreen(r: AccessibilityNodeInfo): Boolean = flatten(r).any {
     label(it).lowercase() in setOf("message request", "send message request", "invite to chat", "消息请求", "发送消息请求", "邀请聊天")
@@ -76,7 +78,7 @@ object PlatformAdapters {
   fun fill(r: AccessibilityNodeInfo, body: String) {
     val entry = input(r) ?: throw NeedsPhoneAction("未识别到独立私信输入框。请在官方应用进入目标聊天后人工处理，系统不会改发公开评论")
     if (entry.text?.toString() == body) return // Reuse the exact unsent draft; never overwrite another draft.
-    check(entry.text.isNullOrBlank() || label(entry) in setOf("Message", "发消息", "发送消息", "Write a message…", "Message…")) { "聊天已有草稿，请先人工核对，避免覆盖" }
+    check(entry.text.isNullOrBlank() || entry.isShowingHintText || (!entry.hintText.isNullOrBlank() && entry.text?.toString() == entry.hintText?.toString()) || label(entry) in setOf("Message", "发消息", "发送消息", "Write a message…", "Message…")) { "聊天已有草稿，请先人工核对，避免覆盖" }
     check(entry.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, body) })) { "文字填写失败" }
   }
   fun sendButton(r: AccessibilityNodeInfo): AccessibilityNodeInfo? = flatten(r).filter {
@@ -103,9 +105,7 @@ object PlatformAdapters {
       val receipt = flatten(r).any {
         val b = android.graphics.Rect().also { box -> it.getBoundsInScreen(box) }
         val status = label(it)
-        (status in setOf("已发送", "已送达", "已读", "Sent", "Delivered", "Read") || status.endsWith("已读")) &&
-          it.className?.toString() == "android.widget.ImageView" && b.left > screen.centerX() &&
-          b.top >= messageBounds.top && b.bottom <= messageBounds.bottom + screen.height() * 0.12
+        ChannelPolicy.facebookReceipt(status, b.left, b.top, b.bottom, screen.centerX(), screen.height(), messageBounds.top, messageBounds.bottom)
       }
       if (receipt) return true
     }

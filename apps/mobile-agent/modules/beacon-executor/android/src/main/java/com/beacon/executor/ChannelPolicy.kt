@@ -13,6 +13,9 @@ object ChannelPolicy {
     hint in setOf("发消息", "输入消息...", "输入消息…", "Message", "Write a message…", "Type a message") && description in setOf("输入消息", "Message", "Type a message")
   fun facebookOutgoingCaption(description: String, body: String, left: Int, center: Int): Boolean =
     left >= center && body.isNotBlank() && description.endsWith(", $body") && description.length > body.length + 2
+  fun facebookReceipt(status: String, left: Int, top: Int, bottom: Int, center: Int, height: Int, messageTop: Int, messageBottom: Int): Boolean =
+    (status in setOf("已发送", "已送达", "已读", "Sent", "Delivered", "Read") || status.endsWith("已读")) &&
+      left > center && top >= messageTop && bottom <= messageBottom + height * .12
   fun composer(id: String, editable: Boolean) = editable && inputIds.matches(id)
   fun sentOutcome(action: String) = if (action == "message_request") "request_submitted" else "sent"
   fun manualAction(action: String) = action in setOf("connection_request", "inmail", "contact_discovery")

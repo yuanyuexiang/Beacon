@@ -24,6 +24,7 @@ from app.modules.mobile.assistance import PageIn
 from app.modules.mobile.assistance import assist as assist_page
 from app.modules.mobile.channels import PLATFORMS, destination
 from app.modules.mobile.models import Device, Execution, Pairing
+from app.modules.mobile.navigation import Screen, advise
 from app.modules.sales import service
 from app.modules.sales.models import ChannelEligibility, ManualTask, TaskStatus
 
@@ -508,14 +509,15 @@ def result(identity: uuid.UUID, body: ResultIn, d: Device = Depends(device_auth)
             j.status, j.error = "unknown", "设备迟到结果与人工核对不一致，请再次核对"
         db.commit()
         return public_job(j)
-    if j.result:
+    if j.result and "status" in j.result:
         if j.result != payload:
             raise HTTPException(409, "该尝试已有结果，请人工核对，不能覆盖")
         return public_job(j)
     if body.status in {"sent", "request_submitted"} and not j.started_at:
         raise HTTPException(409, "未完成发送前检查，不能记录已发送")
     j.status, j.result, j.finished_at, j.error = body.status, payload, service.now(), body.detail or None
-    if body.status == "request_submitted" and j.snapshot.get("action") not in {
+    if body.status == "request_submitted" and j.snapshot.get("action", "direct_message") not in {
+        "direct_message",  # The app may present a message request after navigation.
         "message_request",
         "connection_request",
         "inmail",
@@ -614,3 +616,68 @@ def account_assistance(body: "PageIn", db: Session = Depends(get_db), device: De
     # Release the device-auth advisory lock before a potentially slow model call.
     db.commit()
     return assist_page(body)
+
+
+class NavigationIn(AttemptIn):
+    screen: Screen
+
+
+class ProgressIn(AttemptIn):
+    stage: Literal["opening", "finding_entry", "reading_page", "composing", "verifying_send"]
+    detail: str = Field(default="", max_length=240)
+
+
+def navigation_job(db: Session, identity: uuid.UUID, device: Device, body: AttemptIn) -> Execution:
+    j = attempt(db, identity, device, body)
+    if j.status != "claimed" or not j.lease_until or j.lease_until < service.now():
+        raise HTTPException(409, "任务已停止或执行租约过期")
+    payload = checked(db, task_for(db, j.task_id), device, j.confirmed_by, j.snapshot.get("action", "direct_message"))
+    if payload != j.snapshot:
+        raise HTTPException(409, "任务已变化，请重新确认")
+    return j
+
+
+@worker_router.post("/jobs/{identity}/navigation")
+def navigation(
+    identity: uuid.UUID, body: NavigationIn, d: Device = Depends(device_auth), db: Session = Depends(get_db)
+):
+    j = navigation_job(db, identity, d, body)
+    count = (j.result or {}).get("navigation_calls", 0)
+    if count >= 4:
+        return {
+            "action": "needs_action",
+            "detail": "多次观察后仍未找到聊天入口，消息已保留",
+            "screen_id": body.screen.screen_id,
+        }
+    j.result = {**(j.result or {}), "navigation_calls": count + 1, "progress": "AI 正在查找联系入口"}
+    j.error = "AI 正在查找联系入口"
+    snapshot = dict(j.snapshot)
+    db.commit()
+    try:
+        return advise(body.screen, snapshot)
+    except ValueError:
+        return {
+            "action": "needs_action",
+            "detail": "页面识别结果无效，请重新观察或接管",
+            "screen_id": body.screen.screen_id,
+        }
+
+
+@worker_router.post("/jobs/{identity}/progress")
+def execution_progress(
+    identity: uuid.UUID, body: ProgressIn, d: Device = Depends(device_auth), db: Session = Depends(get_db)
+):
+    j = attempt(db, identity, d, body)
+    if j.status not in {"claimed", "sending"} or not j.lease_until or j.lease_until < service.now():
+        raise HTTPException(409, "任务已停止或执行租约过期")
+    stages = {
+        "opening": "正在打开目标主页",
+        "finding_entry": "正在查找联系入口",
+        "reading_page": "正在识别当前页面",
+        "composing": "正在填写消息",
+        "verifying_send": "正在核对发送结果",
+    }
+    j.error = stages[body.stage]
+    j.result = {**(j.result or {}), "progress": stages[body.stage], "stage": body.stage}
+    db.commit()
+    return {"status": j.status, "progress": j.error}

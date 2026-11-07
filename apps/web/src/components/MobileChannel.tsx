@@ -31,7 +31,7 @@ export default function MobileSettings() {
   try { address = pairingServer(server); } catch { /* Wait for the reachable address. */ }
   async function action(key: string, fn: () => Promise<void>) { setBusy(old => ({ ...old, [key]: true })); try { await fn(); setError(undefined); } catch (e) { setError(String(e)); } finally { setBusy(old => ({ ...old, [key]: false })); } }
   return <Card title="手机设备与执行" extra={<Button loading={busy.refresh} onClick={() => action("refresh", refresh)}>刷新手机</Button>}>
-    <Typography.Paragraph>将 Android 手机绑定到自己的账号。确认消息后，手机领取任务并核对目标执行，结果回到沟通工作台。</Typography.Paragraph>
+    <Typography.Paragraph>将 Android 手机绑定到自己的账号。手机开启自动执行后，网页确认消息，手机自动领取并打开对应社媒执行，结果回到沟通工作台。</Typography.Paragraph>
     <Alert type="info" showIcon message="WhatsApp、Facebook、Instagram、LinkedIn、TikTok、YouTube、X 共用手机设备，各渠道任务独立。WhatsApp 和 Facebook 已有实机测试，其他平台仍待验收；手机需保持解锁并主动连接。" style={{ marginBottom: 16 }} />
     {error && <Alert type="error" message={error} />}
     <Typography.Paragraph type="secondary">在线表示 App 最近与服务通信；执行就绪还需要手机完成运行检查。本地优先使用同一局域网；云端直接联网，无需 USB。页面每 15 秒自动刷新。</Typography.Paragraph>
@@ -86,7 +86,7 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
     <Drawer title={`${MOBILE_LABELS[platform] || platform} 手机执行`} open={open} onClose={() => setOpen(false)} width={620}>
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
       {job ? <><Tag color={job.status === "sent" ? "green" : ["failed", "unknown"].includes(job.status) ? "orange" : "blue"}>{labels[job.status] || job.status}</Tag><p>{job.error}</p>{job.finished_at && <p>更新时间：{new Date(job.finished_at).toLocaleString("zh-CN")}</p>}<p>动作：{MOBILE_ACTIONS[job.snapshot.channel || platform]?.find(a => a.value === job.snapshot.action)?.label || "发送消息"}</p><p>收件人：{job.snapshot.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{job.snapshot.body}</p>
-        {job.status === "queued" && <Alert type="info" showIcon message="已交给手机。请在手机工作台领取并核对这条消息，尚未发送。" />}
+        {job.status === "queued" && <Alert type="info" showIcon message="已交给手机，等待自动执行。请在手机任务页开启“自动执行”并保持解锁；执行结果会自动回填。" />}
         {writable && ["queued", "claimed", "sending"].includes(job.status) && <Button danger loading={busy.cancel} onClick={() => act("cancel", async () => { setJob(await api(`/api/mobile/tasks/${taskId}/cancel`, json({}))); onChanged(); })}>停止本次执行</Button>}
         {["needs_action", "unavailable", "request_submitted"].includes(job.status) && <Alert type="info" showIcon message={labels[job.status]} description="在手机执行记录中打开目标应用、复制消息或记录客户回复；完成手动操作后在沟通页回填实际结果。请求提交不会计为私信已发送。" />}
         {["failed", "cancelled"].includes(job.status) && <Alert type="info" message="本次没有确认发送成功，记录已保留。请核对手机聊天及上述原因；可返回任务切换为人工执行。" />}
@@ -95,7 +95,7 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
         <p>选择你绑定的手机，预览完整消息后确认。手机上仍会核对目标，防止用错会话。</p>
         <Select aria-label="手机联系动作" style={{ width: "100%", marginBottom: 12 }} value={contactAction} options={MOBILE_ACTIONS[platform] || []} onChange={v => { setContactAction(v); setPreview(undefined); }} />
         <Select placeholder="选择已就绪手机" style={{ width: "100%" }} value={device} onChange={v => { setDevice(v); setPreview(undefined); }} options={devices.filter(d => d.status !== "revoked").map(d => ({ value: d.id, disabled: !supports(d), label: `${d.label} · ${d.capabilities?.accounts?.[platform] || (platform !== "whatsapp" ? "App 当前登录账号" : d.account || "待填写号码")} · ${!d.online ? "离线" : labels[d.status] || d.status}` }))} />
-        {!devices.some(supports) && <Alert style={{ marginTop: 12 }} type="info" message="请先在手机点击“连接并检查任务”。保持对应应用已安装并登录；仅 WhatsApp 需要填写本方号码。" />}
+        {!devices.some(supports) && <Alert style={{ marginTop: 12 }} type="info" message="请先在手机点击“开启自动执行”。保持对应应用已安装并登录；仅 WhatsApp 需要填写本方号码。" />}
         <p><a href="/settings?section=mobile">管理手机与配对</a></p>
         <Button disabled={!device || !writable} loading={busy.preview} onClick={() => act("preview", async () => setPreview(await api(`/api/mobile/tasks/${taskId}/preview`, json({ device_id: device, preview_hash: "0".repeat(64), action: contactAction }))))}>预览消息</Button>
         {preview && <Card title="确认本次发送" style={{ marginTop: 16 }}><p>本方账号：{preview.payload.sender}</p><p>收件人：{preview.payload.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{preview.payload.body}</p><Button type="primary" disabled={!writable} loading={busy.confirm} onClick={() => act("confirm", async () => { setJob(await api(`/api/mobile/tasks/${taskId}/confirm`, json({ device_id: device, preview_hash: preview.preview_hash, action: contactAction }))); setPreview(undefined); onChanged(); })}>确认交给手机执行</Button></Card>}

@@ -68,7 +68,7 @@ export default function App() {
   const [connectedAt, setConnectedAt] = useState<string>();
   const [pending, setPending] = useState(0);
   function inspect() {
-    try { const s = Executor.status(); setStatus(s); if (s.journal) { const j = JSON.parse(s.journal); if (j.phase === 'claimed' && !j.reported) setJob(j); else if (j.reported) setJob(undefined); } } catch (e) { setNotice(String(e)); }
+    try { const s = Executor.status(); setStatus(s); if (s.autoError) { setReady(false); setNotice(s.autoError); } if (s.autoEnabled && s.autoLastContact) { setConnected(true); setConnectedAt(new Date(s.autoLastContact).toLocaleTimeString()); } if (s.journal) { const j = JSON.parse(s.journal); if (j.phase === 'claimed' && !j.reported) setJob(j); else if (j.reported) setJob(undefined); } } catch (e) { setNotice(String(e)); }
   }
   useEffect(() => {
     let disposed = false;
@@ -105,7 +105,7 @@ export default function App() {
     return response;
   }, [savedLabel, account, accounts, call]);
   useEffect(() => {
-    if (!paired || !initialized || connectionPaused) return;
+    if (!paired || !initialized || connectionPaused || status?.autoEnabled) return;
     let active = true, inFlight = false;
     const ping = async () => {
       if (inFlight || AppState.currentState !== 'active') return;
@@ -118,7 +118,7 @@ export default function App() {
     const timer = setInterval(() => void ping(), 30000);
     const subscription = AppState.addEventListener('change', state => { if(state === 'active') void ping(); });
     return () => { active = false; clearInterval(timer); subscription.remove(); };
-  }, [paired, initialized, ready, heartbeat, connectionPaused]);
+  }, [paired, initialized, ready, heartbeat, connectionPaused, status?.autoEnabled]);
   async function pairDevice(address: string, pairingCode: string) {
     if (Executor.status().running || job || (status?.journal && !JSON.parse(status.journal).reported)) throw new Error('请先处理当前任务或回填记录，再更换设备配对');
     const base = pairingServer(address);
@@ -152,17 +152,17 @@ export default function App() {
     if (!Object.values(configured).some(Boolean) && !installed.some(p => p !== 'whatsapp')) throw new Error('请安装社媒应用，或填写 WhatsApp 号码');
     if (account && !/^\+[1-9]\d{6,14}$/.test(account)) throw new Error('请核对 WhatsApp 的完整国际号码');
     const s = Executor.status();
-    if (!s.accessibility) { Executor.permissions(); setNotice('请在系统设置开启“Beacon 手机执行”无障碍服务，返回后点击“检查并准备执行”。'); return; }
+    if (!s.accessibility) { Executor.permissions(); setNotice('请在系统设置开启“Beacon 手机执行”无障碍服务，返回后点击“开启自动执行”。'); return; }
     if (!s.unlocked) throw new Error('请先解锁手机屏幕');
     if (!s.installed?.some(p => p !== 'whatsapp' || configured[p])) throw new Error('请安装对应社媒应用；使用 WhatsApp 时填写本方号码');
     const profile = await heartbeat(true);
     if (profile.status !== 'ready') throw new Error('平台已连接，但运行检查未通过，请检查无障碍服务。');
-    if (account) Executor.rememberAccount(account); Executor.rememberAccounts(JSON.stringify({ ...accounts, ...(account ? { whatsapp: account } : {}) })); setReady(true); setNotice('运行检查通过，可以领取已确认任务。');
+    if (account) Executor.rememberAccount(account); Executor.rememberAccounts(JSON.stringify({ ...accounts, ...(account ? { whatsapp: account } : {}) })); Executor.startAutomatic(); setReady(true); setNotice('自动执行已开启，网页确认后会自动打开对应社媒执行；请保持解锁。');
   }
   const button = (title: string, key: string, fn: () => Promise<void> | void, secondary = false) => <Pressable disabled={!!busy} style={[styles.button, secondary && styles.secondary, !!busy && { opacity: .6 }]} onPress={() => void action(key, async () => { await fn(); })}><Text style={[styles.buttonText, secondary && { color: RED }]}>{busy === key ? '处理中…' : title}</Text></Pressable>;
   const field = (placeholder: string, value: string, onChange: (v: string) => void, secure = false) => <TextInput style={styles.input} placeholder={placeholder} value={value} onChangeText={onChange} secureTextEntry={secure} autoCapitalize="none" autoCorrect={false} />;
   const executionReady = ready && connected && !!status?.accessibility && !!status?.unlocked;
-  const stateLabel = status?.running ? '正在执行' : executionReady ? '已就绪' : '待运行检查';
+  const stateLabel = status?.running ? '正在执行' : executionReady ? status?.autoEnabled ? '自动执行中' : '已就绪' : '待运行检查';
   const platformLabel = !paired ? '未绑定' : connectionPaused ? '已断开' : connected ? '已连接' : connectionError ? '连接中断' : '连接中';
   const row = (title: string, detail: string, onPress: () => void) => <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingRow}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.rowDetail}>{detail}</Text></Pressable>;
   const entries: { raw: string; j: { id: string; phase: string; outcome?: string; detail?: string; reported?: boolean; updated_at?: number; snapshot: Job['snapshot'] } }[] = (status?.history || []).flatMap(raw => { try { return [{ raw, j: JSON.parse(raw) }]; } catch { return []; } });
@@ -177,22 +177,23 @@ export default function App() {
       <Pressable accessibilityRole="button" accessibilityLabel={`平台${platformLabel}，查看连接详情`} hitSlop={8} onPress={() => { setTab('设备'); router.setParams({ tab: '设备', panel: 'connection' }); }} style={styles.statusChip}><View style={[styles.statusDot, { backgroundColor: connected ? '#429460' : '#b48a43' }]} /><Text style={[styles.statusText, { color: connected ? '#38724d' : '#8c6c32' }]}>{platformLabel}</Text></Pressable>
     </View>
     <ScrollView key={`${tab}:${panel}`} style={{ flex: 1, backgroundColor: '#f6f5f2' }} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      {!!notice && <Text accessibilityRole="alert" style={styles.notice}>{notice}</Text>}
+      {!!status?.autoError && <Text accessibilityRole="alert" style={styles.notice}>{status.autoError}</Text>}
+      {!!notice && notice !== status?.autoError && <Text accessibilityRole="alert" style={styles.notice}>{notice}</Text>}
       {tab === '任务' && <>
         <View style={styles.summary}>{[[String(pending + (job ? 1 : 0)), '待处理'], [String(completed), '本机完成记录'], [String(needsAction), '需核对记录']].map(([count, title]) => <View key={title} style={styles.stat}><Text style={styles.statNumber}>{count}</Text><Text style={styles.caption}>{title}</Text></View>)}</View>
         <View style={styles.sectionRow}><Text style={styles.sectionLabel}>当前任务</Text><Text style={styles.caption}>{stateLabel}</Text></View>
-        {!executionReady && !status?.running && <View style={styles.card}><Text style={styles.heading}>{!paired ? '先绑定你的手机' : !connected ? '正在连接 Beacon' : '完成运行检查即可领取'}</Text><Text style={styles.small}>{!paired ? '在设备页扫描网页配对码，绑定后即可查看任务。' : !connected ? '配对已保留，恢复连接后可继续。点击顶部状态查看详情。' : '检查手机解锁、社媒应用和无障碍服务。'}</Text>{paired && connected ? button('检查并准备执行', 'start', start) : button('查看设备连接', 'go-device', () => { setTab('设备'); router.setParams({tab:'设备',panel:'connection'}); }, true)}</View>}
+        {!executionReady && !status?.running && <View style={styles.card}><Text style={styles.heading}>{!paired ? '先绑定你的手机' : !connected ? '正在连接 Beacon' : '完成运行检查即可领取'}</Text><Text style={styles.small}>{!paired ? '在设备页扫描网页配对码，绑定后即可查看任务。' : !connected ? '配对已保留，恢复连接后可继续。点击顶部状态查看详情。' : '检查手机解锁、社媒应用和无障碍服务。'}</Text>{paired && connected ? button('开启自动执行', 'start', start) : button('查看设备连接', 'go-device', () => { setTab('设备'); router.setParams({tab:'设备',panel:'connection'}); }, true)}</View>}
         <View style={styles.card}>
           {job ? <><View style={styles.sectionRow}><Text style={styles.sectionLabel}>{channelLabel(job.snapshot.channel)} · {ACTIONS[job.snapshot.action || "direct_message"]}</Text><Text style={styles.badge}>待确认</Text></View><Text style={styles.deviceName}>{job.snapshot.lead_name}</Text><Text>本方：{job.snapshot.sender}</Text><Text>发送至：{job.snapshot.target}</Text><Text style={styles.message}>{job.snapshot.body}</Text>
             {button('确认执行这条消息', 'execute', () => {
               if (!ready || job.snapshot.sender_mode !== 'current_app' && job.snapshot.sender !== (job.snapshot.channel === 'whatsapp' || !job.snapshot.channel ? account : accounts[job.snapshot.channel])) throw new Error('请先核对本方账号并开启执行');
               Alert.alert('确认手机执行', `本方账号 ${job.snapshot.sender}\n发送至 ${job.snapshot.target}\n\n${job.snapshot.body}`, [{ text: '返回', style: 'cancel' }, { text: '执行', onPress: () => { try { Executor.execute(JSON.stringify(job)); setJob(undefined); setNotice('正在目标社媒执行，请保持手机解锁。返回此页查看结果；需要处理时会保留消息。'); } catch (e) { setNotice(String(e)); } } }]);
-            })}</> : <><Text>{status?.running ? '正在执行，请保持解锁' : '暂无正在处理的任务'}</Text>{!status?.running && executionReady && button('领取已确认任务', 'claim', async () => { if (!ready) throw new Error('请先完成运行检查'); await heartbeat(true); const data = await call('/claim', {}); if (!data.job) { setNotice(data.blocked || '暂时没有已确认任务'); return; } Executor.stage(JSON.stringify(data.job)); setJob(data.job); })}</>}
-          {!job && !status?.running && <Text style={styles.small}>{pending ? `网页已确认 ${pending} 条任务，等待领取` : '网页确认任务后，在这里领取；领取和查看不会发送消息。'}</Text>}
+            })}</> : <><Text>{status?.running ? '正在执行，请保持解锁' : '暂无正在处理的任务'}</Text>{!status?.running && executionReady && !status?.autoEnabled && button('领取已确认任务', 'claim', async () => { if (!ready) throw new Error('请先完成运行检查'); await heartbeat(true); const data = await call('/claim', {}); if (!data.job) { setNotice(data.blocked || '暂时没有已确认任务'); return; } Executor.stage(JSON.stringify(data.job)); setJob(data.job); })}</>}
+          {!job && !status?.running && <Text style={styles.small}>{pending ? `网页已确认 ${pending} 条任务，等待领取` : '网页确认消息后，手机自动领取并执行，无需逐条操作。'}</Text>}
           {status?.journal && !JSON.parse(status.journal).reported && <>{button('恢复并回填中断记录', 'recover', () => { Executor.recover(); setNotice('正在恢复记录；不会重新执行发送动作。'); }, true)}</>}
 
         </View>
-        {executionReady && row('执行已就绪', '暂停执行', () => void action('pause', async () => { Executor.pause(); setReady(false); await heartbeat(false); }))}
+        {executionReady && row(status?.autoEnabled ? '自动执行已开启' : '执行已就绪', '暂停执行', () => void action('pause', async () => { Executor.pause(); setReady(false); await heartbeat(false); }))}
       </>}
       {tab === '设备' && !panel && <>
         <View style={styles.card}><View style={styles.sectionRow}><View style={{flex:1}}><Text style={styles.deviceName}>{savedLabel}</Text><Text style={styles.small}>{paired ? '已绑定 Beacon' : '尚未配对'}</Text></View><Pressable accessibilityRole="button" onPress={() => setPanel('connection')}><Text style={styles.link}>编辑</Text></Pressable></View>{row('平台连接', platformLabel, () => setPanel('connection'))}{row('执行状态', stateLabel, () => setPanel('permissions'))}{row('连接详情', connectedAt || '尚未通信', () => setPanel('connection'))}</View>
@@ -215,7 +216,7 @@ export default function App() {
         <Pressable onPress={() => { setManual(v => !v); setTicket(undefined); }}><Text style={{ color: RED }}>{manual ? '收起手动配对' : '无法扫码？手动配对'}</Text></Pressable>
         {manual && <>
           <Text style={styles.small}>本地优先使用同一 Wi-Fi 下电脑的 IP，例如 http://192.168.1.100:8000；云端填写 HTTPS 地址，无需 USB。</Text>
-          {field('服务器地址', server, setServer)}
+          <TextInput style={styles.input} placeholder="服务器地址" value={server} onChangeText={setServer} keyboardType="url" autoCapitalize="none" autoCorrect={false} />
           {button('USB 调试备用地址', 'usb-address', () => setServer('http://127.0.0.1:8000'), true)}
           <TextInput style={styles.input} placeholder="6 位数字配对码" value={code} onChangeText={setCode} keyboardType="number-pad" autoCapitalize="none" autoCorrect={false} />
           {button('配对', 'pair', () => pairDevice(server, code))}
@@ -252,7 +253,7 @@ export default function App() {
         {selectedChannel === 'whatsapp' ? <>{field('+国家区号与电话号码', account, v => { setReady(false); setAccount(v); })}{button('保存 WhatsApp 号码', 'save-accounts', () => { Executor.rememberAccount(account); setNotice('号码已保存，请回工作台连接检查。'); }, true)}</> : <>{field(CHANNELS.find(c => c.id === selectedChannel)?.hint || '账号名称或主页链接（可选）', accounts[selectedChannel] || '', v => { setReady(false); setAccounts(old => ({ ...old, [selectedChannel]: v })); })}{button('保存账号记录', 'save-accounts', () => { Executor.rememberAccounts(JSON.stringify(accounts)); setNotice('账号记录已保存。请在官方 App 核对当前登录身份，再连接检查。'); }, true)}<Text style={styles.small}>可识别资料页后确认保存，也可手动记录。留空仍使用当前 App 账号；切换账号后请重新识别。</Text></>}
         <Text style={styles.small}>设备凭据由 Android 安全存储加密保存。社媒账号在官方 App 登录。</Text>
         </View>}
-        {panel === 'permissions' && <View style={styles.card}><Text style={styles.heading}>运行检查</Text><Text style={styles.small}>{paired ? '✓ 已配对' : '○ 尚未配对'}</Text><Text style={styles.small}>{status?.accessibility ? '✓ 无障碍已连接' : '○ 无障碍服务未连接'}</Text><Text style={styles.small}>{status?.unlocked ? '✓ 手机已解锁' : '○ 请解锁手机'}</Text><Text style={styles.small}>已安装渠道：{status?.installed?.map(channelLabel).join('、') || '尚未检测到'}</Text>{button('打开无障碍设置', 'permissions', () => Executor.permissions(), true)}{paired && button('检查并准备执行', 'start', start)}<Text style={styles.caption}>完成检查不会领取或发送任务。</Text></View>}
+        {panel === 'permissions' && <View style={styles.card}><Text style={styles.heading}>运行检查</Text><Text style={styles.small}>{paired ? '✓ 已配对' : '○ 尚未配对'}</Text><Text style={styles.small}>{status?.accessibility ? '✓ 无障碍已连接' : '○ 无障碍服务未连接'}</Text><Text style={styles.small}>{status?.unlocked ? '✓ 手机已解锁' : '○ 请解锁手机'}</Text><Text style={styles.small}>已安装渠道：{status?.installed?.map(channelLabel).join('、') || '尚未检测到'}</Text>{button('打开无障碍设置', 'permissions', () => Executor.permissions(), true)}{paired && button('开启自动执行', 'start', start)}<Text style={styles.caption}>完成检查不会领取或发送任务。</Text></View>}
         {panel === 'notifications' && (paired ? <ReplyNotifications /> : <View style={styles.card}><Text style={styles.small}>请先绑定手机，再设置回复通知。</Text>{button('绑定手机', 'go-pair', () => setPanel('connection'), true)}</View>)}
         {panel === 'about' && <View style={styles.card}><Image source={require('./assets/brand/logo.png')} style={{width:80,height:52,alignSelf:'center'}} resizeMode="contain" accessibilityLabel="小当家" /><Text style={styles.heading}>Beacon 手机助手</Text><Text style={styles.small}>版本 1.0.0 · 社媒执行终端</Text><Text style={styles.small}>消息在网页准备并确认，手机按任务核对目标后执行。执行记录与客户回复回到 Beacon。</Text><Text style={styles.small}>账号名称由资料页识别后确认，或手动记录，不代表持续监控登录身份。平台安装与真实收发能力分别验收。</Text><Text style={styles.copyright}>© {new Date().getFullYear()} 南京小当家文化咨询有限公司</Text></View>}
       </>}

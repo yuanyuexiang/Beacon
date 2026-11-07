@@ -1,5 +1,12 @@
 package com.beacon.executor
 
+import android.graphics.Bitmap
+import android.graphics.Path
+import android.accessibilityservice.GestureDescription
+import android.util.Base64
+import android.view.WindowManager
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.CompletableFuture
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
 import android.content.Intent
@@ -21,11 +28,68 @@ class PhoneService : AccessibilityService() {
   @Volatile private var platform = "whatsapp"
   @Volatile var running = false
   @Volatile var stopRequested = false
+  @Volatile var autoEnabled = false
+  @Volatile var autoError = ""
+  @Volatile var autoLastContact = 0L
+  private var autoGeneration = 0L
   private val main = Handler(Looper.getMainLooper())
   override fun onServiceConnected() { instance = this }
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-  override fun onInterrupt() { stopRequested = true }
-  override fun onDestroy() { stopRequested = true; instance = null; super.onDestroy() }
+  override fun onInterrupt() { pauseAutomatic() }
+  override fun onDestroy() { pauseAutomatic(); instance = null; super.onDestroy() }
+
+  @Synchronized fun pauseAutomatic() {
+    autoEnabled = false; autoGeneration++; stopRequested = true
+  }
+  @Synchronized fun startAutomatic() {
+    check(!autoEnabled) { "自动执行已开启" }
+    check(!running && Journal(this).unfinished().isEmpty()) { "请先核对未完成记录，再开启自动执行" }
+    check(!Vault(this).disconnected()) { "请先连接平台" }
+    check(!getSystemService(KeyguardManager::class.java).isKeyguardLocked) { "请先解锁手机" }
+    autoEnabled = true; autoError = ""; stopRequested = false
+    val generation = ++autoGeneration
+    thread(name = "beacon-auto-queue") {
+      var autoJob: String? = null
+      try {
+        while (autoEnabled && generation == autoGeneration) {
+          val unlocked = !getSystemService(KeyguardManager::class.java).isKeyguardLocked
+          check(unlocked) { "手机已锁屏，请解锁后重新开启自动执行" }
+          check(!Vault(this).disconnected()) { "平台连接已断开" }
+          if (!running) {
+            if (autoJob != null) {
+              val result = Journal(this).latest()?.let { JSONObject(it) }
+              check(result != null && result.optString("id") == autoJob && AutomaticPolicy.canContinue(result.optString("outcome"), result.optBoolean("reported"))) {
+                "执行未完成或结果待核对，请回 Beacon 查看记录"
+              }
+              autoJob = null
+            }
+            val vault = Vault(this)
+            val installed = PlatformAdapters.packages.filterValues { pkgs -> pkgs.any { try { packageManager.getPackageInfo(it, 0); true } catch (_: Exception) { false } } }.keys
+            request("/heartbeat", JSONObject().put("account", vault.account()).put("accounts", JSONObject(vault.accounts()))
+              .put("installed", org.json.JSONArray(installed.toList())).put("ready", true).put("accessibility", true).put("protocol", 2).put("app_version", "0.3.0"))
+            autoLastContact = System.currentTimeMillis()
+            if (AutomaticPolicy.canClaim(autoEnabled && generation == autoGeneration, unlocked, running, Journal(this).unfinished().isNotEmpty())) {
+              val response = request("/claim", JSONObject())
+              check(response.optString("blocked").isBlank()) { response.optString("blocked") }
+              val next = response.optJSONObject("job")
+              if (next != null) {
+                // Persist a claimed job even if pause arrived during the HTTP request. Never replay it automatically.
+                next.put("phase", "claimed"); Journal(this).save(next)
+                if (!autoEnabled || generation != autoGeneration) break
+                autoJob = next.getString("id")
+                execute(next.toString())
+              }
+            }
+          }
+          Thread.sleep(5000)
+        }
+      } catch (e: Exception) {
+        if (generation == autoGeneration) { autoError = e.message ?: "自动执行暂停"; pauseAutomatic() }
+      } finally {
+        if (!autoEnabled) try { request("/heartbeat", JSONObject().put("account", Vault(this).account()).put("accounts", JSONObject(Vault(this).accounts())).put("ready", false).put("accessibility", true).put("protocol", 2).put("app_version", "0.3.0")) } catch (_: Exception) { }
+      }
+    }
+  }
 
   private fun <T> ui(fn: () -> T): T {
     if (Looper.myLooper() == Looper.getMainLooper()) return fn()
@@ -179,37 +243,137 @@ class PhoneService : AccessibilityService() {
       } catch (e: Exception) {
         // If result upload failed, preserve the already observed outcome.
         if (!j.has("outcome")) {
-          try { settle(j, if (clickAttempted || j.optString("phase") == "click_attempted") "unknown" else if (e is NeedsPhoneAction) "needs_action" else "failed", e.message?.take(500) ?: "执行中断") } catch (_: Exception) { }
+          try { settle(j, if (clickAttempted || j.optString("phase") == "click_attempted") "unknown" else if (e is ContactUnavailable) "unavailable" else if (e is NeedsPhoneAction) "needs_action" else "failed", e.message?.take(500) ?: "执行中断") } catch (_: Exception) { }
         }
       } finally { running = false }
     }
   }
+  private fun progress(j: JSONObject, stage: String) {
+    check(!stopRequested) { "执行已暂停" }
+    j.put("progress", stage); Journal(this).save(j)
+    request("/jobs/${j.getString("id")}/progress", attempt(j).put("stage", stage))
+  }
+  private fun observation(): JSONObject = ui {
+    val bounds = getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds
+    PageObservation.json(root(), bounds.width(), bounds.height())
+  }
+  private fun screenshot(): String? {
+    val future = CompletableFuture<String?>()
+    try { takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+      override fun onFailure(code: Int) { future.complete(null) }
+      override fun onSuccess(result: ScreenshotResult) {
+        val buffer = result.hardwareBuffer
+        try {
+          val bitmap = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+          if (bitmap == null) { future.complete(null); return }
+          val scale = minOf(1.0, 720.0 / bitmap.width, 1600.0 / bitmap.height)
+          val resized = Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+          val bytes = ByteArrayOutputStream().also { resized.compress(Bitmap.CompressFormat.JPEG, 65, it) }.toByteArray()
+          future.complete(Base64.encodeToString(bytes, Base64.NO_WRAP))
+          if (resized !== bitmap) resized.recycle()
+          bitmap.recycle()
+        } catch (_: Exception) { future.complete(null) } finally { buffer.close() }
+      }
+    })
+    } catch (_: Exception) { return null }
+    return try { future.get(5, TimeUnit.SECONDS) } catch (_: Exception) { null }
+  }
+  private fun navigateStep(advice: JSONObject, page: JSONObject): Boolean = ui {
+    check(!stopRequested) { "执行已暂停" }
+    if (observation().getString("screen_id") != page.getString("screen_id")) return@ui false
+    val action = advice.optString("action")
+    check(NavigationPolicy.mayContinue(action)) { "不支持的导航动作" }
+    val r = root()
+    if (action in setOf("open_messages", "open_more", "close_popup")) {
+      // Model positions never reach the send boundary, editable fields or a known destructive control.
+      if (PlatformAdapters.input(r) != null) return@ui false
+      val flat = PlatformAdapters.flatten(r)
+      val nodeId = if (advice.isNull("node_id")) -1 else advice.optInt("node_id", -1)
+      if (nodeId >= 0) {
+        val node = flat.getOrNull(nodeId) ?: return@ui false
+        check(!node.isEditable && !NavigationPolicy.forbidden(PageObservation.label(node))) { "该控件不是导航入口" }
+        return@ui PlatformAdapters.click(node)
+      }
+      val x = advice.getInt("x") * page.getInt("width") / 1000f
+      val y = advice.getInt("y") * page.getInt("height") / 1000f
+      val hit = flat.filter { n -> android.graphics.Rect().also { n.getBoundsInScreen(it) }.contains(x.toInt(), y.toInt()) }
+      check(hit.none { it.isEditable || NavigationPolicy.forbidden(PageObservation.label(it)) }) { "该位置不是导航入口" }
+      val path = Path().apply { moveTo(x, y) }
+      return@ui dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 80)).build(), null, null)
+    }
+    if (action == "back") return@ui performGlobalAction(GLOBAL_ACTION_BACK)
+    if (action == "scroll") {
+      val forward = advice.optString("direction", "down") != "up"
+      return@ui PlatformAdapters.flatten(r).firstOrNull { it.isScrollable }?.performAction(if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) ?: false
+    }
+    true
+  }
+  private fun reachComposer(j: JSONObject, snapshot: JSONObject) {
+    val visited = mutableSetOf<String>()
+    val history = org.json.JSONArray()
+    var aiCalls = 0
+    repeat(14) {
+      check(!stopRequested) { "执行已暂停" }
+      Thread.sleep(650)
+      while (history.length() >= 12) history.remove(0)
+      val page = try { observation() } catch (_: Exception) { return@repeat }
+      val id = page.getString("screen_id")
+      val composer = ui { PlatformAdapters.input(root()) != null }
+      if (composer && ui { PlatformAdapters.header(root(), snapshot) != null }) return
+      val rows = page.getJSONArray("nodes")
+      // A page is tried only once per control; the same menu cannot oscillate forever.
+      var rule: JSONObject? = null
+      if (!composer) for (index in 0 until rows.length()) {
+        val node = rows.getJSONObject(index)
+        val action = NavigationPolicy.navigationLabel(node.getString("text")) ?: continue
+        val key = "$id:$action:${node.getInt("id")}"
+        if (!visited.contains(key)) { visited.add(key); rule = JSONObject().put("action", action).put("node_id", node.getInt("id")); break }
+      }
+      if (rule != null && navigateStep(rule!!, page)) {
+        history.put(rule!!.optString("action")); return@repeat
+      }
+      if (aiCalls >= 4) throw NeedsPhoneAction("多次观察后仍未找到可用私信入口，消息已保留，可改用其他联系方式")
+      progress(j, "reading_page")
+      val picture = screenshot()
+      if (observation().getString("screen_id") != id) return@repeat
+      if (picture != null) page.put("image", picture)
+      page.put("history", history)
+      val advice = request("/jobs/${j.getString("id")}/navigation", attempt(j).put("screen", page), 65000)
+      aiCalls++
+      check(!stopRequested) { "执行已暂停" }
+      if (advice.optString("screen_id") != id || observation().getString("screen_id") != id) return@repeat
+      val action = advice.optString("action")
+      if (action == "ready" && composer && advice.optBoolean("target_match")) {
+        val titleId = advice.optInt("title_node_id", -1)
+        val title = (0 until rows.length()).map { rows.getJSONObject(it) }.firstOrNull { it.getInt("id") == titleId }
+        if (title != null && !title.optBoolean("editable")) {
+          snapshot.put("_resolved_title", title.getString("text"))
+          if (ui { PlatformAdapters.header(root(), snapshot) != null }) return
+        }
+      }
+      if (action == "unavailable") throw ContactUnavailable(advice.optString("detail", "目标暂无私信入口"))
+      if (action == "needs_action") throw NeedsPhoneAction(advice.optString("detail", "当前暂未找到私信入口，消息已保留"))
+      if (NavigationPolicy.mayContinue(action)) navigateStep(advice, page)
+      history.put("$action: ${advice.optString("detail")}".take(240))
+    }
+    throw NeedsPhoneAction("当前页面未能进入私信，消息已保留，可继续人工联系或选择其他渠道")
+  }
   private fun executeSocial(j: JSONObject, snapshot: JSONObject) {
     val body = snapshot.getString("body")
     val action = snapshot.optString("action", "direct_message")
+    progress(j, "opening")
     ui { PlatformAdapters.open(this, snapshot) }
     Thread.sleep(1500)
     if (ChannelPolicy.manualAction(action)) {
       throw NeedsPhoneAction(if (action == "contact_discovery") "已打开频道。请检查消息邀请、商务邮箱或外链；不会自动评论" else "已打开目标主页。请人工确认连接邀请或 InMail 入口及费用；不会自动申请或付费")
     }
-    var verified = false
-    repeat(40) {
-      if (!verified) { Thread.sleep(500); verified = ui { try { PlatformAdapters.header(root(), snapshot) != null } catch (_: Exception) { false } } }
-    }
-    if (!verified) throw NeedsPhoneAction("已打开主页，但无法从页面核对目标用户名。请人工核对目标并进入私信；本次未发送")
-    ui {
-      val r = root()
-      if (PlatformAdapters.input(r) == null) PlatformAdapters.messageButton(r)?.let { PlatformAdapters.click(it) }
-    }
-    var composerReady = false
-    repeat(40) {
-      if (!composerReady) { Thread.sleep(500); composerReady = ui { try { PlatformAdapters.input(root()) != null } catch (_: Exception) { false } } }
-    }
-    if (!composerReady) throw NeedsPhoneAction("聊天尚未出现私信输入框；首次聊天的开始按钮可能向对方发送事件，请在手机确认后再继续")
+    progress(j, "finding_entry")
+    reachComposer(j, snapshot)
+    progress(j, "composing")
     val before = ui {
       val r = root()
       if (PlatformAdapters.header(r, snapshot) == null) throw NeedsPhoneAction("进入聊天后无法再次核对目标用户名，请人工处理")
-      if (PlatformAdapters.requestScreen(r) && action != "message_request") throw NeedsPhoneAction("平台当前是消息请求入口，请在网页选择消息请求后重新准备，不能记为普通私信")
+      if (PlatformAdapters.requestScreen(r)) j.put("observed_action", "message_request")
       val count = PlatformAdapters.count(r, body)
       PlatformAdapters.fill(r, body)
       count
@@ -240,12 +404,14 @@ class PhoneService : AccessibilityService() {
       j.put("phase", "click_attempted"); Journal(this).save(j)
       check(PlatformAdapters.click(send)) { "发送点击未完成" }
     }
+    progress(j, "verifying_send")
     var observed = false
     repeat(20) {
       if (!observed) { Thread.sleep(500); observed = ui { try { val r = root(); PlatformAdapters.header(r, snapshot) != null && PlatformAdapters.count(r, body) > before && PlatformAdapters.sent(r, body) } catch (_: Exception) { false } } }
     }
     check(observed) { "无法确认平台发送结果，请核对聊天；不会自动重发" }
-    settle(j, ChannelPolicy.sentOutcome(action), if (action == "message_request") "已观察到消息请求提交，请等待对方接受" else "已在目标私信观察到新增消息和发送状态")
+    val outcomeAction = j.optString("observed_action", action)
+    settle(j, ChannelPolicy.sentOutcome(outcomeAction), if (outcomeAction == "message_request") "已观察到消息请求提交，请等待对方接受" else "已在目标私信观察到新增消息和发送状态")
   }
   fun captureReplies(raw: String): String {
     check(!running) { "正在执行，请稍后读取回复" }

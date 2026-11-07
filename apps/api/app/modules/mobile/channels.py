@@ -44,7 +44,9 @@ def destination(channel: str, value: str | None) -> tuple[str, str]:
             and path.lower() not in {"/direct", "/p", "/reels", "/accounts", "/explore"},
             "linkedin": bool(re.fullmatch(r"/(in|company)/[A-Za-z0-9._%-]+", path)),
             "tiktok": bool(re.fullmatch(r"/@[A-Za-z0-9._]+", path)),
-            "youtube": bool(re.fullmatch(r"/(@[A-Za-z0-9._%-]+|channel/[A-Za-z0-9_-]+|c/[A-Za-z0-9._%-]+)", path)),
+            "youtube": bool(
+                re.fullmatch(r"/(@[A-Za-z0-9._%-]+|channel/[A-Za-z0-9_-]+|(?:c|user)/[A-Za-z0-9._%-]+)", path)
+            ),
             "x": bool(re.fullmatch(r"/[A-Za-z0-9_]+", path))
             and path.lower() not in {"/home", "/messages", "/i", "/search", "/settings", "/intent"},
         }[platform]
