@@ -3,6 +3,7 @@ package com.beacon.executor
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.provider.Settings
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -14,12 +15,18 @@ class BeaconExecutorModule : Module() {
     Function("status") {
       val c = context()
       val installed = try { c.packageManager.getPackageInfo("com.whatsapp", 0); true } catch (_: Exception) { false }
-      mapOf("accessibility" to (PhoneService.instance != null), "whatsapp" to installed,
+      val model = Build.MODEL.orEmpty().trim()
+      val brand = Build.MANUFACTURER.orEmpty().trim()
+      val deviceName = try { Settings.Global.getString(c.contentResolver, "device_name")?.trim() } catch (_: Exception) { null }
+      val defaultName = deviceName?.takeIf { it.isNotBlank() && !it.equals("Android", true) }
+        ?: (if (model.startsWith(brand, true)) model else "$brand $model").trim().ifBlank { "Android 手机" }
+      mapOf("deviceName" to defaultName, "accessibility" to (PhoneService.instance != null), "whatsapp" to installed,
         "unlocked" to !c.getSystemService(KeyguardManager::class.java).isKeyguardLocked,
         "running" to (PhoneService.instance?.running ?: false), "journal" to Journal(c).latest(),
         "history" to Journal(c).recent(), "savedAccount" to Vault(c).account(), "savedAccounts" to Vault(c).accounts(),
         "installed" to PlatformAdapters.packages.filterValues { pkgs -> pkgs.any { try { c.packageManager.getPackageInfo(it, 0); true } catch (_: Exception) { false } } }.keys.toList())
     }
+    AsyncFunction("inspectAccount") { channel: String -> (PhoneService.instance ?: error("请先在设备页开启 Beacon 无障碍服务")).inspectAccount(channel) }
     Function("notificationStatus") { NotificationMonitor.status(context()) }
     Function("notificationSettings") { context().startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     Function("notificationChannels") { raw: String -> NotificationMonitor.configure(context(), raw) }

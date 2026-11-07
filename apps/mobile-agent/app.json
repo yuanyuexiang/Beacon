@@ -54,7 +54,9 @@
             "image": "./assets/brand/logo.png"
           }
         }
-      ]
+      ],
+      "expo-router",
+      "expo-font"
     ]
   }
 }

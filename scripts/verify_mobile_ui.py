@@ -1,6 +1,7 @@
 """Phone settings regression with mocked APIs; never pairs a real device or sends."""
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -15,7 +16,10 @@ async def main():
         calls.append(path)
         if path == "/api/auth/me":
             data = dict(id="tester", username="tester", role="admin", must_change_password=False)
-        elif path == "/api/mobile/devices": data = [device]
+        elif path == "/api/mobile/devices": data = [] if device.get("removed") else [device]
+        elif path == "/api/mobile/devices/mock-device" and route.request.method == "DELETE":
+            device["removed"] = True
+            data = {"removed": True}
         elif path == "/api/mobile/pairing": data = dict(code="123456", expires_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(), owner="tester")
         elif path.endswith("/revoke"):
             device["status"] = "revoked"
@@ -27,7 +31,7 @@ async def main():
         page = await browser.new_page(viewport=dict(width=1600, height=1050))
         page.on("pageerror", lambda e: errors.append(str(e)))
         await page.route("**/api/**", handle)
-        await page.goto("http://localhost:3001/settings?section=mobile")
+        await page.goto("http://localhost:3000/settings?section=mobile")
         await expect(page.get_by_text("验证手机", exact=True)).to_be_visible()
         await page.get_by_role("button", name="绑定新手机", exact=True).click()
         await expect(page.get_by_text("123456", exact=True)).to_be_visible()
@@ -41,6 +45,9 @@ async def main():
         await expect(page.get_by_text("已解除", exact=True)).to_be_visible()
         await page.set_viewport_size(dict(width=900, height=1000))
         await page.screenshot(path=str(out / "settings-narrow.png"), full_page=True)
+        await page.get_by_role("button", name=re.compile(r"^删\s*除$"), exact=True).click()
+        await page.get_by_role("button", name="删除设备", exact=True).click()
+        await expect(page.get_by_text("验证手机", exact=True)).to_have_count(0)
         assert not errors, errors
         assert not any(path.endswith("/send") for path in calls)
         await browser.close()

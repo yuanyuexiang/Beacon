@@ -46,6 +46,7 @@ class PairIn(Input):
 
 
 class Heartbeat(Input):
+    label: str | None = Field(default=None, min_length=1, max_length=128)
     account: str = Field(default="", max_length=64)
     accounts: dict[str, str] = Field(default_factory=dict)
     installed: list[str] = Field(default_factory=list, max_length=10)
@@ -104,7 +105,9 @@ def public_device(d: Device) -> dict:
         "status": d.status,
         "account": d.account,
         "last_seen_at": d.last_seen_at,
-        "online": bool(d.last_seen_at and d.last_seen_at > service.now() - timedelta(seconds=90)),
+        "online": bool(
+            d.status != "revoked" and d.last_seen_at and d.last_seen_at > service.now() - timedelta(seconds=90)
+        ),
         "capabilities": d.capabilities,
     }
 
@@ -163,6 +166,7 @@ def devices(db: Session = Depends(get_db), op: Operator = Depends(current_operat
     return [
         public_device(d)
         for d in db.scalars(select(Device).where(Device.owner == op.username).order_by(Device.created_at.desc()))
+        if not (d.capabilities or {}).get("list_hidden")
     ]
 
 
@@ -170,14 +174,28 @@ def devices(db: Session = Depends(get_db), op: Operator = Depends(current_operat
 def revoke(identity: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
     lock(db)
     d = operator_device(db, identity, op)
+    revoke_device(db, d)
+    db.commit()
+    return public_device(d)
+
+
+def revoke_device(db: Session, d: Device) -> None:
     d.status = "revoked"
     for j in db.scalars(
         select(Execution).where(Execution.device_id == d.id, Execution.status.in_(["queued", "claimed", "sending"]))
     ):
         j.status = "unknown" if j.started_at else "cancelled"
         j.error = "设备已解除绑定" if not j.started_at else "发送时设备解除绑定，请核对实际结果"
+
+
+@router.delete("/devices/{identity}")
+def remove_device(identity: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
+    lock(db)
+    d = operator_device(db, identity, op)
+    revoke_device(db, d)
+    d.capabilities = {**(d.capabilities or {}), "list_hidden": True}
     db.commit()
-    return public_device(d)
+    return {"removed": True}
 
 
 @worker_router.post("/heartbeat")
@@ -199,8 +217,10 @@ def heartbeat(body: Heartbeat, d: Device = Depends(device_auth), db: Session = D
             select(Execution).where(Execution.device_id == d.id, Execution.status.in_(["queued", "claimed"]))
         ):
             j.status, j.error = "cancelled", "本方账号改变，请重新确认"
+    if body.label and body.label.strip():
+        d.label = body.label.strip()
     d.account, d.last_seen_at = body.account, service.now()
-    d.capabilities = {**body.model_dump(exclude={"account"}), "accounts": accounts}
+    d.capabilities = {**body.model_dump(exclude={"account", "label"}), "accounts": accounts}
     d.status = "ready" if body.ready and body.accessibility else "paired"
     db.commit()
     return device_state(d, db)

@@ -1,5 +1,5 @@
 "use client";
-import { Alert, Button, Card, Drawer, Empty, Input, QRCode, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Drawer, Empty, Input, Popconfirm, QRCode, Select, Space, Table, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { MOBILE_ACTIONS, MOBILE_LABELS } from "@/lib/mobile-channels";
@@ -18,13 +18,14 @@ export default function MobileSettings() {
   const [error, setError] = useState<string>();
   const [now, setNow] = useState(Date.now());
   const refresh = useCallback(async () => { try { setDevices(await api<Device[]>("/api/mobile/devices")); setError(undefined); } catch (e) { setError(String(e)); } }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(), 15000); const onFocus = () => void refresh(); window.addEventListener("focus", onFocus); return () => {clearInterval(timer); window.removeEventListener("focus", onFocus);}; }, [refresh]);
   useEffect(() => { if (!pairing) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [pairing]);
   async function action(key: string, fn: () => Promise<void>) { setBusy(old => ({ ...old, [key]: true })); try { await fn(); setError(undefined); } catch (e) { setError(String(e)); } finally { setBusy(old => ({ ...old, [key]: false })); } }
   return <Card title="手机设备与执行" extra={<Button loading={busy.refresh} onClick={() => action("refresh", refresh)}>刷新手机</Button>}>
     <Typography.Paragraph>将 Android 手机绑定到自己的账号。确认消息后，手机领取任务并核对目标执行，结果回到沟通工作台。</Typography.Paragraph>
     <Alert type="info" showIcon message="WhatsApp、Facebook、Instagram、LinkedIn、TikTok、YouTube、X 共用手机设备，各渠道任务独立。WhatsApp 和 Facebook 已有实机测试，其他平台仍待验收；手机需保持解锁并主动连接。" style={{ marginBottom: 16 }} />
     {error && <Alert type="error" message={error} />}
+    <Typography.Paragraph type="secondary">在线表示 App 最近与服务通信；执行就绪还需要手机完成运行检查。本地 USB 连接需要端口转发，插上线不等于服务已连通。页面每 15 秒自动刷新。</Typography.Paragraph>
     {writable && <Button type="primary" loading={busy.pair} onClick={() => action("pair", async () => setPairing(await api("/api/mobile/pairing", json({}))))}>绑定新手机</Button>}
     {pairing && <Card size="small" style={{ marginTop: 12 }} title="用 Beacon 手机助手扫码配对">
       <Space align="start" wrap size="large">
@@ -42,8 +43,8 @@ export default function MobileSettings() {
     </Card>}
     <Table rowKey="id" dataSource={devices} pagination={false} style={{ marginTop: 16 }} locale={{ emptyText: <Empty description="尚未绑定手机" /> }} columns={[
       { title: "手机", dataIndex: "label" }, { title: "本方渠道账号", render: (_, d) => <Space direction="vertical">{Object.entries(d.capabilities?.accounts || (d.account ? { whatsapp: d.account } : {})).map(([p, v]) => <span key={p} style={{ overflowWrap: "anywhere" }}>{MOBILE_LABELS[p] || p} · {v}</span>)}</Space> },
-      { title: "状态", render: (_, d) => <Space direction="vertical"><Tag>{d.status === "ready" && !d.online ? "离线" : labels[d.status] || d.status}</Tag><small>{d.last_seen_at ? `最近连接 ${new Date(d.last_seen_at).toLocaleString("zh-CN")}` : "尚未连接"}</small></Space> },
-      { title: "操作", render: (_, d) => writable && d.status !== "revoked" && <Button danger loading={busy[d.id]} onClick={() => action(d.id, async () => { await api(`/api/mobile/devices/${d.id}/revoke`, json({})); await refresh(); })}>解除绑定</Button> },
+      { title: "状态", render: (_, d) => <Space direction="vertical"><Tag>{d.status === "revoked" ? "已解除" : !d.online ? "离线" : d.status === "ready" ? "在线 · 执行就绪" : "在线 · 待运行检查"}</Tag><small>{d.last_seen_at ? `最近连接 ${new Date(d.last_seen_at).toLocaleString("zh-CN")}` : "尚未连接"}</small></Space> },
+      { title: "操作", render: (_, d) => writable && <Space wrap>{d.status !== "revoked" && <Button danger loading={busy[d.id]} onClick={() => action(d.id, async () => { await api(`/api/mobile/devices/${d.id}/revoke`, json({})); await refresh(); })}>解除绑定</Button>}<Popconfirm title="从列表删除这台手机？" description="同时解除绑定，历史任务和发送记录会保留。未开始的任务取消，已开始的需核对结果。" okText="删除设备" cancelText="取消" onConfirm={() => action(`delete:${d.id}`, async () => { await api(`/api/mobile/devices/${d.id}`, {method:"DELETE"}); await refresh(); })}><Button danger loading={busy[`delete:${d.id}`]}>删除</Button></Popconfirm></Space> },
     ]} />
   </Card>;
 }

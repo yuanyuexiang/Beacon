@@ -1,5 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, AppState, Keyboard, Image, ImageBackground, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, AppState, BackHandler, Keyboard, Image, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { router, useLocalSearchParams } from 'expo-router';
 import { ACTIONS, CHANNELS, channelLabel } from './lib/channels';
 import ReplyNotifications from './ReplyNotifications';
 import PairingScanner from './PairingScanner';
@@ -25,66 +28,99 @@ async function request(url: string, options: RequestInit) {
 }
 const outcomeLabels: Record<string, string> = { sent: '已发送', failed: '未发送', unknown: '结果待核对', claimed: '待确认执行', preparing: '正在核对聊天', preflight: '正在检查发送条件', click_attempted: '正在核对发送结果', needs_action: '需要手机处理', request_submitted: '请求已提交', unavailable: '暂不可联系' };
 export default function App() {
-  const [tab, setTab] = useState('工作台');
+  const params = useLocalSearchParams<{ tab?: string; panel?: string }>();
+  const tab = ['任务', '记录', '设备'].includes(params.tab || '') ? params.tab! : '任务';
+  const panel = params.panel || '';
+  const setTab = (value: string) => { Keyboard.dismiss(); router.setParams({ tab: value, panel: '' }); setNotice(''); };
+  const setPanel = (value: string) => { Keyboard.dismiss(); router.setParams({ panel: value }); setNotice(''); };
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (panel) { router.setParams({ panel: '' }); return true; }
+      if (tab !== '任务') { router.setParams({ tab: '任务', panel: '' }); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [panel, tab]);
+  const [recordFilter, setRecordFilter] = useState('全部');
+  const [expandedRecord, setExpandedRecord] = useState<string>();
   const [ticket, setTicket] = useState<PairingTicket>();
   const [manual, setManual] = useState(false);
   const [server, setServer] = useState('https://beacon.ai-onestep.com');
   const [code, setCode] = useState('');
-  const [label, setLabel] = useState('我的手机');
+  const [label, setLabel] = useState(() => Executor.status().deviceName || 'Android 手机');
+  const [savedLabel, setSavedLabel] = useState(() => Executor.status().deviceName || 'Android 手机');
   const [account, setAccount] = useState('');
   const [accounts, setAccounts] = useState<Record<string, string>>({});
   const [replyJob, setReplyJob] = useState<string>();
   const [reply, setReply] = useState('');
+  const [accountCandidate, setAccountCandidate] = useState<{channel: string; identity: string; observed_at: number}>();
   const [selectedChannel, setSelectedChannel] = useState('whatsapp');
   const [paired, setPaired] = useState(false);
   const [ready, setReady] = useState(false);
+  const [initialized, setInitialized] = useState(false), [connected, setConnected] = useState(false);
   const [status, setStatus] = useState<PhoneStatus>();
   const [job, setJob] = useState<Job>();
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
-  const [showChecks, setShowChecks] = useState(true);
+  const [connectionError, setConnectionError] = useState('');
   const [connectedAt, setConnectedAt] = useState<string>();
   const [pending, setPending] = useState(0);
   function inspect() {
     try { const s = Executor.status(); setStatus(s); if (s.journal) { const j = JSON.parse(s.journal); if (j.phase === 'claimed' && !j.reported) setJob(j); else if (j.reported) setJob(undefined); } } catch (e) { setNotice(String(e)); }
   }
   useEffect(() => {
+    let disposed = false;
+    void Promise.resolve().then(() => {
+    if (disposed) return;
     try { const c = Executor.credentials(); if (c.token) {
       setPaired(true); setServer(c.server);
       void request(c.server + '/api/mobile/device/state', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.token }, body: '{}' }).then(profile => {
+        if (profile.label && profile.label !== '我的手机') { setLabel(profile.label); setSavedLabel(profile.label); }
         if (profile.accounts) setAccounts(profile.accounts);
-        if (profile.account) { setAccount(current => current || profile.account); setShowChecks(false); }
+        if (profile.account) { setAccount(current => current || profile.account); }
         setPending(profile.pending_count || 0);
-      }).catch(e => setNotice(e instanceof Error ? e.message : String(e)));
-    } } catch (e) { setNotice('设备凭据读取失败，请重新配对：' + String(e)); }
-    try { const s = Executor.status(); if (s.savedAccounts && Object.keys(JSON.parse(s.savedAccounts)).length) setAccounts(JSON.parse(s.savedAccounts)); if (s.savedAccount) { setAccount(s.savedAccount); setShowChecks(false); } } catch { /* Runtime checks show the native error separately. */ }
-    inspect(); const timer = setInterval(inspect, 2000); const sub = AppState.addEventListener('change', s => { if (s === 'active') inspect(); });
-    return () => { clearInterval(timer); sub.remove(); };
+      }).catch(e => setConnectionError(e instanceof Error ? e.message : String(e))).finally(() => setInitialized(true));
+    } else setInitialized(true); } catch (e) { setInitialized(true); setNotice('设备凭据读取失败，请重新配对：' + String(e)); }
+    try { const s = Executor.status(); if (s.savedAccounts && Object.keys(JSON.parse(s.savedAccounts)).length) setAccounts(JSON.parse(s.savedAccounts)); if (s.savedAccount) { setAccount(s.savedAccount); } } catch { /* Runtime checks show the native error separately. */ }
+    inspect();
+    });
+    const timer = setInterval(inspect, 2000); const sub = AppState.addEventListener('change', s => { if (s === 'active') inspect(); });
+    return () => { disposed = true; clearInterval(timer); sub.remove(); };
   }, []);
-  async function call(path: string, body: object) {
+  const call = useCallback(async (path: string, body: object) => {
     const c = Executor.credentials();
     return request(c.server + '/api/mobile/device' + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.token }, body: JSON.stringify(body) });
-  }
-  async function action(key: string, fn: () => Promise<void>) { if (busy) return; Keyboard.dismiss(); setBusy(key); setNotice(''); try { await fn(); inspect(); } catch (e) { const message = e instanceof Error ? e.message : String(e); setNotice(message); if (key === 'pair') Alert.alert('未能配对', message); } finally { setBusy(''); } }
-  async function heartbeat(active: boolean) {
-    const response = await call('/heartbeat', { account, accounts: { ...accounts, ...(account ? { whatsapp: account } : {}) }, installed: Executor.status().installed, ready: active, accessibility: Executor.status().accessibility, app_version: '0.3.0', protocol: 2 });
-    setConnectedAt(new Date().toLocaleTimeString());
+  }, []);
+  async function action(key: string, fn: () => Promise<void>) { if (busy) return; Keyboard.dismiss(); setBusy(key); setNotice(''); try { await fn(); inspect(); } catch (e) { const message = e instanceof Error ? e.message : String(e); setNotice(message.replace(/^[\s\S]*Caused by:\s*(?:java\.lang\.[A-Za-z]+Exception:\s*)?/, '')); if (key === 'pair') Alert.alert('未能配对', message); } finally { setBusy(''); } }
+  const heartbeat = useCallback(async (active: boolean, phoneLabel = savedLabel) => {
+    const response = await call('/heartbeat', { label: phoneLabel.trim() || Executor.status().deviceName, account, accounts: Object.fromEntries(Object.entries({ ...accounts, ...(account ? { whatsapp: account } : {}) }).filter(([, value]) => value.trim())), installed: Executor.status().installed, ready: active, accessibility: Executor.status().accessibility, app_version: '0.3.0', protocol: 2 });
+    setConnected(true); setConnectionError(''); setConnectedAt(new Date().toLocaleTimeString());
     setPending(response.pending_count || 0);
-    if (active && response.status !== 'ready') throw new Error('Beacon 已连接，但无障碍服务尚未连接。请检查服务是否开启，退出其他手机调试工具后再试。');
+    if (active && response.status !== 'ready') setReady(false);
     return response;
-  }
+  }, [savedLabel, account, accounts, call]);
   useEffect(() => {
-    if (!ready) return;
-    const timer = setInterval(() => { if (AppState.currentState === 'active') void heartbeat(true).catch(e => { setReady(false); setNotice(String(e)); }); }, 30000);
-    return () => clearInterval(timer);
-  }, [ready, account, accounts]);
+    if (!paired || !initialized) return;
+    let active = true, inFlight = false;
+    const ping = async () => {
+      if (inFlight || AppState.currentState !== 'active') return;
+      inFlight = true;
+      try { await heartbeat(ready); }
+      catch (e) { if (active) { setConnected(false); setConnectionError(String(e)); } }
+      finally { inFlight = false; }
+    };
+    void ping();
+    const timer = setInterval(() => void ping(), 30000);
+    const subscription = AppState.addEventListener('change', state => { if(state === 'active') void ping(); });
+    return () => { active = false; clearInterval(timer); subscription.remove(); };
+  }, [paired, initialized, ready, heartbeat]);
   async function pairDevice(address: string, pairingCode: string) {
     if (Executor.status().running || job || (status?.journal && !JSON.parse(status.journal).reported)) throw new Error('请先处理当前任务或回填记录，再更换设备配对');
     const base = pairingServer(address);
     if (!/^\d{6}$/.test(pairingCode.trim())) throw new Error('请输入 6 位数字配对码');
     if (!label.trim()) throw new Error('请填写手机名称');
     const data = await request(base + '/api/mobile/device/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: pairingCode.trim(), label: label.trim() }) });
-    Executor.configure(base, data.token); setServer(base); setCode(''); setPaired(true); setReady(false); setPending(0); setConnectedAt(undefined); setTab('工作台'); setNotice(`已绑定到 ${data.owner || '当前网页账号'}，请核对本方账号并连接检查。`);
+    Executor.configure(base, data.token); setSavedLabel(label.trim()); setServer(base); setCode(''); setPaired(true); setInitialized(true); setConnected(false); setReady(false); setPending(0); setConnectedAt(undefined); setTab('任务'); setNotice(`已绑定到 ${data.owner || '当前网页账号'}，请核对本方账号并连接检查。`);
   }
   async function start() {
     const configured: Record<string, string> = { ...accounts, ...(account ? { whatsapp: account } : {}) };
@@ -92,17 +128,55 @@ export default function App() {
     if (!Object.values(configured).some(Boolean) && !installed.some(p => p !== 'whatsapp')) throw new Error('请安装社媒应用，或填写 WhatsApp 号码');
     if (account && !/^\+[1-9]\d{6,14}$/.test(account)) throw new Error('请核对 WhatsApp 的完整国际号码');
     const s = Executor.status(); if (!s.installed?.some(p => p !== 'whatsapp' || configured[p]) || !s.accessibility || !s.unlocked) throw new Error('请完成运行检查并安装对应社媒应用');
-    await heartbeat(true); if (account) Executor.rememberAccount(account); Executor.rememberAccounts(JSON.stringify({ ...accounts, ...(account ? { whatsapp: account } : {}) })); setReady(true); setShowChecks(false); setNotice('已连接。网页确认任务后，点击“领取已确认任务”；领取不会发送消息。');
+    const profile = await heartbeat(true);
+    if (profile.status !== 'ready') throw new Error('平台已连接，但运行检查未通过，请检查无障碍服务。');
+    if (account) Executor.rememberAccount(account); Executor.rememberAccounts(JSON.stringify({ ...accounts, ...(account ? { whatsapp: account } : {}) })); setReady(true); setNotice('运行检查通过，可以领取已确认任务。');
   }
   const button = (title: string, key: string, fn: () => Promise<void> | void, secondary = false) => <Pressable disabled={!!busy} style={[styles.button, secondary && styles.secondary, !!busy && { opacity: .6 }]} onPress={() => void action(key, async () => { await fn(); })}><Text style={[styles.buttonText, secondary && { color: RED }]}>{busy === key ? '处理中…' : title}</Text></Pressable>;
   const field = (placeholder: string, value: string, onChange: (v: string) => void, secure = false) => <TextInput style={styles.input} placeholder={placeholder} value={value} onChangeText={onChange} secureTextEntry={secure} autoCapitalize="none" autoCorrect={false} />;
-  return <SafeAreaView style={styles.root}><StatusBar barStyle="dark-content" /><ImageBackground source={require('./assets/brand/banner.jpg')} style={styles.hero} imageStyle={{ opacity: .18 }} resizeMode="cover" accessible={false}>
-      <View style={styles.brandRow}><Image source={require('./assets/brand/logo.png')} style={styles.logo} resizeMode="contain" accessibilityLabel="小当家" /><View style={{ flex: 1 }}><Text style={styles.title}>小当家 · 手机助手</Text><Text style={styles.heroNote}>Beacon · 社媒执行终端</Text></View></View>
-    </ImageBackground>
-    <View style={styles.tabs}>{['工作台', '记录', '设备与账号'].map(t => <Pressable key={t} onPress={() => { setTab(t); setNotice(''); }}><Text style={[styles.tab, tab === t && { color: RED, fontWeight: '700' }]}>{t}</Text></Pressable>)}</View>
-    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  const executionReady = ready && connected && !!status?.accessibility && !!status?.unlocked;
+  const stateLabel = status?.running ? '正在执行' : executionReady ? '已就绪' : '待运行检查';
+  const platformLabel = !paired ? '未绑定' : connected ? '已连接' : connectionError ? '连接中断' : '连接中';
+  const row = (title: string, detail: string, onPress: () => void) => <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingRow}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.rowDetail}>{detail}</Text></Pressable>;
+  const entries: { raw: string; j: { id: string; phase: string; outcome?: string; detail?: string; reported?: boolean; updated_at?: number; snapshot: Job['snapshot'] } }[] = (status?.history || []).flatMap(raw => { try { return [{ raw, j: JSON.parse(raw) }]; } catch { return []; } });
+  const completed = entries.filter(({j}) => ['sent', 'request_submitted'].includes(j.outcome || '')).length;
+  const needsAction = entries.filter(({j}) => ['unknown', 'failed', 'needs_action', 'unavailable'].includes(j.outcome || '') || !j.reported && j.phase !== 'claimed').length;
+  const records = entries.filter(({j}) => recordFilter === '全部' || (recordFilter === '已完成' ? ['sent', 'request_submitted'].includes(j.outcome || '') : ['unknown', 'failed', 'needs_action', 'unavailable'].includes(j.outcome || '') || !j.reported));
+  const platformBadge = (platform: string) => <View style={[styles.platformIcon, { backgroundColor: platform === 'whatsapp' ? '#edf6ef' : platform === 'instagram' ? '#fbf0f3' : '#eef3fa' }]}><Text style={[styles.platformLetter, { color: platform === 'whatsapp' ? '#3d8651' : platform === 'instagram' ? '#b35b7a' : '#3568a8' }]}>{({whatsapp:'W',facebook:'f',instagram:'◎',linkedin:'in',tiktok:'♪',youtube:'▶',x:'X'} as Record<string,string>)[platform] || '•'}</Text></View>;
+  const panelTitles: Record<string,string> = { connection: '连接与配对', accounts: '本方社媒账号', permissions: '运行权限', notifications: '客户回复通知', about: '关于手机助手' };
+  return <SafeAreaView style={styles.root} edges={['top', 'bottom']}><StatusBar barStyle="dark-content" />
+    <View style={styles.topBar}>
+      <View style={styles.brandRow}>{tab === '任务' && <Image source={require('./assets/brand/logo.png')} style={styles.logo} resizeMode="contain" accessibilityLabel="小当家" />}<Text style={styles.title}>{tab === '任务' ? '手机助手' : tab === '记录' ? '执行记录' : '设备与连接'}</Text></View>
+      <Pressable accessibilityRole="button" accessibilityLabel={`平台${platformLabel}，查看连接详情`} hitSlop={8} onPress={() => { setTab('设备'); router.setParams({ tab: '设备', panel: 'connection' }); }} style={styles.statusChip}><View style={[styles.statusDot, { backgroundColor: connected ? '#429460' : '#b48a43' }]} /><Text style={[styles.statusText, { color: connected ? '#38724d' : '#8c6c32' }]}>{platformLabel}</Text></Pressable>
+    </View>
+    <ScrollView key={`${tab}:${panel}`} style={{ flex: 1, backgroundColor: '#f6f5f2' }} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {!!notice && <Text accessibilityRole="alert" style={styles.notice}>{notice}</Text>}
-      {tab === '设备与账号' && <View style={styles.card}><Text style={styles.heading}>{paired ? '设备已配对' : '绑定 Beacon'}</Text>
+      {tab === '任务' && <>
+        <View style={styles.summary}>{[[String(pending + (job ? 1 : 0)), '待处理'], [String(completed), '本机完成记录'], [String(needsAction), '需核对记录']].map(([count, title]) => <View key={title} style={styles.stat}><Text style={styles.statNumber}>{count}</Text><Text style={styles.caption}>{title}</Text></View>)}</View>
+        <View style={styles.sectionRow}><Text style={styles.sectionLabel}>当前任务</Text><Text style={styles.caption}>{stateLabel}</Text></View>
+        {!executionReady && !status?.running && <View style={styles.card}><Text style={styles.heading}>{!paired ? '先绑定你的手机' : !connected ? '正在连接 Beacon' : '完成运行检查即可领取'}</Text><Text style={styles.small}>{!paired ? '在设备页扫描网页配对码，绑定后即可查看任务。' : !connected ? '配对已保留，恢复连接后可继续。点击顶部状态查看详情。' : '检查手机解锁、社媒应用和无障碍服务。'}</Text>{paired && connected ? button('检查并准备执行', 'start', start) : button('查看设备连接', 'go-device', () => { setTab('设备'); router.setParams({tab:'设备',panel:'connection'}); }, true)}</View>}
+        <View style={styles.card}>
+          {job ? <><View style={styles.sectionRow}><Text style={styles.sectionLabel}>{channelLabel(job.snapshot.channel)} · {ACTIONS[job.snapshot.action || "direct_message"]}</Text><Text style={styles.badge}>待确认</Text></View><Text style={styles.deviceName}>{job.snapshot.lead_name}</Text><Text>本方：{job.snapshot.sender}</Text><Text>发送至：{job.snapshot.target}</Text><Text style={styles.message}>{job.snapshot.body}</Text>
+            {button('确认执行这条消息', 'execute', () => {
+              if (!ready || job.snapshot.sender_mode !== 'current_app' && job.snapshot.sender !== (job.snapshot.channel === 'whatsapp' || !job.snapshot.channel ? account : accounts[job.snapshot.channel])) throw new Error('请先核对本方账号并开启执行');
+              Alert.alert('确认手机执行', `本方账号 ${job.snapshot.sender}\n发送至 ${job.snapshot.target}\n\n${job.snapshot.body}`, [{ text: '返回', style: 'cancel' }, { text: '执行', onPress: () => { try { Executor.execute(JSON.stringify(job)); setJob(undefined); setNotice('正在目标社媒执行，请保持手机解锁。返回此页查看结果；需要处理时会保留消息。'); } catch (e) { setNotice(String(e)); } } }]);
+            })}</> : <><Text>{status?.running ? '正在执行，请保持解锁' : '暂无正在处理的任务'}</Text>{!status?.running && executionReady && button('领取已确认任务', 'claim', async () => { if (!ready) throw new Error('请先完成运行检查'); await heartbeat(true); const data = await call('/claim', {}); if (!data.job) { setNotice(data.blocked || '暂时没有已确认任务'); return; } Executor.stage(JSON.stringify(data.job)); setJob(data.job); })}</>}
+          {!job && !status?.running && <Text style={styles.small}>{pending ? `网页已确认 ${pending} 条任务，等待领取` : '网页确认任务后，在这里领取；领取和查看不会发送消息。'}</Text>}
+          {status?.journal && !JSON.parse(status.journal).reported && <>{button('恢复并回填中断记录', 'recover', () => { Executor.recover(); setNotice('正在恢复记录；不会重新执行发送动作。'); }, true)}</>}
+
+        </View>
+        {executionReady && row('执行已就绪', '暂停执行', () => void action('pause', async () => { Executor.pause(); setReady(false); await heartbeat(false); }))}
+      </>}
+      {tab === '设备' && !panel && <>
+        <View style={styles.card}><View style={styles.sectionRow}><View style={{flex:1}}><Text style={styles.deviceName}>{savedLabel}</Text><Text style={styles.small}>{paired ? '已绑定 Beacon' : '尚未配对'}</Text></View><Pressable accessibilityRole="button" onPress={() => setPanel('connection')}><Text style={styles.link}>编辑</Text></Pressable></View>{row('平台连接', platformLabel, () => setPanel('connection'))}{row('执行状态', stateLabel, () => setPanel('permissions'))}{row('连接详情', connectedAt || '尚未通信', () => setPanel('connection'))}</View>
+        <View style={styles.sectionRow}><Text style={styles.sectionLabel}>本方社媒账号</Text><Pressable accessibilityRole="button" onPress={() => setPanel('accounts')}><Text style={styles.link}>管理全部</Text></Pressable></View>
+        <View style={styles.card}>{CHANNELS.filter(c => status?.installed?.includes(c.id) || (c.id === 'whatsapp' ? account : accounts[c.id])).slice(0,3).map(c => <Pressable accessibilityRole="button" key={c.id} style={styles.accountRow} onPress={() => { setSelectedChannel(c.id); setPanel('accounts'); }}>{platformBadge(c.id)}<View style={{flex:1}}><Text style={styles.accountLabel}>{c.label}</Text><Text style={styles.caption} numberOfLines={1}>{(c.id === 'whatsapp' ? account : accounts[c.id]) || '使用 App 当前账号 · 未记录名称'}</Text></View><Text style={styles.caption}>{status?.installed?.includes(c.id) ? '已安装' : '未安装'}</Text></Pressable>)}<Text style={styles.caption}>所有平台平行使用，点击“管理全部”查看或维护。</Text></View>
+        <View style={styles.card}>{row('运行权限', status?.accessibility && status?.unlocked ? '检查正常' : '待检查', () => setPanel('permissions'))}{row('客户回复通知', '权限与监听设置', () => setPanel('notifications'))}{row('关于手机助手', '版本与版权', () => setPanel('about'))}</View>
+      </>}
+      {tab === '设备' && !!panel && <>
+        <Pressable accessibilityRole="button" onPress={() => setPanel('')} style={styles.back}><Text style={styles.link}>返回设备</Text></Pressable>
+        <Text style={styles.pageHeading}>{panelTitles[panel] || '设备设置'}</Text>
+        {panel === 'connection' && <View style={styles.card}><Text style={styles.heading}>Beacon 平台 · {platformLabel}</Text><Text selectable style={styles.small}>{Executor.credentials().server || server}</Text>{!!connectedAt && <Text style={styles.small}>最近通信：{connectedAt}</Text>}{!!connectionError && <Text accessibilityRole="alert" style={styles.notice}>{connectionError}</Text>}{paired && button('检查连接', 'ping', async () => { await heartbeat(ready); setNotice('已连接 Beacon 平台。'); }, true)}
         <Text>在电脑网页“设置 → 手机执行”点击“绑定新手机”。</Text>
         <PairingScanner disabled={!!busy || !!status?.running} onScanned={p => { setTicket(p); setManual(false); setNotice('已识别配对码，请核对服务器与绑定账号后确认。'); }} />
         {ticket && <View style={styles.message}><Text style={styles.heading}>确认绑定</Text><Text>服务器：{ticket.server}</Text><Text>绑定账号：{ticket.owner}</Text>
@@ -119,40 +193,47 @@ export default function App() {
           {button('配对', 'pair', () => pairDevice(server, code))}
         </>}
         {field('手机名称', label, setLabel)}
+        <Text style={styles.small}>系统设备名称：{status?.deviceName || '读取中'}</Text>
+        {paired && button('保存手机名称', 'save-label', async () => { if (!label.trim()) throw new Error('请填写手机名称'); await heartbeat(ready, label.trim()); setSavedLabel(label.trim()); setNotice('手机名称已同步到 Beacon。'); }, true)}
+
+        </View>}
+        {panel === 'accounts' && <View style={styles.card}>
         <Text style={styles.heading}>本方社媒账号</Text>
-        <Text style={styles.small}>在官方 App 登录后填写对应账号。此处不需要 API Key 或密码。更改后需重新连接检查。</Text>
+        <Text style={styles.small}>各平台账号独立记录，可选填名称或主页链接。记录不代表已核验登录身份；实际使用官方 App 当前登录账号。无需 API Key 或密码。</Text>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{CHANNELS.map(c => <Pressable key={c.id} onPress={() => setSelectedChannel(c.id)} style={{ padding: 9, borderRadius: 8, backgroundColor: selectedChannel === c.id ? '#fff0f0' : '#f5f5f5' }}><Text style={{ color: selectedChannel === c.id ? RED : '#333' }}>{c.label}</Text></Pressable>)}</View>
         <Text>{status?.installed?.includes(selectedChannel) ? '✓ 已安装' : '○ 未检测到应用'} · {channelLabel(selectedChannel)}</Text>
-        {selectedChannel === 'whatsapp' ? <>{field('+国家区号与电话号码', account, v => { setReady(false); setAccount(v); })}{button('保存 WhatsApp 号码', 'save-accounts', () => { Executor.rememberAccount(account); setNotice('号码已保存，请回工作台连接检查。'); }, true)}</> : <Text style={styles.small}>直接使用 {channelLabel(selectedChannel)} 官方 App 当前登录的账号，无需填写账号或 API Key。请在官方 App 中登录你要使用的账号。</Text>}
-        <Text style={styles.small}>设备凭据由 Android 安全存储加密保存。社媒账号在官方 App 登录。</Text></View>}
-      {tab === '工作台' && <>
-        <View style={styles.card}><Text style={styles.heading}>{status?.running ? '正在执行任务' : ready && status?.accessibility && status?.unlocked ? '已就绪' : paired ? '已配对 · 待连接检查' : '请先绑定手机'}</Text>
-          {!!account && <Text>WhatsApp 本方账号：{account}</Text>}
-          <Text style={styles.small}>其他社媒使用手机 App 当前登录的账号。</Text>
-          {!!connectedAt && <Text style={styles.small}>最近连接：{connectedAt}</Text>}
-          {paired ? button(ready ? '检查连接' : '连接并检查任务', 'start', start) : button('扫码绑定手机', 'go-pair', () => setTab('设备与账号'))}
-          <Pressable onPress={() => setShowChecks(v => !v)}><Text style={{ color: RED }}>{showChecks ? '收起运行检查' : '账号与运行检查'}</Text></Pressable>
-          {(showChecks || !paired) && <><Text>{paired ? '✓ 已配对' : '○ 尚未配对'}</Text><Text>{status?.whatsapp ? '✓ WhatsApp 已安装' : '○ 未发现 WhatsApp'}</Text><Text>{status?.accessibility ? '✓ 无障碍已连接' : '○ 无障碍服务未连接'}</Text><Text>{status?.unlocked ? '✓ 手机已解锁' : '○ 请解锁手机'}</Text>
-          {button('打开无障碍设置', 'permissions', () => Executor.permissions(), true)}
-          {button('管理全部渠道账号', 'account-settings', () => setTab('设备与账号'), true)}
-          <Text>核对当前 WhatsApp 登录账号（可选）：</Text>{field('+国家区号与电话号码', account, v => { if (ready) void heartbeat(false).catch(() => {}); setAccount(v); setReady(false); })}
-          <Text style={styles.small}>本方账号由你在官方 App 核对。WhatsApp 已通过单条实机验证，其他平台本轮仅开发，待你决定后测试。</Text>
-          <Text style={styles.small}>号码只需核对一次，本机记住号码；每次打开仍由你主动连接，不会自动发送。</Text></>}
-          {button('暂停执行', 'pause', async () => { Executor.pause(); setReady(false); if (account && paired) await heartbeat(false); }, true)}
-        </View>
-        <View style={styles.card}><Text style={styles.heading}>当前任务</Text>
-          {job ? <><Text>{channelLabel(job.snapshot.channel)} · {ACTIONS[job.snapshot.action || "direct_message"]}</Text><Text>{job.snapshot.lead_name}</Text><Text>本方：{job.snapshot.sender}</Text><Text>发送至：{job.snapshot.target}</Text><Text style={styles.message}>{job.snapshot.body}</Text>
-            {button('核对并执行这条消息', 'execute', () => {
-              if (!ready || job.snapshot.sender_mode !== 'current_app' && job.snapshot.sender !== (job.snapshot.channel === 'whatsapp' || !job.snapshot.channel ? account : accounts[job.snapshot.channel])) throw new Error('请先核对本方账号并开启执行');
-              Alert.alert('确认手机执行', `本方账号 ${job.snapshot.sender}\n发送至 ${job.snapshot.target}\n\n${job.snapshot.body}`, [{ text: '返回', style: 'cancel' }, { text: '执行', onPress: () => { try { Executor.execute(JSON.stringify(job)); setJob(undefined); setNotice('正在目标社媒执行，请保持手机解锁。返回此页查看结果；需要处理时会保留消息。'); } catch (e) { setNotice(String(e)); } } }]);
-            })}</> : <><Text>{status?.running ? '正在执行，请保持解锁' : '尚未领取任务'}</Text>{button('领取已确认任务', 'claim', async () => { if (!ready) throw new Error('请先开启执行'); await heartbeat(true); const data = await call('/claim', {}); if (!data.job) { setNotice(data.blocked || '暂时没有已确认任务'); return; } Executor.stage(JSON.stringify(data.job)); setJob(data.job); })}</>}
-          {!job && !status?.running && <Text style={styles.small}>{pending ? `网页已确认 ${pending} 条任务，等待领取` : '网页确认任务后，在这里领取；领取和查看不会发送消息。'}</Text>}
-          {status?.journal && !JSON.parse(status.journal).reported && <>{button('恢复并回填中断记录', 'recover', () => { Executor.recover(); setNotice('正在恢复记录；不会重新执行发送动作。'); }, true)}</>}
-        </View></>}
-      {tab === '设备与账号' && paired && <ReplyNotifications />}
-      {tab === '记录' && <><Text style={styles.heading}>最近执行记录</Text>{status?.history?.length ? status.history.map(raw => { const j = JSON.parse(raw); return <View key={j.id} style={styles.card}>
-        <Text>{channelLabel(j.snapshot?.channel)} · {ACTIONS[j.snapshot?.action || 'direct_message']}</Text><Text>{j.snapshot?.lead_name}</Text><Text>收件人：{j.snapshot?.target}</Text>
-        <Text>状态：{outcomeLabels[j.outcome || j.phase] || '处理中／待核对'}</Text><Text>{j.detail || ''}</Text><Text>{j.reported ? '已回填 Beacon' : '尚未回填，请在工作台恢复记录'}</Text>
+        {button('识别当前账号', 'identify-account', async () => {
+          if (job || status?.running) throw new Error('请先处理当前任务，再识别账号');
+          setAccountCandidate(undefined);
+          const result = JSON.parse(await Executor.inspectAccount(selectedChannel));
+          if (result.channel !== selectedChannel || !result.identity) throw new Error('没有获得明确账号，本次未保存');
+          setAccountCandidate(result);
+        }, true)}
+        <Text style={styles.caption}>将打开对应 App 的本方个人资料页，只读取账号，不修改资料或发送消息。未识别时，可手动打开自己的资料页后重试。</Text>
+        {accountCandidate?.channel === selectedChannel && <View style={styles.message}><Text style={styles.heading}>请确认识别结果</Text><Text>{channelLabel(accountCandidate.channel)} · {accountCandidate.identity}</Text><Text style={styles.caption}>读取时间：{new Date(accountCandidate.observed_at).toLocaleString()}</Text>
+          {button('确认并保存账号', 'accept-account', async () => {
+            const value = accountCandidate.identity.trim();
+            const next = {...accounts, [accountCandidate.channel]: value};
+            if (accountCandidate.channel === 'whatsapp') { Executor.rememberAccount(value); setAccount(value); }
+            Executor.rememberAccounts(JSON.stringify(next)); setAccounts(next); setReady(false); setAccountCandidate(undefined);
+            setNotice('识别结果已确认并保存。请回任务页重新检查，再执行任务。');
+          })}
+          {button('放弃本次结果', 'discard-account', () => setAccountCandidate(undefined), true)}
+        </View>}
+        {selectedChannel === 'whatsapp' ? <>{field('+国家区号与电话号码', account, v => { setReady(false); setAccount(v); })}{button('保存 WhatsApp 号码', 'save-accounts', () => { Executor.rememberAccount(account); setNotice('号码已保存，请回工作台连接检查。'); }, true)}</> : <>{field(CHANNELS.find(c => c.id === selectedChannel)?.hint || '账号名称或主页链接（可选）', accounts[selectedChannel] || '', v => { setReady(false); setAccounts(old => ({ ...old, [selectedChannel]: v })); })}{button('保存账号记录', 'save-accounts', () => { Executor.rememberAccounts(JSON.stringify(accounts)); setNotice('账号记录已保存。请在官方 App 核对当前登录身份，再连接检查。'); }, true)}<Text style={styles.small}>可识别资料页后确认保存，也可手动记录。留空仍使用当前 App 账号；切换账号后请重新识别。</Text></>}
+        <Text style={styles.small}>设备凭据由 Android 安全存储加密保存。社媒账号在官方 App 登录。</Text>
+        </View>}
+        {panel === 'permissions' && <View style={styles.card}><Text style={styles.heading}>运行检查</Text><Text style={styles.small}>{paired ? '✓ 已配对' : '○ 尚未配对'}</Text><Text style={styles.small}>{status?.accessibility ? '✓ 无障碍已连接' : '○ 无障碍服务未连接'}</Text><Text style={styles.small}>{status?.unlocked ? '✓ 手机已解锁' : '○ 请解锁手机'}</Text><Text style={styles.small}>已安装渠道：{status?.installed?.map(channelLabel).join('、') || '尚未检测到'}</Text>{button('打开无障碍设置', 'permissions', () => Executor.permissions(), true)}{paired && button('检查并准备执行', 'start', start)}<Text style={styles.caption}>完成检查不会领取或发送任务。</Text></View>}
+        {panel === 'notifications' && (paired ? <ReplyNotifications /> : <View style={styles.card}><Text style={styles.small}>请先绑定手机，再设置回复通知。</Text>{button('绑定手机', 'go-pair', () => setPanel('connection'), true)}</View>)}
+        {panel === 'about' && <View style={styles.card}><Image source={require('./assets/brand/logo.png')} style={{width:80,height:52,alignSelf:'center'}} resizeMode="contain" accessibilityLabel="小当家" /><Text style={styles.heading}>Beacon 手机助手</Text><Text style={styles.small}>版本 1.0.0 · 社媒执行终端</Text><Text style={styles.small}>消息在网页准备并确认，手机按任务核对目标后执行。执行记录与客户回复回到 Beacon。</Text><Text style={styles.small}>账号名称由资料页识别后确认，或手动记录，不代表持续监控登录身份。平台安装与真实收发能力分别验收。</Text><Text style={styles.copyright}>© {new Date().getFullYear()} 南京小当家文化咨询有限公司</Text></View>}
+      </>}
+      {tab === '记录' && <>
+        <View style={styles.filters}>{['全部', '已完成', '需处理'].map(f => <Pressable accessibilityRole="button" accessibilityState={{selected:recordFilter === f}} key={f} onPress={() => setRecordFilter(f)} style={[styles.filter,recordFilter === f && styles.selectedFilter]}><Text style={[styles.filterText,recordFilter === f && {color:RED}]}>{f}</Text></Pressable>)}</View>
+        <View style={styles.sectionRow}><Text style={styles.sectionLabel}>本机最近记录</Text><Text style={styles.caption}>{records.length} 条</Text></View>
+        {records.length ? records.map(({raw,j}) => <View key={j.id} style={styles.card}>
+          <Pressable accessibilityRole="button" accessibilityState={{expanded:expandedRecord === j.id}} onPress={() => setExpandedRecord(expandedRecord === j.id ? undefined : j.id)} style={styles.recordHeader}>{platformBadge(j.snapshot?.channel || 'whatsapp')}<View style={{flex:1}}><Text style={styles.accountLabel}>{j.snapshot?.lead_name || '未命名客户'}</Text><Text style={styles.caption}>{channelLabel(j.snapshot?.channel)} · {ACTIONS[j.snapshot?.action || 'direct_message']}</Text></View><Text style={[styles.badge, ['sent','request_submitted'].includes(j.outcome || '') && styles.successBadge]}>{outcomeLabels[j.outcome || j.phase] || '处理中'}</Text></Pressable>
+          <View style={styles.sectionRow}><Text style={styles.caption}>{j.reported ? '已回填 Beacon' : '尚未回填'}</Text><Text style={styles.caption}>{j.updated_at ? '更新于 ' + new Date(j.updated_at).toLocaleString() : '历史时间未记录'}</Text></View>
+          {expandedRecord === j.id && <><Text selectable style={styles.small}>收件人：{j.snapshot?.target}</Text><Text style={styles.message}>{j.snapshot?.body}</Text>{!!j.detail && <Text style={styles.small}>{j.detail}</Text>}
         {j.reported && <>
           {button('打开目标应用处理', 'open-' + j.id, () => Executor.openTarget(raw), true)}
           {button('复制本次消息', 'copy-' + j.id, () => { Executor.copyMessage(j.snapshot.body); setNotice('已复制消息。请核对目标后人工处理，并在网页记录实际结果。'); }, true)}
@@ -165,14 +246,13 @@ export default function App() {
             {button('取消', 'cancel-reply-' + j.id, () => setReplyJob(undefined), true)}
           </>}
         </>}
-      </View>; }) : <View style={styles.card}><Text>暂无记录</Text></View>}</>}
-      <Text style={styles.copyright}>© {new Date().getFullYear()} 南京小当家文化咨询有限公司</Text>
-    </ScrollView></SafeAreaView>;
+          </>}
+        </View>) : <View style={styles.empty}><Text style={styles.emptySymbol}>◷</Text><Text style={styles.heading}>暂无{recordFilter === '全部' ? '执行' : recordFilter}记录</Text><Text style={styles.small}>手机执行结果会显示在这里。</Text></View>}
+      </>}
+    </ScrollView>
+    <View style={styles.bottomNav}>{[{name:'任务',icon:'clipboard-outline' as const},{name:'记录',icon:'time-outline' as const},{name:'设备',icon:'phone-portrait-outline' as const}].map(item => <Pressable accessibilityRole="tab" accessibilityState={{selected:tab === item.name}} accessibilityLabel={item.name} key={item.name} style={styles.navItem} onPress={() => setTab(item.name)}><Ionicons name={item.icon} size={23} color={tab === item.name ? RED : '#8a857e'} /><Text style={[styles.navLabel,tab === item.name && {color:RED,fontWeight:'600'}]}>{item.name}</Text></Pressable>)}</View>
+  </SafeAreaView>;
 }
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#f7f4f1', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 }, hero: { padding: 20, backgroundColor: '#211b19' }, brandRow: { flexDirection: 'row', alignItems: 'center', gap: 14 }, logo: { width: 78, height: 48, borderRadius: 4, backgroundColor: '#fff' }, title: { color: '#fab736', fontSize: 20, fontWeight: '700' }, heroNote: { color: '#fff', marginTop: 6, fontSize: 12 },
-  tabs: { flexDirection: 'row', justifyContent: 'space-around', backgroundColor: '#fff', padding: 16 }, tab: { fontSize: 16, color: '#666' }, content: { padding: 16, gap: 16, paddingBottom: 50 },
-  copyright: { color: '#777', fontSize: 12, textAlign: 'center', lineHeight: 20, paddingTop: 8, paddingBottom: 4 },
-  card: { backgroundColor: '#fff', padding: 20, borderRadius: 16, gap: 12 }, heading: { fontSize: 19, fontWeight: '700' }, input: { padding: 13, borderWidth: 1, borderColor: '#ddd', borderRadius: 9, fontSize: 16 },
-  button: { padding: 14, borderRadius: 9, backgroundColor: RED, alignItems: 'center' }, secondary: { backgroundColor: '#fff3f3', borderWidth: 1, borderColor: '#f1c7c9' }, buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 }, small: { color: '#777', lineHeight: 21 }, notice: { backgroundColor: '#fff3d4', padding: 15, borderRadius: 10, lineHeight: 23 }, message: { backgroundColor: '#f8f6f3', padding: 12, lineHeight: 24 },
+  root: {flex:1,backgroundColor:'#fff'}, topBar: {height:60,paddingHorizontal:20,flexDirection:'row',justifyContent:'space-between',alignItems:'center',backgroundColor:'#fff'}, brandRow:{flexDirection:'row',alignItems:'center',gap:9},logo:{width:38,height:29},title:{fontSize:20,fontWeight:'700',color:'#232321'},statusChip:{flexDirection:'row',alignItems:'center',gap:6,minHeight:44},statusDot:{width:6,height:6,borderRadius:3},statusText:{fontSize:12},content:{padding:18,gap:14,paddingBottom:30},bottomNav:{flexDirection:'row',borderTopWidth:1,borderTopColor:'#eae7e1',backgroundColor:'#fff',paddingTop:7,paddingBottom:5},navItem:{flex:1,minHeight:54,alignItems:'center',justifyContent:'center',gap:4},navIcon:{fontSize:25,lineHeight:27,color:'#8a857e'},navLabel:{fontSize:11,color:'#8a857e'},card:{backgroundColor:'#fff',padding:17,borderRadius:17,gap:13,borderWidth:1,borderColor:'#edeae5'},heading:{fontSize:17,fontWeight:'600',color:'#272724'},pageHeading:{fontSize:23,fontWeight:'700',color:'#272724'},deviceName:{fontSize:21,fontWeight:'700',color:'#272724'},small:{fontSize:13,color:'#7e7971',lineHeight:21},caption:{fontSize:11,color:'#918a81',lineHeight:17},summary:{flexDirection:'row',paddingVertical:17,borderRadius:15,backgroundColor:'#fff',borderWidth:1,borderColor:'#edeae5'},stat:{flex:1,alignItems:'center',gap:6},statNumber:{fontSize:25,fontWeight:'600',color:'#272724'},sectionRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12},sectionLabel:{fontSize:12,color:'#8a857d',fontWeight:'600'},settingRow:{minHeight:47,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,borderBottomWidth:1,borderBottomColor:'#f1eeea'},rowTitle:{fontSize:13,color:'#35332f'},rowDetail:{fontSize:12,color:'#8a857d',flexShrink:1,textAlign:'right'},back:{minHeight:34,justifyContent:'center'},link:{fontSize:13,color:'#b62b35',paddingVertical:6},accountRow:{flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,borderBottomWidth:1,borderBottomColor:'#f0ece7'},accountLabel:{fontSize:14,fontWeight:'600',color:'#2b2926',marginBottom:4},platformIcon:{width:34,height:34,borderRadius:10,alignItems:'center',justifyContent:'center'},platformLetter:{fontSize:18,fontWeight:'700'},recordHeader:{flexDirection:'row',alignItems:'center',gap:11,minHeight:44},badge:{fontSize:11,color:'#8f692d',backgroundColor:'#fff3e1',borderRadius:6,padding:6,overflow:'hidden'},successBadge:{color:'#38724d',backgroundColor:'#edf5ef'},filters:{flexDirection:'row',gap:8},filter:{paddingVertical:9,paddingHorizontal:14,borderRadius:9,borderWidth:1,borderColor:'#e9e5df',backgroundColor:'#fff'},selectedFilter:{backgroundColor:'#fff0f0',borderColor:'#f3d5d5'},filterText:{fontSize:12,color:'#848078'},empty:{alignItems:'center',paddingVertical:35,gap:10},emptySymbol:{fontSize:38,color:'#bbb4aa'},input:{padding:12,borderWidth:1,borderColor:'#e2ded7',borderRadius:10,fontSize:15,color:'#2b2926'},button:{minHeight:46,padding:13,borderRadius:11,backgroundColor:RED,alignItems:'center',justifyContent:'center'},secondary:{backgroundColor:'#f5f4f1',borderWidth:1,borderColor:'#e9e5df'},buttonText:{color:'#fff',fontWeight:'600',fontSize:14},notice:{backgroundColor:'#fff4df',color:'#856127',padding:14,borderRadius:11,fontSize:13,lineHeight:21},message:{backgroundColor:'#f7f6f3',color:'#5d5b57',padding:14,borderRadius:10,fontSize:14,lineHeight:23},copyright:{color:'#9a948a',fontSize:11,textAlign:'center',lineHeight:19}
 });

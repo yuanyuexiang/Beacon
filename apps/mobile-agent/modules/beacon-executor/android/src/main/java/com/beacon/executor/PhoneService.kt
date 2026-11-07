@@ -31,6 +31,10 @@ class PhoneService : AccessibilityService() {
     if (Looper.myLooper() == Looper.getMainLooper()) return fn()
     val f = FutureTask(fn); main.post(f); return f.get(5, TimeUnit.SECONDS)
   }
+  fun inspectAccount(channel: String): String {
+    synchronized(this) { check(!running) { "请先完成当前执行，再识别账号" }; running = true }
+    return try { AccountInspector(this).inspect(channel) } finally { running = false }
+  }
   private fun root(): AccessibilityNodeInfo {
     check(!getSystemService(KeyguardManager::class.java).isKeyguardLocked) { "手机已锁屏" }
     val r = rootInActiveWindow ?: error("无法读取页面")

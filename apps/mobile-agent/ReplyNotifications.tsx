@@ -4,11 +4,11 @@ import Executor from './modules/beacon-executor';
 import { CHANNELS } from './lib/channels';
 
 export default function ReplyNotifications() {
-  const [status, setStatus] = useState<ReturnType<typeof Executor.notificationStatus>>();
+  const [status, setStatus] = useState<ReturnType<typeof Executor.notificationStatus>>(() => Executor.notificationStatus());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   function refresh() { try { setStatus(Executor.notificationStatus()); } catch (e) { setError(String(e)); } }
-  useEffect(() => { refresh(); const timer = setInterval(refresh, 3000); return () => clearInterval(timer); }, []);
+  useEffect(() => { const timer = setInterval(refresh, 3000); return () => clearInterval(timer); }, []);
   const channels: string[] = status ? JSON.parse(status.channels) : [];
   function toggle(channel: string) {
     try { Executor.notificationChannels(JSON.stringify(channels.includes(channel) ? channels.filter(c => c !== channel) : [...channels, channel])); refresh(); }

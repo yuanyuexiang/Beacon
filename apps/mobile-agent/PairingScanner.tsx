@@ -23,7 +23,7 @@ export default function PairingScanner({ onScanned, disabled }: { onScanned: (ti
           try { const ticket = parsePairingTicket(data); setOpen(false); onScanned(ticket); }
           catch (e) { setError(e instanceof Error ? e.message : String(e)); }
         }} />}</View> : <><Text>仅扫描配对码时使用相机，不拍照、不录音、不上传画面。也可以返回手动配对。</Text>{control(permission?.canAskAgain === false ? '打开相机权限设置' : '允许使用相机', () => { if (permission?.canAskAgain === false) void Linking.openSettings(); else void requestPermission(); })}</>}
-        {!!error && <><Text accessibilityRole="alert" style={{ color: '#cf010e' }}>{error}</Text>{control('重新扫描', () => { scanned.current = false; setError(''); })}</>}
+        {!!error && <><Text accessibilityRole="alert" style={{ color: '#cf010e' }}>{error}</Text><Pressable accessibilityRole="button" style={{ padding: 14, backgroundColor: '#cf010e', borderRadius: 9, alignItems: 'center' }} onPress={() => { scanned.current = false; setError(''); }}><Text style={{color:'white'}}>重新扫描</Text></Pressable></>}
         {control('返回', () => setOpen(false))}
       </View>
     </Modal>

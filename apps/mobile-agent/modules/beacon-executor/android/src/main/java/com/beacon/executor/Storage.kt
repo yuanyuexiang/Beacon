@@ -80,6 +80,7 @@ class Journal(private val c: Context) : SQLiteOpenHelper(c, "beacon-execution.db
   fun clearNotices() { writableDatabase.execSQL("DELETE FROM notices") }
 
   fun save(j: JSONObject) {
+    j.put("updated_at", System.currentTimeMillis())
     writableDatabase.execSQL("INSERT OR REPLACE INTO journal (id,value) VALUES (?,?)", arrayOf(j.getString("id"), j.toString()))
   }
   fun latest(): String = readableDatabase.rawQuery("SELECT value FROM journal ORDER BY rowid DESC LIMIT 1", null).use { if (it.moveToFirst()) it.getString(0) else "" }

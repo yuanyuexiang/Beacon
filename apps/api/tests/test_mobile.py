@@ -213,3 +213,42 @@ def test_pairing_refresh_expires_previous_code_and_returns_owner(client, db):
     assert client.post("/api/mobile/device/pair", json={"code": first["code"], "label": "old"}).status_code == 409
     paired = client.post("/api/mobile/device/pair", json={"code": second["code"], "label": "scan"})
     assert paired.status_code == 200 and paired.json()["owner"] == "tester"
+
+
+def test_presence_without_execution_ready(client, db):
+    _, d, headers, _ = setup(client, db)
+    response = client.post(
+        "/api/mobile/device/heartbeat", headers=headers, json={"ready": False, "app_version": "test", "protocol": 2}
+    )
+    assert response.status_code == 200
+    phone = client.get("/api/mobile/devices").json()[0]
+    assert phone["online"] is True and phone["status"] == "paired"
+
+
+def test_remove_device_preserves_history_and_revokes_token(client, db):
+    tid, d, headers, _ = setup(client, db)
+    job, _ = enqueue(client, tid, d)
+    assert client.delete(f"/api/mobile/devices/{d['device_id']}").status_code == 200
+    assert client.get("/api/mobile/devices").json() == []
+    assert (
+        client.post(
+            "/api/mobile/device/heartbeat", headers=headers, json={"ready": False, "app_version": "test", "protocol": 2}
+        ).status_code
+        == 401
+    )
+    db.expire_all()
+    assert db.scalar(select(Device)).status == "revoked"
+    assert db.scalar(select(Execution)).status == "cancelled"
+    assert client.get(f"/api/mobile/tasks/{tid}").json()["id"] == job["id"]
+
+
+def test_device_reports_name_without_changing_sender(client, db):
+    _, d, headers, _ = setup(client, db)
+    response = client.post(
+        "/api/mobile/device/heartbeat",
+        headers=headers,
+        json={"label": "Xiaomi 测试手机", "account": "+447700900001", "app_version": "test"},
+    )
+    assert response.status_code == 200
+    assert response.json()["label"] == "Xiaomi 测试手机"
+    assert client.get("/api/mobile/devices").json()[0]["label"] == "Xiaomi 测试手机"
