@@ -100,6 +100,8 @@ async def main():
         await expect(page.get_by_role("dialog")).to_have_count(0)
         await page.get_by_role("combobox", name="默认模型", exact=True).click()
         await page.get_by_title("测试资料模型 · mock-model", exact=True).click()
+        await page.get_by_text("按用途指定模型（可选）", exact=True).click()
+        await expect(page.get_by_role("combobox", name="手机页面理解", exact=True)).to_be_visible()
         await page.get_by_role("button", name="保存 AI 配置", exact=True).click()
         await expect(
             page.get_by_role("button", name="测试能力", exact=True)

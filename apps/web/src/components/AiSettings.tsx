@@ -10,7 +10,7 @@ type Test = { at: string; status: string; checks: Record<string, Check> };
 type Connection = { id: string; label: string; provider: string; protocol: string; base_url: string; model: string; vision: boolean; enabled: boolean; json_mode: boolean; timeout: number; key_configured?: boolean; key?: string; test?: Test };
 type Configuration = { version: string | null; connections: Connection[]; routes: Record<string, string | null>; source: string; environment?: Connection; presets: { id: string; label: string; base_url: string; protocol: string; docs: string }[] };
 const fields = ["id", "label", "provider", "protocol", "base_url", "model", "vision", "enabled", "json_mode", "timeout", "key"] as const;
-const purposeLabels = { default: "默认模型", research: "资料理解", vision: "菜单识别", writing: "文案生成" };
+const purposeLabels = { default: "默认模型", research: "资料理解", vision: "菜单识别", writing: "文案生成", mobile: "手机页面理解" };
 const checkLabels: Record<string, string> = {text: "文本返回", structured: "JSON 解析", vision: "图片识别"};
 
 export default function AiSettings() {
@@ -94,7 +94,7 @@ export default function AiSettings() {
         <Typography.Title level={5}>使用设置</Typography.Title>
         <Form layout="vertical">
           <Form.Item label="默认模型"><Select aria-label="默认模型" allowClear placeholder="选择默认模型连接" value={routes.default || undefined} options={options} disabled={locked} onChange={value => {setRoutes({...routes, default: value || null}); setDirty(true);}} /></Form.Item>
-          <Collapse items={[{key: "purposes", label: "按用途指定模型（可选）", children: <>{(["research", "vision", "writing"] as const).map(key => <Form.Item key={key} label={purposeLabels[key]}><Select aria-label={purposeLabels[key]} allowClear placeholder="继承默认模型" value={routes[key] || undefined} options={key === "vision" ? options.filter(o => rows.find(r => r.id === o.value)?.vision) : options} disabled={locked} onChange={value => {setRoutes({...routes, [key]: value || null}); setDirty(true);}} /></Form.Item>)}</>}]} />
+          <Collapse items={[{key: "purposes", label: "按用途指定模型（可选）", children: <>{(["research", "vision", "writing", "mobile"] as const).map(key => <Form.Item key={key} label={purposeLabels[key]}><Select aria-label={purposeLabels[key]} allowClear placeholder="继承默认模型" value={routes[key] || undefined} options={key === "vision" ? options.filter(o => rows.find(r => r.id === o.value)?.vision) : options} disabled={locked} onChange={value => {setRoutes({...routes, [key]: value || null}); setDirty(true);}} /></Form.Item>)}</>}]} />
         </Form>
         {routes.default && !rows.find(r => r.id === (routes.vision || routes.default))?.vision && <Alert type="info" message="当前未选择支持图片的菜单识别模型，图片或扫描菜单将提示配置；文本资料功能可正常使用。" style={{marginTop: 12}} />}
         <Space wrap style={{marginTop: 16}}><Button type="primary" loading={busy.save} disabled={locked || !dirty} onClick={save}>保存 AI 配置</Button><Button disabled={locked || !dirty} onClick={() => act("reload", load)}>放弃修改</Button>{dirty && <Typography.Text type="secondary">先保存修改，再测试连接。</Typography.Text>}</Space>

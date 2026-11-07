@@ -73,7 +73,7 @@ PRESETS = [
     },
     {"id": "custom", "label": "自定义兼容接口", "protocol": "chat", "base_url": "", "docs": ""},
 ]
-PURPOSES = {"research": "资料理解", "vision": "菜单识别", "writing": "文案生成"}
+PURPOSES = {"research": "资料理解", "vision": "菜单识别", "writing": "文案生成", "mobile": "手机页面理解"}
 
 
 def latest(db: Session) -> AIConfiguration | None:

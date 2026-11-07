@@ -53,6 +53,7 @@ class Routing(BaseModel):
     research: str | None = None
     vision: str | None = None
     writing: str | None = None
+    mobile: str | None = None
 
 
 class ConfigurationIn(BaseModel):

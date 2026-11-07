@@ -53,7 +53,7 @@ export default function App() {
   const [accounts, setAccounts] = useState<Record<string, string>>({});
   const [replyJob, setReplyJob] = useState<string>();
   const [reply, setReply] = useState('');
-  const [accountCandidate, setAccountCandidate] = useState<{channel: string; identity: string; observed_at: number}>();
+  const [accountCandidate, setAccountCandidate] = useState<{channel: string; identity: string; observed_at: number; source?: string; model?: string}>();
   const [selectedChannel, setSelectedChannel] = useState('whatsapp');
   const [paired, setPaired] = useState(false);
   const [ready, setReady] = useState(false);
@@ -209,8 +209,8 @@ export default function App() {
           if (result.channel !== selectedChannel || !result.identity) throw new Error('没有获得明确账号，本次未保存');
           setAccountCandidate(result);
         }, true)}
-        <Text style={styles.caption}>将打开对应 App 的本方个人资料页，只读取账号，不修改资料或发送消息。未识别时，可手动打开自己的资料页后重试。</Text>
-        {accountCandidate?.channel === selectedChannel && <View style={styles.message}><Text style={styles.heading}>请确认识别结果</Text><Text>{channelLabel(accountCandidate.channel)} · {accountCandidate.identity}</Text><Text style={styles.caption}>读取时间：{new Date(accountCandidate.observed_at).toLocaleString()}</Text>
+        <Text style={styles.caption}>打开本方资料页读取账号。规则识别失败时，将资料页顶部文字交给 Beacon AI 辅助识别；不上传截图，不读取聊天，不发送消息。</Text>
+        {accountCandidate?.channel === selectedChannel && <View style={styles.message}><Text style={styles.heading}>请确认识别结果</Text><Text>{channelLabel(accountCandidate.channel)} · {accountCandidate.identity}</Text><Text style={styles.caption}>{accountCandidate.source === 'ai' ? `AI 辅助 · ${accountCandidate.model || '当前模型'} · ` : '规则识别 · '}读取时间：{new Date(accountCandidate.observed_at).toLocaleString()}</Text>
           {button('确认并保存账号', 'accept-account', async () => {
             const value = accountCandidate.identity.trim();
             const next = {...accounts, [accountCandidate.channel]: value};

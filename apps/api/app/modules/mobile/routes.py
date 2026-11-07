@@ -19,6 +19,8 @@ from app.core.db import get_db
 from app.core.models import Operator
 from app.modules.content.models import ContentPiece
 from app.modules.leads.models import Lead
+from app.modules.mobile.assistance import PageIn
+from app.modules.mobile.assistance import assist as assist_page
 from app.modules.mobile.channels import PLATFORMS, destination
 from app.modules.mobile.models import Device, Execution, Pairing
 from app.modules.sales import service
@@ -564,3 +566,10 @@ def inbound(identity: uuid.UUID, body: InboundIn, d: Device = Depends(device_aut
         d.owner,
     )
     return {"id": str(event.id), "created": created}
+
+
+@worker_router.post("/account-assistance")
+def account_assistance(body: "PageIn", db: Session = Depends(get_db), device: Device = Depends(device_auth)):
+    # Release the device-auth advisory lock before a potentially slow model call.
+    db.commit()
+    return assist_page(body)
