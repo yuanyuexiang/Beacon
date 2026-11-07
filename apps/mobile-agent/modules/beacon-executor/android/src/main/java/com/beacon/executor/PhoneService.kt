@@ -88,7 +88,7 @@ class PhoneService : AccessibilityService() {
   private fun request(path: String, payload: JSONObject, timeout: Int = 15000): JSONObject {
     val cred = Vault(this).read()
     val base = cred["server"] ?: error("未配对")
-    check(base.startsWith("https://") || base.startsWith("http://127.0.0.1:")) { "需要 HTTPS 服务器" }
+    check(validServer(base)) { "需要 HTTPS 服务器" }
     val conn = URL(base + "/api/mobile/device" + path).openConnection() as HttpURLConnection
     conn.connectTimeout = 10000; conn.readTimeout = timeout; conn.requestMethod = "POST"; conn.doOutput = true
     conn.setRequestProperty("Authorization", "Bearer " + cred["token"])

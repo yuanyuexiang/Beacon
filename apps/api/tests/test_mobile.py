@@ -252,3 +252,75 @@ def test_device_reports_name_without_changing_sender(client, db):
     assert response.status_code == 200
     assert response.json()["label"] == "Xiaomi 测试手机"
     assert client.get("/api/mobile/devices").json()[0]["label"] == "Xiaomi 测试手机"
+
+
+def test_device_disconnect_retains_pairing_and_unbind_revokes(client, db):
+    _, device, headers, _ = setup(client, db)
+    assert client.post("/api/mobile/device/disconnect", headers=headers).status_code == 200
+    row = next(d for d in client.get("/api/mobile/devices").json() if str(d["id"]) == device["device_id"])
+    assert row["online"] is False
+    assert row["status"] == "paired"
+    assert client.post("/api/mobile/device/state", headers=headers).status_code == 200
+    assert (
+        client.post(
+            "/api/mobile/device/heartbeat",
+            headers=headers,
+            json={"account": "+447700900001", "ready": False, "accessibility": True, "app_version": "test"},
+        ).status_code
+        == 200
+    )
+    assert client.post("/api/mobile/device/unbind", headers=headers).status_code == 200
+    assert client.post("/api/mobile/device/state", headers=headers).status_code == 401
+
+
+def test_admin_phone_can_execute_task_assigned_to_another_authorized_member(client, db):
+    from app.core.models import Operator
+    from app.modules.leads.models import Lead
+
+    tid, device, headers, _ = setup(client, db)
+    task = db.get(ManualTask, tid)
+    owner = db.scalar(select(Operator).where(Operator.username == "tester"))
+    assert owner.role == "admin"
+    member = Operator(username="phone-member", role="member", is_active=True, password_hash="unused")
+    db.add(member)
+    task.assigned_to = member.username
+    db.get(Lead, task.lead_id).assigned_to = member.username
+    db.commit()
+    job, _ = enqueue(client, tid, device)
+    claimed = client.post("/api/mobile/device/claim", headers=headers)
+    assert claimed.json()["job"]["id"] == job["id"]
+    assert db.get(ManualTask, tid).assigned_to == member.username
+
+
+def test_member_phone_cannot_execute_another_members_task(client, db):
+    import pytest
+    from fastapi import HTTPException
+
+    from app.core.models import Operator
+    from app.modules.mobile.routes import check_device_access
+
+    tid, _, _, _ = setup(client, db)
+    device = db.scalar(select(Device))
+    db.add(Operator(username="another-phone-owner", role="member", is_active=True, password_hash="unused"))
+    device.owner = "another-phone-owner"
+    db.commit()
+    task = db.get(ManualTask, tid)
+    with pytest.raises(HTTPException, match="任务负责人"):
+        check_device_access(db, task.lead_id, device, task.assigned_to, "tester")
+
+
+def test_mobile_readiness_reports_missing_accessibility_and_start_separately(client, db):
+    tid, device, _, _ = setup(client, db)
+    row = db.scalar(select(Device))
+    row.status = "paired"
+    row.capabilities = {**row.capabilities, "accessibility": False}
+    db.commit()
+    path = f"/api/mobile/tasks/{tid}/preview"
+    response = client.post(path, json={"device_id": device["device_id"], "preview_hash": "0" * 64})
+    assert response.status_code == 409
+    assert "无障碍服务" in response.json()["detail"]
+    row.capabilities = {**row.capabilities, "accessibility": True}
+    db.commit()
+    response = client.post(path, json={"device_id": device["device_id"], "preview_hash": "0" * 64})
+    assert response.status_code == 409
+    assert "任务页" in response.json()["detail"]

@@ -348,7 +348,9 @@ def context(db: Session, lead: Lead) -> dict:
     }
 
 
-def assess(db: Session, draft: Preparation, *, require_approval: bool = True, confirm_email: bool = False) -> list[str]:
+def assess(
+    db: Session, draft: Preparation, *, require_approval: bool = True, confirm_recipient: bool = False
+) -> list[str]:
     blockers = []
     try:
         service.check_member_owner(db, draft.lead_id, draft.assigned_to)
@@ -366,25 +368,27 @@ def assess(db: Session, draft: Preparation, *, require_approval: bool = True, co
     piece = db.get(ContentPiece, draft.content_id) if draft.content_id else None
     if service.is_suppressed(db, draft.lead_id, elig.contact_ref if elig else None):
         blockers.append("客户或联系方式已被抑制，不能触达")
-    relaxed_email = bool(elig and elig.channel.value == "email" and confirm_email)
+    relaxed_recipient = bool(elig and confirm_recipient)
     if not elig:
         blockers.append("尚未选择联系方式")
     else:
         if elig.lead_id != draft.lead_id or elig.channel.value != draft.channel:
             blockers.append("联系方式与客户或渠道不一致")
-        if elig.eligibility != Eligibility.allowed and (not relaxed_email or elig.eligibility == Eligibility.blocked):
+        if elig.eligibility != Eligibility.allowed and (
+            not relaxed_recipient or elig.eligibility == Eligibility.blocked
+        ):
             from app.modules.sales import admission
 
             lead = db.get(Lead, draft.lead_id)
             auto = admission.public(db, lead, elig) if lead else None
             blockers.append((auto or {}).get("reason") or "渠道准入尚未允许，请运行 AI 自动准入或补充证据")
-        if elig.conditions and not relaxed_email:
+        if elig.conditions and not relaxed_recipient:
             blockers.extend(channel_conditions.missing(elig.channel.value, elig.conditions))
             if piece:
                 blockers.extend(channel_conditions.content_missing(elig.conditions, str(piece.id), piece.content_hash))
         if elig.contact_usable == ContactUsable.invalid:
             blockers.append("联系方式无效")
-        if not relaxed_email and elig.review_due_at and elig.review_due_at < service.now():
+        if not relaxed_recipient and elig.review_due_at and elig.review_due_at < service.now():
             blockers.append("渠道准入复核已到期")
         if draft.execution_mode in {"manual", "mobile"} and not manual_target(draft.channel, elig.contact_ref):
             blockers.append("缺少有效邮箱、电话或该平台的 HTTPS 主页链接")
@@ -404,7 +408,7 @@ def assess(db: Session, draft: Preparation, *, require_approval: bool = True, co
         elig
         and piece
         and elig.eligibility == Eligibility.allowed
-        and not relaxed_email
+        and not relaxed_recipient
         and (elig.rule_version or "").startswith("ai-admission:")
     ):
         try:

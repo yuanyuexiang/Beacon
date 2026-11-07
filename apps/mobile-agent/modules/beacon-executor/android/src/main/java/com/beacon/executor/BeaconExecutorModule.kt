@@ -36,9 +36,15 @@ class BeaconExecutorModule : Module() {
     }
     Function("configure") { server: String, token: String ->
       check(Journal(context()).unfinished().isEmpty()) { "请先恢复未回填记录" }
-      NotificationMonitor.configure(context(), "[]"); Vault(context()).save(server, token)
+      NotificationMonitor.configure(context(), "[]"); Vault(context()).save(server, token); Vault(context()).setDisconnected(false)
     }
     Function("credentials") { Vault(context()).read() }
+    Function("connectionPaused") { Vault(context()).disconnected() }
+    Function("setConnectionPaused") { paused: Boolean -> Vault(context()).setDisconnected(paused) }
+    Function("clearConnection") {
+      check(PhoneService.instance?.running != true && Journal(context()).unfinished().isEmpty()) { "请先处理当前任务及未回填记录" }
+      NotificationMonitor.configure(context(), "[]"); Vault(context()).clearConnection()
+    }
     Function("rememberAccounts") { raw: String -> Vault(context()).rememberAccounts(raw) }
     Function("rememberAccount") { account: String -> Vault(context()).rememberAccount(account) }
     Function("stage") { raw: String ->

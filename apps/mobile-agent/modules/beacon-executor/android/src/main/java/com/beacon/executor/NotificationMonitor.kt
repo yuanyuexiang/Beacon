@@ -85,7 +85,7 @@ class NotificationMonitor : NotificationListenerService() {
     }
     @Synchronized fun flush(c: Context) {
       val prefs = c.getSharedPreferences("beacon-notifications", MODE_PRIVATE)
-      if (!enabled(c) || JSONArray(channels(c)).length() == 0) return
+      if (Vault(c).disconnected() || !enabled(c) || JSONArray(channels(c)).length() == 0) return
       try {
         val credentials = Vault(c).read()
         if (credentials["token"].isNullOrBlank()) return

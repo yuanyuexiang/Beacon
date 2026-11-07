@@ -1,7 +1,11 @@
 export type PairingTicket = { type: 'beacon-pair'; version: 1; server: string; code: string; expires_at: string; owner: string };
 export function pairingServer(value: string): string {
   const u = new URL(value.trim());
-  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && u.hostname === '127.0.0.1' && u.port === '8000')) throw new Error('请使用 HTTPS 服务器；USB 本地测试只支持 http://127.0.0.1:8000');
+  const parts = u.hostname.split('.').map(Number);
+  const ipv4 = parts.length === 4 && parts.every(v => Number.isInteger(v) && v >= 0 && v <= 255);
+  const lan = ipv4 && (parts[0] === 10 || parts[0] === 192 && parts[1] === 168 || parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31);
+  const usb = u.hostname === '127.0.0.1' && u.port === '8000';
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && (lan || usb))) throw new Error('云端使用 HTTPS；局域网填写电脑 IP，例如 http://192.168.1.100:8000');
   if (u.username || u.password || u.pathname !== '/' || u.search || u.hash) throw new Error('只填写服务器根地址');
   return u.origin;
 }

@@ -34,6 +34,7 @@ class Vault(val c: Context) {
     return String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)))
   }
   fun save(server: String, token: String) {
+    check(validServer(server)) { "Invalid server address" }
     val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
     val encrypted = cipher.doFinal(token.toByteArray())
     check(prefs.edit().putString("server", server).putString("token", Base64.encodeToString(encrypted, Base64.NO_WRAP))
@@ -46,6 +47,9 @@ class Vault(val c: Context) {
     }
     return mapOf("server" to (prefs.getString("server", "") ?: ""), "token" to String(cipher.doFinal(Base64.decode(encoded, Base64.NO_WRAP))))
   }
+  fun disconnected(): Boolean = prefs.getBoolean("disconnected", false)
+  fun setDisconnected(value: Boolean) { check(prefs.edit().putBoolean("disconnected", value).commit()) }
+  fun clearConnection() { check(prefs.edit().remove("server").remove("token").remove("iv").putBoolean("disconnected", true).commit()) }
   fun rememberAccount(account: String) {
     check(account.matches(Regex("^\\+[1-9][0-9]{6,14}$"))) { "请输入完整国际电话号码" }
     check(prefs.edit().putString("account", account).commit())
@@ -93,4 +97,15 @@ class Journal(private val c: Context) : SQLiteOpenHelper(c, "beacon-execution.db
     rows
   }
   fun contains(id: String): Boolean = readableDatabase.rawQuery("SELECT id FROM journal WHERE id=?", arrayOf(id)).use { it.moveToFirst() }
+}
+
+internal fun validServer(value: String): Boolean {
+  return try {
+    val u = java.net.URI(value)
+    val parts = u.host.orEmpty().split(".").mapNotNull { it.toIntOrNull() }
+    val ipv4 = parts.size == 4 && parts.all { it in 0..255 }
+    val lan = ipv4 && (parts[0] == 10 || parts[0] == 192 && parts[1] == 168 || parts[0] == 172 && parts[1] in 16..31)
+    u.userInfo == null && (u.path.isNullOrEmpty() || u.path == "/") && u.query == null && u.fragment == null && !u.host.isNullOrBlank() &&
+      (u.scheme == "https" || u.scheme == "http" && (lan || u.host == "127.0.0.1" && u.port == 8000))
+  } catch (_: Exception) { false }
 }

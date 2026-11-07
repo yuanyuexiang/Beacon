@@ -200,3 +200,27 @@ def test_new_recipient_can_prepare_and_confirm_without_replacing_old_task(client
     assert response.json()["task_id"] != first.json()["task_id"]
     assert db.scalar(select(func.count()).select_from(ManualTask)) == 2
     assert "/send" not in calls
+
+
+def test_social_manual_unknown_source_uses_explicit_recipient_confirmation(client, db, monkeypatch):
+    from app.modules.sales import service
+    from app.modules.sales.models import Channel, ChannelEligibility, Eligibility
+    from app.modules.sales.preparation import Preparation
+
+    draft, calls = setup(client, db, monkeypatch, mode="manual")
+    contact = db.get(ChannelEligibility, draft["eligibility_id"])
+    contact.channel = Channel.facebook
+    contact.contact_ref = "https://www.facebook.com/example"
+    contact.eligibility = Eligibility.unknown
+    saved = db.get(Preparation, draft["id"])
+    saved.channel = "facebook"
+    db.commit()
+    base = f"/api/communication/drafts/{draft['id']}"
+    preview = client.post(base + "/preview").json()
+    assert preview["issues"] == []
+    result = client.post(base + "/confirm", json={"preview_hash": preview["preview_hash"], "confirmed": True})
+    assert result.status_code == 200, result.text
+    task = db.get(ManualTask, result.json()["task_id"])
+    service.check_can_contact(db, contact, db.get(ContentPiece, task.content_id))
+    assert contact.eligibility == Eligibility.unknown
+    assert calls == []

@@ -9,6 +9,9 @@ export default requireNativeModule<{
   syncNotifications(): Promise<void>;
   permissions(): void;
   configure(server: string, token: string): void;
+  connectionPaused(): boolean;
+  setConnectionPaused(paused: boolean): void;
+  clearConnection(): void;
   credentials(): { server: string; token: string };
   rememberAccounts(raw: string): void;
   rememberAccount(account: string): void;

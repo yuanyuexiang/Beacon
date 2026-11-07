@@ -4,7 +4,7 @@ import Link from "next/link";
 import dayjs from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import Button from "@/components/AccessButton";
-import { MOBILE_ACTIONS, MOBILE_LABELS, mobilePlatform } from "@/lib/mobile-channels";
+import { MOBILE_ACTIONS, MOBILE_LABELS, mobilePlatform, phoneUnavailableReason, ExecutionPhone } from "@/lib/mobile-channels";
 import { MobileTask } from "./MobileChannel";
 import ChannelConditions from "./ChannelConditions";
 import { api, json } from "@/lib/api";
@@ -14,7 +14,7 @@ import { contactRank } from "@/lib/contact-ranking";
 import { useOperator } from "@/lib/auth";
 import { nextSendIssue } from "@/lib/sendflow";
 
-type Phone = { id: string; label: string; status: string; online?: boolean; capabilities?: { protocol?: number; installed?: string[]; accounts?: Record<string,string> } };
+type Phone = ExecutionPhone;
 type Preview = { preview_hash: string; issues: string[]; payload: { from: string; to: string; subject: string; body: string; mode: string; mobile_context?: { device_id: string; device_label: string; payload: { sender: string; action: string } } } };
 export default function MessageComposer({ draft, assignees, returnTo, sender, optOut, preferredAnalysisId, onViewMenus, onChange, onWorkingChange, onResultChange, lockedRecipient = false }: { onResultChange?: () => void; lockedRecipient?: boolean; draft: Draft; assignees: Assignee[]; returnTo: string; sender: string; optOut: string; preferredAnalysisId?: string; onViewMenus?: () => void; onChange: (d: Draft) => void; onWorkingChange?: (id:string,active:boolean) => void }) {
   const { me } = useOperator();
@@ -39,13 +39,18 @@ export default function MessageComposer({ draft, assignees, returnTo, sender, op
   useEffect(() => { setAction(MOBILE_ACTIONS[platform || ""]?.[0]?.value || "direct_message"); setResult(undefined); setPreview(undefined); setIssues([]); }, [draft.id, draft.eligibility_id, draft.execution_mode, platform]);
   useEffect(() => {
     if (draft.execution_mode !== "mobile") return;
-    let active = true; setPhoneLoading(true); setPhoneError(undefined);
+    let active = true;
+    const load = () => { setPhoneError(undefined);
     api<Phone[]>("/api/mobile/devices").then(list => {
       if (!active) return;
-      const ready = list.filter(d => d.status === "ready" && d.online && (d.capabilities?.protocol === 2 ? !!platform && d.capabilities.installed?.includes(platform) && (platform !== "whatsapp" || !!d.capabilities.accounts?.whatsapp) : platform === "whatsapp"));
-      setPhones(ready); setDeviceId(old => ready.some(d => d.id === old) ? old : ready.length === 1 ? ready[0].id : undefined);
+      const visible = list.filter(d => d.status !== "revoked");
+      const ready = visible.filter(d => !phoneUnavailableReason(d, platform));
+      setPhones(visible); setDeviceId(old => visible.some(d => d.id === old) ? old : ready.length === 1 ? ready[0].id : visible.length === 1 ? visible[0].id : undefined);
     }).catch(e => { if(active) { setPhones([]); setDeviceId(undefined); setPhoneError(e.message); } }).finally(() => { if(active) setPhoneLoading(false); });
-    return () => { active = false; };
+    };
+    setPhoneLoading(true); load();
+    const timer = setInterval(load, 10000);
+    return () => { active = false; clearInterval(timer); };
   }, [draft.execution_mode, platform, phoneRevision]);
   const [form] = Form.useForm();
   const latest = useRef(draft), edits = useRef({body,subject}), dirty = useRef(false), pending = useRef<Promise<Draft> | null>(null);
@@ -80,13 +85,6 @@ export default function MessageComposer({ draft, assignees, returnTo, sender, op
     if (draft.execution_mode === "mobile" && !deviceId) { setPhoneError("请连接手机并选择执行设备"); return; }
     await save();
     const d = latest.current;
-    const c = d.context.contacts.find(c => c.id === d.eligibility_id);
-    if (d.channel !== "email" && c && c.eligibility !== "allowed" && c.eligibility !== "blocked" && !c.suppressed && !checked.current.has(c.id)) {
-      checked.current.add(c.id);
-      // Reuse existing facts first; only fetch when no saved recommendation exists. Never loop on missing evidence.
-      await api(`/api/leads/${d.lead_id}/auto-admission?refresh=${!c.recommendation || c.auto_admission?.needs_refresh || c.auto_admission?.status === "unknown"}`,{method:"POST"});
-      await refresh();
-    }
     const p = await api<Preview>(`/api/communication/drafts/${draft.id}/preview`,json(d.execution_mode === "mobile" ? {device_id:deviceId,action} : {}));
     setIssues(p.issues); setConfirmed(false);
     if (!p.issues.length) setPreview(p);
@@ -101,9 +99,10 @@ export default function MessageComposer({ draft, assignees, returnTo, sender, op
         {lockedRecipient ? <div className="outreach-recipient" aria-label="当前收件人"><Typography.Text type="secondary">{channelLabel(draft.channel, contact?.contact_ref)}收件人</Typography.Text><Typography.Paragraph strong style={{margin:"6px 0 0",overflowWrap:"anywhere"}}>{contact?.contact_ref || "请从左侧选择联系方式"}</Typography.Paragraph></div> : <Form.Item label="发给谁"><Space.Compact style={{width:"100%"}}><Select aria-label="收件人" placeholder="选择联系方式" style={{flex:1,minWidth:0,width:0}} value={draft.eligibility_id || undefined} disabled={busy || readOnly} options={draft.context.contacts.filter(c => c.channel === draft.channel).sort((a,b) => contactRank(a.recommendation)-contactRank(b.recommendation)).map(c => ({value:c.id,label:`${c.contact_ref || "未填写"}${c.recommendation?.owner ? ` · ${c.recommendation.owner}` : ""}${c.suppressed ? " · 已拒收" : ""}`}))} onChange={id => act(() => patch({eligibility_id:id}))} /><Button disabled={busy || readOnly} onClick={() => setSection(["contact"])}>添加</Button></Space.Compact></Form.Item>}
         {!!platform ? <Form.Item label="触达方式"><Radio.Group aria-label="触达方式" value={draft.execution_mode} disabled={busy || readOnly} onChange={e => act(() => patch({execution_mode:e.target.value}))} options={[{value:"mobile",label:"手机触达"},{value:"manual",label:"人工触达"}, ...(draft.execution_mode === "social" ? [{value:"social",label:"已连接 API 会话"}] : [])]} />{draft.execution_mode === "manual" && <Typography.Paragraph type="secondary" style={{margin:"8px 0 0"}}>复制消息，打开对方主页后自行粘贴发送。不需要连接手机或配置社媒 API。</Typography.Paragraph>}</Form.Item> : draft.channel === "email" ? <Typography.Paragraph type="secondary">{draft.execution_mode === "gmail" ? "通过 Gmail 发送" : "通过邮箱客户端人工发送"}</Typography.Paragraph> : null}
         {draft.execution_mode === "mobile" && <Form.Item label={`通过手机 ${MOBILE_LABELS[platform || ""] || "社媒"} 联系`}>
-          <Space wrap><Select aria-label="执行手机" placeholder="选择在线手机" value={deviceId} loading={phoneLoading} disabled={busy || readOnly} style={{width:260}} options={phones.map(d => ({value:d.id,label:d.label}))} onChange={setDeviceId} /><Button disabled={phoneLoading || busy} onClick={() => setPhoneRevision(v => v+1)}>刷新手机</Button>{(MOBILE_ACTIONS[platform || ""]?.length || 0) > 1 && <Select aria-label="手机联系动作" value={action} options={MOBILE_ACTIONS[platform || ""]} style={{width:240}} disabled={busy || readOnly} onChange={setAction} />}</Space>
+          <Space wrap><Select aria-label="执行手机" placeholder="选择已绑定手机" value={deviceId} loading={phoneLoading} disabled={busy || readOnly} style={{width:260}} options={phones.map(d => ({value:d.id,label:`${d.label} · ${phoneUnavailableReason(d,platform) ? !d.online ? "离线" : "待就绪" : "已就绪"}`}))} onChange={setDeviceId} /><Button disabled={phoneLoading || busy} onClick={() => setPhoneRevision(v => v+1)}>刷新手机</Button>{(MOBILE_ACTIONS[platform || ""]?.length || 0) > 1 && <Select aria-label="手机联系动作" value={action} options={MOBILE_ACTIONS[platform || ""]} style={{width:240}} disabled={busy || readOnly} onChange={setAction} />}</Space>
           {phoneError && <Typography.Paragraph type="danger">{phoneError}</Typography.Paragraph>}
-          {!phoneLoading && !phones.length && <Typography.Paragraph type="secondary">请在手机助手点击“连接并检查任务”，保持解锁并安装对应应用。<Link href="/settings?section=mobile">配对或管理手机</Link></Typography.Paragraph>}
+          {deviceId && phones.find(d => d.id === deviceId) && phoneUnavailableReason(phones.find(d => d.id === deviceId)!, platform) && <Typography.Paragraph type="warning" style={{margin:"8px 0"}}>{phoneUnavailableReason(phones.find(d => d.id === deviceId)!, platform)}。手机状态每 10 秒自动更新。</Typography.Paragraph>}
+          {!phoneLoading && !phones.length && <Typography.Paragraph type="secondary">尚未找到当前账号绑定的手机。<Link href="/settings?section=mobile">配对或管理手机</Link></Typography.Paragraph>}
         </Form.Item>}
         {draft.channel === "email" && <Form.Item label="主题"><Input aria-label="邮件主题" value={subject} disabled={!piece || busy || readOnly} maxLength={200} onChange={e => { dirty.current=true; edits.current.subject=e.target.value; setSubject(e.target.value); setIssues([]); }} /></Form.Item>}
         <Form.Item label="消息正文"><Input.TextArea aria-label="文案内容" value={body} rows={9} disabled={!piece || busy || readOnly} placeholder="点击 AI 起草，根据门店和菜单资料生成消息后可直接修改" onChange={e => { dirty.current=true; edits.current.body=e.target.value; setBody(e.target.value); setIssues([]); }} /></Form.Item>

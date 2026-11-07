@@ -21,7 +21,7 @@ async function request(url: string, options: RequestInit) {
     return data;
   } catch (e) {
     if (e instanceof Error && (e.name === 'AbortError' || e instanceof TypeError)) {
-      throw new Error('连接不到 Beacon。USB 测试请检查连接线和本机转发；云端请检查服务器网络。配对仍保留，恢复后点击“连接并检查任务”。');
+      throw new Error('连接不到 Beacon。局域网请检查手机和电脑是否在同一网络、电脑 IP 和端口是否正确；云端请检查网络。配对仍保留，可重新连接。');
     }
     throw e;
   } finally { clearTimeout(timer); }
@@ -56,6 +56,8 @@ export default function App() {
   const [accountCandidate, setAccountCandidate] = useState<{channel: string; identity: string; observed_at: number; source?: string; model?: string}>();
   const [selectedChannel, setSelectedChannel] = useState('whatsapp');
   const [paired, setPaired] = useState(false);
+  const [connectionPaused, setConnectionPaused] = useState(() => Executor.connectionPaused());
+  const [switching, setSwitching] = useState(false);
   const [ready, setReady] = useState(false);
   const [initialized, setInitialized] = useState(false), [connected, setConnected] = useState(false);
   const [status, setStatus] = useState<PhoneStatus>();
@@ -74,7 +76,8 @@ export default function App() {
     if (disposed) return;
     try { const c = Executor.credentials(); if (c.token) {
       setPaired(true); setServer(c.server);
-      void request(c.server + '/api/mobile/device/state', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.token }, body: '{}' }).then(profile => {
+      if (Executor.connectionPaused()) setInitialized(true);
+      else void request(c.server + '/api/mobile/device/state', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.token }, body: '{}' }).then(profile => {
         if (profile.label && profile.label !== '我的手机') { setLabel(profile.label); setSavedLabel(profile.label); }
         if (profile.accounts) setAccounts(profile.accounts);
         if (profile.account) { setAccount(current => current || profile.account); }
@@ -88,46 +91,70 @@ export default function App() {
     return () => { disposed = true; clearInterval(timer); sub.remove(); };
   }, []);
   const call = useCallback(async (path: string, body: object) => {
+    if (Executor.connectionPaused() && !['/disconnect', '/unbind'].includes(path)) throw new Error('当前已断开，请先重新连接平台');
     const c = Executor.credentials();
     return request(c.server + '/api/mobile/device' + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + c.token }, body: JSON.stringify(body) });
   }, []);
   async function action(key: string, fn: () => Promise<void>) { if (busy) return; Keyboard.dismiss(); setBusy(key); setNotice(''); try { await fn(); inspect(); } catch (e) { const message = e instanceof Error ? e.message : String(e); setNotice(message.replace(/^[\s\S]*Caused by:\s*(?:java\.lang\.[A-Za-z]+Exception:\s*)?/, '')); if (key === 'pair') Alert.alert('未能配对', message); } finally { setBusy(''); } }
   const heartbeat = useCallback(async (active: boolean, phoneLabel = savedLabel) => {
     const response = await call('/heartbeat', { label: phoneLabel.trim() || Executor.status().deviceName, account, accounts: Object.fromEntries(Object.entries({ ...accounts, ...(account ? { whatsapp: account } : {}) }).filter(([, value]) => value.trim())), installed: Executor.status().installed, ready: active, accessibility: Executor.status().accessibility, app_version: '0.3.0', protocol: 2 });
+    if (Executor.connectionPaused()) return response;
     setConnected(true); setConnectionError(''); setConnectedAt(new Date().toLocaleTimeString());
     setPending(response.pending_count || 0);
     if (active && response.status !== 'ready') setReady(false);
     return response;
   }, [savedLabel, account, accounts, call]);
   useEffect(() => {
-    if (!paired || !initialized) return;
+    if (!paired || !initialized || connectionPaused) return;
     let active = true, inFlight = false;
     const ping = async () => {
       if (inFlight || AppState.currentState !== 'active') return;
       inFlight = true;
       try { await heartbeat(ready); }
-      catch (e) { if (active) { setConnected(false); setConnectionError(String(e)); } }
+      catch (e) { if (active) { setConnected(false); setReady(false); setConnectionError(String(e)); } }
       finally { inFlight = false; }
     };
     void ping();
     const timer = setInterval(() => void ping(), 30000);
     const subscription = AppState.addEventListener('change', state => { if(state === 'active') void ping(); });
     return () => { active = false; clearInterval(timer); subscription.remove(); };
-  }, [paired, initialized, ready, heartbeat]);
+  }, [paired, initialized, ready, heartbeat, connectionPaused]);
   async function pairDevice(address: string, pairingCode: string) {
     if (Executor.status().running || job || (status?.journal && !JSON.parse(status.journal).reported)) throw new Error('请先处理当前任务或回填记录，再更换设备配对');
     const base = pairingServer(address);
     if (!/^\d{6}$/.test(pairingCode.trim())) throw new Error('请输入 6 位数字配对码');
     if (!label.trim()) throw new Error('请填写手机名称');
     const data = await request(base + '/api/mobile/device/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: pairingCode.trim(), label: label.trim() }) });
-    Executor.configure(base, data.token); setSavedLabel(label.trim()); setServer(base); setCode(''); setPaired(true); setInitialized(true); setConnected(false); setReady(false); setPending(0); setConnectedAt(undefined); setTab('任务'); setNotice(`已绑定到 ${data.owner || '当前网页账号'}，请核对本方账号并连接检查。`);
+    if (paired) { try { await call('/unbind', {}); } catch { /* Old server may be unreachable; the phone stops using its credentials. */ } }
+    Executor.configure(base, data.token); setConnectionPaused(false); setSwitching(false); setSavedLabel(label.trim()); setServer(base); setCode(''); setPaired(true); setInitialized(true); setConnected(false); setReady(false); setPending(0); setConnectedAt(undefined); setTab('任务'); setNotice(`已绑定到 ${data.owner || '当前网页账号'}，请核对本方账号并连接检查。`);
+  }
+  async function reconnect() {
+    Executor.setConnectionPaused(false); setConnectionPaused(false); setReady(false);
+    try { await heartbeat(false); setNotice('平台已连接；点击运行检查后再开启执行。'); }
+    catch (e) { setConnected(false); setConnectionError(e instanceof Error ? e.message : String(e)); throw e; }
+  }
+  async function disconnect() {
+    if (Executor.status().running) throw new Error('正在执行任务，请完成后再断开');
+    Executor.pause(); Executor.setConnectionPaused(true); setConnectionPaused(true); setReady(false); setConnected(false);
+    try { await call('/disconnect', {}); } catch { /* Keep the local disconnect even when offline. */ }
+    setNotice('已断开，配对和社媒账号已保留。');
+  }
+  async function unbind() {
+    if (Executor.status().running || job || (status?.journal && !JSON.parse(status.journal).reported)) throw new Error('请先处理当前任务及未回填记录');
+    await call('/unbind', {});
+    Executor.clearConnection(); setPaired(false); setReady(false); setConnected(false); setConnectionPaused(true); setPending(0); setConnectedAt(undefined); setConnectionError('');
+    setNotice('已解除绑定，可以扫描另一平台的配对码。');
   }
   async function start() {
+    if (connectionPaused) await reconnect();
     const configured: Record<string, string> = { ...accounts, ...(account ? { whatsapp: account } : {}) };
     const installed = Executor.status().installed || [];
     if (!Object.values(configured).some(Boolean) && !installed.some(p => p !== 'whatsapp')) throw new Error('请安装社媒应用，或填写 WhatsApp 号码');
     if (account && !/^\+[1-9]\d{6,14}$/.test(account)) throw new Error('请核对 WhatsApp 的完整国际号码');
-    const s = Executor.status(); if (!s.installed?.some(p => p !== 'whatsapp' || configured[p]) || !s.accessibility || !s.unlocked) throw new Error('请完成运行检查并安装对应社媒应用');
+    const s = Executor.status();
+    if (!s.accessibility) { Executor.permissions(); setNotice('请在系统设置开启“Beacon 手机执行”无障碍服务，返回后点击“检查并准备执行”。'); return; }
+    if (!s.unlocked) throw new Error('请先解锁手机屏幕');
+    if (!s.installed?.some(p => p !== 'whatsapp' || configured[p])) throw new Error('请安装对应社媒应用；使用 WhatsApp 时填写本方号码');
     const profile = await heartbeat(true);
     if (profile.status !== 'ready') throw new Error('平台已连接，但运行检查未通过，请检查无障碍服务。');
     if (account) Executor.rememberAccount(account); Executor.rememberAccounts(JSON.stringify({ ...accounts, ...(account ? { whatsapp: account } : {}) })); setReady(true); setNotice('运行检查通过，可以领取已确认任务。');
@@ -136,7 +163,7 @@ export default function App() {
   const field = (placeholder: string, value: string, onChange: (v: string) => void, secure = false) => <TextInput style={styles.input} placeholder={placeholder} value={value} onChangeText={onChange} secureTextEntry={secure} autoCapitalize="none" autoCorrect={false} />;
   const executionReady = ready && connected && !!status?.accessibility && !!status?.unlocked;
   const stateLabel = status?.running ? '正在执行' : executionReady ? '已就绪' : '待运行检查';
-  const platformLabel = !paired ? '未绑定' : connected ? '已连接' : connectionError ? '连接中断' : '连接中';
+  const platformLabel = !paired ? '未绑定' : connectionPaused ? '已断开' : connected ? '已连接' : connectionError ? '连接中断' : '连接中';
   const row = (title: string, detail: string, onPress: () => void) => <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingRow}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.rowDetail}>{detail}</Text></Pressable>;
   const entries: { raw: string; j: { id: string; phase: string; outcome?: string; detail?: string; reported?: boolean; updated_at?: number; snapshot: Job['snapshot'] } }[] = (status?.history || []).flatMap(raw => { try { return [{ raw, j: JSON.parse(raw) }]; } catch { return []; } });
   const completed = entries.filter(({j}) => ['sent', 'request_submitted'].includes(j.outcome || '')).length;
@@ -176,7 +203,8 @@ export default function App() {
       {tab === '设备' && !!panel && <>
         <Pressable accessibilityRole="button" onPress={() => setPanel('')} style={styles.back}><Text style={styles.link}>返回设备</Text></Pressable>
         <Text style={styles.pageHeading}>{panelTitles[panel] || '设备设置'}</Text>
-        {panel === 'connection' && <View style={styles.card}><Text style={styles.heading}>Beacon 平台 · {platformLabel}</Text><Text selectable style={styles.small}>{Executor.credentials().server || server}</Text>{!!connectedAt && <Text style={styles.small}>最近通信：{connectedAt}</Text>}{!!connectionError && <Text accessibilityRole="alert" style={styles.notice}>{connectionError}</Text>}{paired && button('检查连接', 'ping', async () => { await heartbeat(ready); setNotice('已连接 Beacon 平台。'); }, true)}
+        {panel === 'connection' && <View style={styles.card}><Text style={styles.heading}>Beacon 平台 · {platformLabel}</Text><Text selectable style={styles.small}>{Executor.credentials().server || server}</Text>{!!connectedAt && <Text style={styles.small}>最近通信：{connectedAt}</Text>}{!!connectionError && <Text accessibilityRole="alert" style={styles.notice}>{connectionError}</Text>}{paired && <><Text style={styles.small}>执行：{stateLabel}。平台连接成功不等于已开启执行。</Text>{button(connected ? '检查连接' : '重新连接', 'ping', reconnect, true)}{!connectionPaused && button('断开连接', 'disconnect', disconnect, true)}{button('切换 Beacon 平台', 'switch', () => setSwitching(v => !v), true)}{button('解除绑定', 'unbind', () => Alert.alert('解除平台绑定？', '清除当前平台凭据，社媒账号资料保留。', [{text:'取消',style:'cancel'},{text:'解除绑定',style:'destructive',onPress:() => void action('unbind-confirm', unbind)}]), true)}</>}
+        {(!paired || switching) && <>
         <Text>在电脑网页“设置 → 手机执行”点击“绑定新手机”。</Text>
         <PairingScanner disabled={!!busy || !!status?.running} onScanned={p => { setTicket(p); setManual(false); setNotice('已识别配对码，请核对服务器与绑定账号后确认。'); }} />
         {ticket && <View style={styles.message}><Text style={styles.heading}>确认绑定</Text><Text>服务器：{ticket.server}</Text><Text>绑定账号：{ticket.owner}</Text>
@@ -186,11 +214,12 @@ export default function App() {
         </View>}
         <Pressable onPress={() => { setManual(v => !v); setTicket(undefined); }}><Text style={{ color: RED }}>{manual ? '收起手动配对' : '无法扫码？手动配对'}</Text></Pressable>
         {manual && <>
-          <Text style={styles.small}>USB 本地测试填写 http://127.0.0.1:8000；云端填写 HTTPS 地址。</Text>
+          <Text style={styles.small}>本地优先使用同一 Wi-Fi 下电脑的 IP，例如 http://192.168.1.100:8000；云端填写 HTTPS 地址，无需 USB。</Text>
           {field('服务器地址', server, setServer)}
-          {button('使用 USB 本地地址', 'usb-address', () => setServer('http://127.0.0.1:8000'), true)}
+          {button('USB 调试备用地址', 'usb-address', () => setServer('http://127.0.0.1:8000'), true)}
           <TextInput style={styles.input} placeholder="6 位数字配对码" value={code} onChangeText={setCode} keyboardType="number-pad" autoCapitalize="none" autoCorrect={false} />
           {button('配对', 'pair', () => pairDevice(server, code))}
+        </>}
         </>}
         {field('手机名称', label, setLabel)}
         <Text style={styles.small}>系统设备名称：{status?.deviceName || '读取中'}</Text>

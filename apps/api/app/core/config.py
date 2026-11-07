@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     secret_key: str = Field(min_length=32, description="会话签名密钥")
     cookie_secure: bool = False
     release_sha: str | None = None
+    mobile_public_url: str | None = None
     workflow_worker_enabled: bool = True
     bootstrap_operator: str | None = None
     bootstrap_password: str | None = None

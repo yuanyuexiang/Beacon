@@ -73,7 +73,7 @@ class MobileChoice(BaseModel):
 
 
 def snapshot(db: Session, d: Preparation, choice: MobileChoice | None = None, op: Operator | None = None) -> dict:
-    gaps = workbench.assess(db, d, require_approval=False, confirm_email=True)
+    gaps = workbench.assess(db, d, require_approval=False, confirm_recipient=True)
     piece = db.get(ContentPiece, d.content_id) if d.content_id else None
     contact = db.get(ChannelEligibility, d.eligibility_id) if d.eligibility_id else None
     latest = content.latest_content(db, d.lead_id, piece.kind) if piece else None
@@ -222,11 +222,7 @@ def confirm(
     assert piece is not None and d.eligibility_id is not None
     try:
         recipient = db.get(ChannelEligibility, d.eligibility_id)
-        note = (
-            f"recipient-confirmed:{recipient.id}:{recipient.contact_ref}"
-            if recipient and d.channel == "email"
-            else "用户确认完整发送预览"
-        )
+        note = f"recipient-confirmed:{recipient.id}:{recipient.contact_ref}" if recipient else "用户确认完整发送预览"
         content.decide(db, piece, ApprovalDecision.approved, op.username, note, commit=False)
         task = service.create_task(db, d.lead_id, d.eligibility_id, piece.id, op.username, commit=False)
         task.assigned_to, task.execution_mode, task.source_batch_id, task.follow_up_at = (

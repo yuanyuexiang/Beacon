@@ -15,6 +15,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.auth import current_operator, may_send
+from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.models import Operator
 from app.modules.content.models import ContentPiece
@@ -108,7 +109,10 @@ def public_device(d: Device) -> dict:
         "account": d.account,
         "last_seen_at": d.last_seen_at,
         "online": bool(
-            d.status != "revoked" and d.last_seen_at and d.last_seen_at > service.now() - timedelta(seconds=90)
+            d.status != "revoked"
+            and not (d.capabilities or {}).get("connection_paused")
+            and d.last_seen_at
+            and d.last_seen_at > service.now() - timedelta(seconds=90)
         ),
         "capabilities": d.capabilities,
     }
@@ -141,7 +145,7 @@ def create_pairing(db: Session = Depends(get_db), op: Operator = Depends(current
     expiry = service.now() + timedelta(minutes=5)
     db.add(Pairing(owner=op.username, code_hash=digest(code), expires_at=expiry))
     db.commit()
-    return {"code": code, "expires_at": expiry, "owner": op.username}
+    return {"code": code, "expires_at": expiry, "owner": op.username, "server": get_settings().mobile_public_url}
 
 
 @worker_router.post("/pair")
@@ -200,6 +204,21 @@ def remove_device(identity: uuid.UUID, db: Session = Depends(get_db), op: Operat
     return {"removed": True}
 
 
+@worker_router.post("/disconnect")
+def disconnect_device(d: Device = Depends(device_auth), db: Session = Depends(get_db)):
+    d.status = "paired"
+    d.capabilities = {**(d.capabilities or {}), "ready": False, "connection_paused": True}
+    db.commit()
+    return {"disconnected": True}
+
+
+@worker_router.post("/unbind")
+def unbind_device(d: Device = Depends(device_auth), db: Session = Depends(get_db)):
+    revoke_device(db, d)
+    db.commit()
+    return {"unbound": True}
+
+
 @worker_router.post("/heartbeat")
 def heartbeat(body: Heartbeat, d: Device = Depends(device_auth), db: Session = Depends(get_db)):
     if body.protocol == 1 and not re.fullmatch(r"\+[1-9][0-9]{6,14}", body.account):
@@ -249,14 +268,35 @@ def task_for(db: Session, identity: uuid.UUID) -> ManualTask:
     return t
 
 
+def _check_device_access(
+    db: Session, lead_id: uuid.UUID, d: Device, assigned_to: str | None, confirmed_by: str
+) -> None:
+    if not may_send(db, confirmed_by) or not may_send(db, d.owner):
+        raise HTTPException(409, "手机绑定人或确认人的账号已停用或无执行权限")
+    owner = db.scalar(select(Operator).where(Operator.username == d.owner))
+    if owner and owner.role in {"admin", "director"}:
+        service.check_member_owner(db, lead_id, confirmed_by)
+        return
+    if assigned_to != d.owner:
+        raise HTTPException(409, "请选择任务负责人绑定的手机，或由管理员使用自己的手机代办")
+    service.check_member_owner(db, lead_id, d.owner)
+    service.check_member_owner(db, lead_id, confirmed_by)
+
+
+def check_device_access(db: Session, lead_id: uuid.UUID, d: Device, assigned_to: str | None, confirmed_by: str) -> None:
+    try:
+        _check_device_access(db, lead_id, d, assigned_to, confirmed_by)
+    except service.SalesError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
 def checks(db: Session, t: ManualTask, d: Device, confirmed_by: str, action: str = "direct_message") -> dict:
     db.scalar(select(Lead).where(Lead.id == t.lead_id).with_for_update().execution_options(populate_existing=True))
     db.refresh(t)
 
     if t.status not in {TaskStatus.pending, TaskStatus.opened}:
         raise HTTPException(409, "任务已暂停、结束或发送，请刷新")
-    if (t.assigned_to or t.created_by) != d.owner or not may_send(db, confirmed_by):
-        raise HTTPException(409, "请使用任务负责人绑定的手机，确认人也须保持有效权限")
+    check_device_access(db, t.lead_id, d, t.assigned_to or t.created_by, confirmed_by)
     service.check_task_owner(db, t)
     e, p = db.get(ChannelEligibility, t.eligibility_id), db.get(ContentPiece, t.content_id)
     assert e and p
@@ -279,8 +319,7 @@ def destination_payload(
     confirmed_by: str,
     action: str = "direct_message",
 ) -> dict:
-    if assigned_to != d.owner or not may_send(db, confirmed_by):
-        raise HTTPException(409, "请使用任务负责人绑定的手机，确认人也须保持有效权限")
+    check_device_access(db, lead_id, d, assigned_to, confirmed_by)
     try:
         platform, target = destination(channel, contact_ref)
     except ValueError as exc:
@@ -297,8 +336,18 @@ def destination_payload(
         sender = str(PLATFORMS[platform]["label"]) + " 当前登录账号"
     if not sender or modern and platform not in capabilities.get("installed", []):
         raise HTTPException(409, "请先在手机确认该平台账号并检查应用安装状态")
-    if d.status != "ready" or not d.last_seen_at or d.last_seen_at < service.now() - timedelta(seconds=90):
-        raise HTTPException(409, "请在手机上完成运行检查并开启执行")
+    if d.status == "revoked":
+        raise HTTPException(409, "手机已解除绑定，请重新配对")
+    if (
+        capabilities.get("connection_paused")
+        or not d.last_seen_at
+        or d.last_seen_at < service.now() - timedelta(seconds=90)
+    ):
+        raise HTTPException(409, "手机未连接平台，请在手机助手点击重新连接")
+    if not capabilities.get("accessibility"):
+        raise HTTPException(409, "请在手机系统设置开启“Beacon 手机执行”无障碍服务，再返回 App 点击“检查并准备执行”")
+    if d.status != "ready":
+        raise HTTPException(409, "手机已连接，请在手机助手任务页点击“检查并准备执行”")
     lead = db.get(Lead, lead_id)
     return {
         "target": target,
@@ -530,22 +579,14 @@ class InboundIn(Input):
 
 @worker_router.post("/jobs/{identity}/inbound")
 def inbound(identity: uuid.UUID, body: InboundIn, d: Device = Depends(device_auth), db: Session = Depends(get_db)):
-    from app.core.models import Operator
-
     j = db.get(Execution, identity)
     if not j or j.device_id != d.id:
         raise HTTPException(404, "执行记录不存在")
     t = task_for(db, j.task_id)
-    lead = db.get(Lead, j.lead_id)
-    owner = db.scalar(select(Operator).where(Operator.username == d.owner))
-    if (
-        (t.assigned_to or t.created_by) != d.owner
-        or owner
-        and owner.role == "member"
-        and lead
-        and lead.assigned_to != d.owner
-    ):
-        raise HTTPException(403, "门店已交接，不能回填此会话")
+    try:
+        check_device_access(db, j.lead_id, d, t.assigned_to or t.created_by, d.owner)
+    except (HTTPException, service.SalesError):
+        raise HTTPException(403, "门店已交接或账号无权限，不能回填此会话") from None
     if body.body.strip() == j.snapshot.get("body", "").strip():
         raise HTTPException(409, "内容与本方发出的消息一致，请只记录客户真实回复")
     key = "mobile:" + str(j.id) + ":" + digest(body.body.strip())[:32]
