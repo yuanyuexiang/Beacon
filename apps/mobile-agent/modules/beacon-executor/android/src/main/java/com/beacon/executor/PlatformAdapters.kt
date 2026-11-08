@@ -69,8 +69,9 @@ object PlatformAdapters {
   fun messageButton(r: AccessibilityNodeInfo): AccessibilityNodeInfo? = flatten(r).filter {
     label(it) in setOf("Message", "Send message", "发消息", "发送消息", "私信") && !it.isEditable
   }.mapNotNull { clickableNode(it) }.distinctBy { android.graphics.Rect().also { rect -> it.getBoundsInScreen(rect) }.toString() }.singleOrNull()
+  fun linkedinForm(r: AccessibilityNodeInfo) = r.packageName?.toString() in packages["linkedin"].orEmpty() && ChannelPolicy.linkedinCompanyForm(flatten(r).map(::label))
   fun input(r: AccessibilityNodeInfo): AccessibilityNodeInfo? = flatten(r).filter {
-    ChannelPolicy.composer(id(it), it.isEditable) || NavigationPolicy.privateComposer(it.hintText?.toString().orEmpty(), id(it), it.isEditable) || r.packageName?.toString() in packages["facebook"].orEmpty() && ChannelPolicy.facebookComposer(it.hintText?.toString() ?: "", it.contentDescription?.toString() ?: "", it.isEditable)
+    (linkedinForm(r) && it.isEditable) || ChannelPolicy.composer(id(it), it.isEditable) || NavigationPolicy.privateComposer(it.hintText?.toString().orEmpty(), id(it), it.isEditable) || r.packageName?.toString() in packages["facebook"].orEmpty() && ChannelPolicy.facebookComposer(it.hintText?.toString() ?: "", it.contentDescription?.toString() ?: "", it.isEditable)
   }.singleOrNull()
   fun requestScreen(r: AccessibilityNodeInfo): Boolean = flatten(r).any {
     label(it).lowercase() in setOf("message request", "send message request", "invite to chat", "消息请求", "发送消息请求", "邀请聊天")
@@ -82,7 +83,7 @@ object PlatformAdapters {
     check(entry.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, body) })) { "文字填写失败" }
   }
   fun sendButton(r: AccessibilityNodeInfo): AccessibilityNodeInfo? = flatten(r).filter {
-    (id(it).matches(Regex(".*(send_button|send_message_button|composer_send|message_send).*")) || label(it) in setOf("Send", "发送")) && it.isEnabled && !it.isEditable
+    (id(it).matches(Regex(".*(send_button|send_message_button|composer_send|message_send).*")) || label(it) in setOf("Send", "发送") || linkedinForm(r) && label(it) == "发消息") && it.isEnabled && !it.isEditable
   }.mapNotNull { clickableNode(it) }.distinctBy { android.graphics.Rect().also { rect -> it.getBoundsInScreen(rect) }.toString() }.singleOrNull()
   private fun bodyNode(n: AccessibilityNodeInfo, body: String, center: Int): Boolean {
     if (n.isEditable) return false
@@ -108,6 +109,28 @@ object PlatformAdapters {
         ChannelPolicy.facebookReceipt(status, b.left, b.top, b.bottom, screen.centerX(), screen.height(), messageBounds.top, messageBounds.bottom)
       }
       if (receipt) return true
+    }
+    if (r.packageName?.toString() in packages["instagram"].orEmpty()) {
+      val entry = input(r)
+      val empty = entry != null && (entry.text.isNullOrBlank() || entry.isShowingHintText ||
+        (!entry.hintText.isNullOrBlank() && entry.text?.toString() == entry.hintText?.toString()))
+      var parent = message.parent
+      var inList = false
+      val bubbleNodes = mutableListOf(message)
+      repeat(6) {
+        parent?.let { node ->
+          if (id(node) == "message_list") inList = true
+          else if (!inList) bubbleNodes.addAll(flatten(node))
+          parent = node.parent
+        }
+      }
+      val pending = bubbleNodes.any {
+        val text = label(it).lowercase()
+        text in setOf("sending", "sending…", "sending...", "failed to send", "not sent", "retry", "发送中", "发送中…", "发送失败", "未发送", "重试") ||
+          id(it).contains("send_failed") || it.className?.toString() == "android.widget.ProgressBar"
+      }
+      if (ChannelPolicy.instagramBubble(messageBounds.left - rootBounds.left, messageBounds.right - rootBounds.left,
+          rootBounds.width(), inList, empty, pending)) return true
     }
     var ancestor = message.parent
     repeat(3) {

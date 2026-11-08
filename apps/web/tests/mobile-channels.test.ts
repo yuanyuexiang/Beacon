@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { mobilePlatform, MOBILE_ACTIONS, defaultExecutionMode, phoneUnavailableReason } from '../src/lib/mobile-channels';
+import { phoneStatusLabel, mobilePlatform, MOBILE_ACTIONS, defaultExecutionMode, phoneUnavailableReason } from '../src/lib/mobile-channels';
 it('explains connected but paused phones without requiring a recorded Facebook name', () => {
   const phone = {id:'phone',label:'Xiaomi',online:true,status:'paired',capabilities:{protocol:2,installed:['facebook'],accessibility:true}};
   expect(phoneUnavailableReason(phone,'facebook')).toContain('待开启执行');
@@ -25,4 +25,12 @@ it('defaults social preparation to phones while email retains Gmail', () => {
   expect(defaultExecutionMode('email')).toBe('gmail');
   expect(defaultExecutionMode('phone')).toBe('manual');
   expect(defaultExecutionMode('contact_form')).toBe('manual');
+});
+
+it('keeps a locked phone online and accepts queued work without claiming readiness to send now', () => {
+  const phone = {id:'phone',label:'Xiaomi',online:true,status:'ready',capabilities:{protocol:2,installed:['facebook'],accessibility:true,unlocked:false}};
+  expect(phoneStatusLabel(phone)).toBe('在线 · 等待解锁');
+  expect(phoneUnavailableReason(phone,'facebook')).toBeUndefined();
+  expect(phoneStatusLabel({...phone,status:'paired'})).toBe('在线 · 执行已暂停');
+  expect(phoneStatusLabel({...phone,online:false})).toBe('离线');
 });

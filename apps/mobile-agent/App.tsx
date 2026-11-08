@@ -68,7 +68,13 @@ export default function App() {
   const [connectedAt, setConnectedAt] = useState<string>();
   const [pending, setPending] = useState(0);
   function inspect() {
-    try { const s = Executor.status(); setStatus(s); if (s.autoError) { setReady(false); setNotice(s.autoError); } if (s.autoEnabled && s.autoLastContact) { setConnected(true); setConnectedAt(new Date(s.autoLastContact).toLocaleTimeString()); } if (s.journal) { const j = JSON.parse(s.journal); if (j.phase === 'claimed' && !j.reported) setJob(j); else if (j.reported) setJob(undefined); } } catch (e) { setNotice(String(e)); }
+    try {
+      const s = Executor.status(); setStatus(s); setReady(s.autoEnabled);
+      const paused = Executor.connectionPaused(); setConnectionPaused(paused);
+      setConnected(!paused && s.platformConnected); setConnectionError(s.connectionError);
+      if (s.connectionLastContact) setConnectedAt(new Date(s.connectionLastContact).toLocaleTimeString());
+      if (s.journal) { const j = JSON.parse(s.journal); if (j.phase === 'claimed' && !j.reported) setJob(j); else if (j.reported) setJob(undefined); }
+    } catch (e) { setNotice(String(e)); }
   }
   useEffect(() => {
     let disposed = false;
@@ -97,7 +103,7 @@ export default function App() {
   }, []);
   async function action(key: string, fn: () => Promise<void>) { if (busy) return; Keyboard.dismiss(); setBusy(key); setNotice(''); try { await fn(); inspect(); } catch (e) { const message = e instanceof Error ? e.message : String(e); setNotice(message.replace(/^[\s\S]*Caused by:\s*(?:java\.lang\.[A-Za-z]+Exception:\s*)?/, '')); if (key === 'pair') Alert.alert('未能配对', message); } finally { setBusy(''); } }
   const heartbeat = useCallback(async (active: boolean, phoneLabel = savedLabel) => {
-    const response = await call('/heartbeat', { label: phoneLabel.trim() || Executor.status().deviceName, account, accounts: Object.fromEntries(Object.entries({ ...accounts, ...(account ? { whatsapp: account } : {}) }).filter(([, value]) => value.trim())), installed: Executor.status().installed, ready: active, accessibility: Executor.status().accessibility, app_version: '0.3.0', protocol: 2 });
+    const response = await call('/heartbeat', { label: phoneLabel.trim() || Executor.status().deviceName, account, accounts: Object.fromEntries(Object.entries({ ...accounts, ...(account ? { whatsapp: account } : {}) }).filter(([, value]) => value.trim())), installed: Executor.status().installed, ready: active, accessibility: Executor.status().accessibility, unlocked: Executor.status().unlocked, app_version: '0.3.0', protocol: 2 });
     if (Executor.connectionPaused()) return response;
     setConnected(true); setConnectionError(''); setConnectedAt(new Date().toLocaleTimeString());
     setPending(response.pending_count || 0);
@@ -105,20 +111,14 @@ export default function App() {
     return response;
   }, [savedLabel, account, accounts, call]);
   useEffect(() => {
-    if (!paired || !initialized || connectionPaused || status?.autoEnabled) return;
-    let active = true, inFlight = false;
-    const ping = async () => {
-      if (inFlight || AppState.currentState !== 'active') return;
-      inFlight = true;
-      try { await heartbeat(ready); }
-      catch (e) { if (active) { setConnected(false); setReady(false); setConnectionError(String(e)); } }
-      finally { inFlight = false; }
-    };
-    void ping();
-    const timer = setInterval(() => void ping(), 30000);
-    const subscription = AppState.addEventListener('change', state => { if(state === 'active') void ping(); });
-    return () => { active = false; clearInterval(timer); subscription.remove(); };
-  }, [paired, initialized, ready, heartbeat, connectionPaused, status?.autoEnabled]);
+    if (!paired || !initialized || connectionPaused) return;
+    let disposed = false;
+    void Promise.resolve().then(() => {
+      if (disposed) return;
+      try { Executor.startConnection(); } catch (e) { setConnectionError(String(e)); }
+    });
+    return () => { disposed = true; };
+  }, [paired, initialized, connectionPaused]);
   async function pairDevice(address: string, pairingCode: string) {
     if (Executor.status().running || job || (status?.journal && !JSON.parse(status.journal).reported)) throw new Error('请先处理当前任务或回填记录，再更换设备配对');
     const base = pairingServer(address);
@@ -126,11 +126,19 @@ export default function App() {
     if (!label.trim()) throw new Error('请填写手机名称');
     const data = await request(base + '/api/mobile/device/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: pairingCode.trim(), label: label.trim() }) });
     if (paired) { try { await call('/unbind', {}); } catch { /* Old server may be unreachable; the phone stops using its credentials. */ } }
-    Executor.configure(base, data.token); setConnectionPaused(false); setSwitching(false); setSavedLabel(label.trim()); setServer(base); setCode(''); setPaired(true); setInitialized(true); setConnected(false); setReady(false); setPending(0); setConnectedAt(undefined); setTab('任务'); setNotice(`已绑定到 ${data.owner || '当前网页账号'}，请核对本方账号并连接检查。`);
+    Executor.configure(base, data.token); Executor.startConnection(); setConnectionPaused(false); setSwitching(false); setSavedLabel(label.trim()); setServer(base); setCode(''); setPaired(true); setInitialized(true); setConnected(false); setReady(false); setPending(0); setConnectedAt(undefined); setTab('任务'); setNotice(`已绑定到 ${data.owner || '当前网页账号'}，请核对本方账号并连接检查。`);
+  }
+  async function updateAddress() {
+    if (Executor.status().running || job) throw new Error('请先处理当前任务');
+    const base = pairingServer(server); const current = Executor.credentials();
+    const profile = await request(base + '/api/mobile/device/state', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + current.token }, body: '{}' });
+    if (!['paired', 'ready'].includes(profile.status)) throw new Error('新地址未确认此设备，请重新配对');
+    Executor.updateAddress(base, current.server); setServer(base); setConnectionPaused(false); setReady(false); setConnectionError('');
+    setPending(profile.pending_count || 0); setNotice('平台地址已更新，配对及社媒账号已保留；执行已暂停。');
   }
   async function reconnect() {
-    Executor.setConnectionPaused(false); setConnectionPaused(false); setReady(false);
-    try { await heartbeat(false); setNotice('平台已连接；点击运行检查后再开启执行。'); }
+    Executor.setConnectionPaused(false); Executor.startConnection(); setConnectionPaused(false);
+    try { const active = Executor.status().autoEnabled; await heartbeat(active); setNotice(active ? '平台已连接，自动执行保持开启。' : '平台已连接；点击运行检查后再开启执行。'); }
     catch (e) { setConnected(false); setConnectionError(e instanceof Error ? e.message : String(e)); throw e; }
   }
   async function disconnect() {
@@ -162,7 +170,7 @@ export default function App() {
   const button = (title: string, key: string, fn: () => Promise<void> | void, secondary = false) => <Pressable disabled={!!busy} style={[styles.button, secondary && styles.secondary, !!busy && { opacity: .6 }]} onPress={() => void action(key, async () => { await fn(); })}><Text style={[styles.buttonText, secondary && { color: RED }]}>{busy === key ? '处理中…' : title}</Text></Pressable>;
   const field = (placeholder: string, value: string, onChange: (v: string) => void, secure = false) => <TextInput style={styles.input} placeholder={placeholder} value={value} onChangeText={onChange} secureTextEntry={secure} autoCapitalize="none" autoCorrect={false} />;
   const executionReady = ready && connected && !!status?.accessibility && !!status?.unlocked;
-  const stateLabel = status?.running ? '正在执行' : executionReady ? status?.autoEnabled ? '自动执行中' : '已就绪' : '待运行检查';
+  const stateLabel = status?.running ? '正在执行' : status?.autoEnabled && !status.unlocked ? '等待解锁' : executionReady ? status?.autoEnabled ? '自动执行中' : '已就绪' : '待运行检查';
   const platformLabel = !paired ? '未绑定' : connectionPaused ? '已断开' : connected ? '已连接' : connectionError ? '连接中断' : '连接中';
   const row = (title: string, detail: string, onPress: () => void) => <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingRow}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.rowDetail}>{detail}</Text></Pressable>;
   const entries: { raw: string; j: { id: string; phase: string; outcome?: string; detail?: string; reported?: boolean; updated_at?: number; snapshot: Job['snapshot'] } }[] = (status?.history || []).flatMap(raw => { try { return [{ raw, j: JSON.parse(raw) }]; } catch { return []; } });
@@ -204,7 +212,7 @@ export default function App() {
       {tab === '设备' && !!panel && <>
         <Pressable accessibilityRole="button" onPress={() => setPanel('')} style={styles.back}><Text style={styles.link}>返回设备</Text></Pressable>
         <Text style={styles.pageHeading}>{panelTitles[panel] || '设备设置'}</Text>
-        {panel === 'connection' && <View style={styles.card}><Text style={styles.heading}>Beacon 平台 · {platformLabel}</Text><Text selectable style={styles.small}>{Executor.credentials().server || server}</Text>{!!connectedAt && <Text style={styles.small}>最近通信：{connectedAt}</Text>}{!!connectionError && <Text accessibilityRole="alert" style={styles.notice}>{connectionError}</Text>}{paired && <><Text style={styles.small}>执行：{stateLabel}。平台连接成功不等于已开启执行。</Text>{button(connected ? '检查连接' : '重新连接', 'ping', reconnect, true)}{!connectionPaused && button('断开连接', 'disconnect', disconnect, true)}{button('切换 Beacon 平台', 'switch', () => setSwitching(v => !v), true)}{button('解除绑定', 'unbind', () => Alert.alert('解除平台绑定？', '清除当前平台凭据，社媒账号资料保留。', [{text:'取消',style:'cancel'},{text:'解除绑定',style:'destructive',onPress:() => void action('unbind-confirm', unbind)}]), true)}</>}
+        {panel === 'connection' && <View style={styles.card}><Text style={styles.heading}>Beacon 平台 · {platformLabel}</Text><Text style={styles.small}>{status?.connectionService ? '后台连接服务已开启，退出页面后继续待命。' : '后台连接服务未运行，请重新连接。'}</Text>{!status?.notificationPermission && button('允许显示连接通知', 'notify-permission', () => Executor.notificationPermission(), true)}<Text style={styles.small}>后台稳定性：在系统应用设置中允许后台运行／自启动，并将省电策略设为无限制。锁屏时保持连接，等待解锁再执行；强行停止后需重新打开。</Text>{button('后台运行设置', 'background-settings', () => Executor.backgroundSettings(), true)}<Text style={styles.small}>平台地址（切换 Wi-Fi／热点后，填写电脑当前 IP）</Text><TextInput accessibilityLabel="平台地址" style={styles.input} value={server} onChangeText={setServer} keyboardType="url" autoCapitalize="none" autoCorrect={false} />{paired && server.trim() !== Executor.credentials().server && button('验证并更新地址', 'update-address', updateAddress, true)}{!!connectedAt && <Text style={styles.small}>最近通信：{connectedAt}</Text>}{!!connectionError && <Text accessibilityRole="alert" style={styles.notice}>{connectionError}</Text>}{paired && <><Text style={styles.small}>执行：{stateLabel}。平台连接成功不等于已开启执行。</Text>{button(connected ? '检查连接' : '重新连接', 'ping', reconnect, true)}{!connectionPaused && button('断开连接', 'disconnect', disconnect, true)}{button('切换 Beacon 平台', 'switch', () => setSwitching(v => !v), true)}{button('解除绑定', 'unbind', () => Alert.alert('解除平台绑定？', '清除当前平台凭据，社媒账号资料保留。', [{text:'取消',style:'cancel'},{text:'解除绑定',style:'destructive',onPress:() => void action('unbind-confirm', unbind)}]), true)}</>}
         {(!paired || switching) && <>
         <Text>在电脑网页“设置 → 手机执行”点击“绑定新手机”。</Text>
         <PairingScanner disabled={!!busy || !!status?.running} onScanned={p => { setTicket(p); setManual(false); setNotice('已识别配对码，请核对服务器与绑定账号后确认。'); }} />

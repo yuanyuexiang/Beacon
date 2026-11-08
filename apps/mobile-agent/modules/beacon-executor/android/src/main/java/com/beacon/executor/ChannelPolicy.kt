@@ -16,6 +16,15 @@ object ChannelPolicy {
   fun facebookReceipt(status: String, left: Int, top: Int, bottom: Int, center: Int, height: Int, messageTop: Int, messageBottom: Int): Boolean =
     (status in setOf("已发送", "已送达", "已读", "Sent", "Delivered", "Read") || status.endsWith("已读")) &&
       left > center && top >= messageTop && bottom <= messageBottom + height * .12
+  // Instagram's Compose bubbles expose no textual receipt. This means accepted in
+  // the local conversation, never delivered/read. Caller also requires a NEW exact body.
+  fun instagramBubble(left: Int, right: Int, width: Int, inMessageList: Boolean, composerEmpty: Boolean, pendingOrFailed: Boolean): Boolean =
+    width > 0 && left >= 0 && right > left && right <= width &&
+      left - (width - right) > width * .15 && inMessageList && composerEmpty && !pendingOrFailed
+  fun linkedinCompanyForm(labels: List<String>): Boolean =
+    labels.any { it.startsWith("收件人:") || it.startsWith("收件人：") || it.startsWith("To:") } &&
+      labels.any { it.startsWith("撰写消息") || it.startsWith("Write a message") } &&
+      labels.any { it.contains("讨论领域") || it.contains("Topic") }
   fun composer(id: String, editable: Boolean) = editable && inputIds.matches(id)
   fun sentOutcome(action: String) = if (action == "message_request") "request_submitted" else "sent"
   fun manualAction(action: String) = action in setOf("connection_request", "inmail", "contact_discovery")

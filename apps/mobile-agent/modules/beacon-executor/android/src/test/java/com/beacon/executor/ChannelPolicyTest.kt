@@ -39,6 +39,20 @@ class ChannelPolicyTest {
     assertFalse(ChannelPolicy.facebookReceipt("已发送", 30, 2130, 2170, 540, 2400, 2040, 2120))
     assertFalse(ChannelPolicy.facebookReceipt("已发送", 930, 400, 440, 540, 2400, 2040, 2120))
   }
+  @Test fun instagramAcceptanceRequiresOutgoingBubbleAndClearedComposer() {
+    assertTrue(ChannelPolicy.instagramBubble(347, 1059, 1080, true, true, false))
+    assertFalse(ChannelPolicy.instagramBubble(21, 733, 1080, true, true, false))
+    assertFalse(ChannelPolicy.instagramBubble(347, 1059, 1080, false, true, false))
+    assertFalse(ChannelPolicy.instagramBubble(347, 1059, 1080, true, false, false))
+    assertFalse(ChannelPolicy.instagramBubble(347, 1059, 1080, true, true, true))
+    assertFalse(ChannelPolicy.instagramBubble(0, 1080, 1080, true, true, false))
+  }
+  @Test fun linkedinCompanyMessageFormIsNotACommentOrShareSheet() {
+    assertTrue(ChannelPolicy.linkedinCompanyForm(listOf("收件人: Test Company", "撰写消息*", "业务请求. 讨论领域*")))
+    assertFalse(ChannelPolicy.linkedinCompanyForm(listOf("Test Company", "撰写消息*", "业务请求. 讨论领域*")))
+    assertFalse(ChannelPolicy.linkedinCompanyForm(listOf("收件人: Test Company", "发表评论", "讨论领域")))
+    assertFalse(ChannelPolicy.linkedinCompanyForm(listOf("To: Person", "Write a message")))
+  }
   @Test fun invitationAndPaidActionsNeverEnterTheAutomaticSendPath() {
     for (action in listOf("connection_request", "inmail", "contact_discovery")) assertTrue(ChannelPolicy.manualAction(action))
     assertFalse(ChannelPolicy.manualAction("direct_message"))

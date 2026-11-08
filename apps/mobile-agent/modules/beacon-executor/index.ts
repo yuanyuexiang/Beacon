@@ -1,5 +1,5 @@
 import { requireNativeModule } from 'expo';
-export type PhoneStatus = { autoEnabled: boolean; autoError: string; autoLastContact: number; deviceName: string; accessibility: boolean; whatsapp: boolean; unlocked: boolean; running: boolean; journal: string; history: string[]; savedAccount: string; savedAccounts: string; installed: string[] };
+export type PhoneStatus = { connectionService: boolean; platformConnected: boolean; connectionError: string; connectionLastContact: number; batteryUnrestricted: boolean; notificationPermission: boolean; autoEnabled: boolean; autoError: string; autoLastContact: number; deviceName: string; accessibility: boolean; whatsapp: boolean; unlocked: boolean; running: boolean; journal: string; history: string[]; savedAccount: string; savedAccounts: string; installed: string[] };
 export default requireNativeModule<{
   status(): PhoneStatus;
   inspectAccount(channel: string): Promise<string>;
@@ -9,9 +9,13 @@ export default requireNativeModule<{
   syncNotifications(): Promise<void>;
   permissions(): void;
   configure(server: string, token: string): void;
+  startConnection(): void;
+  backgroundSettings(): void;
+  notificationPermission(): void;
   connectionPaused(): boolean;
   setConnectionPaused(paused: boolean): void;
   clearConnection(): void;
+  updateAddress(server: string, previous: string): void;
   credentials(): { server: string; token: string };
   rememberAccounts(raw: string): void;
   rememberAccount(account: string): void;

@@ -8,7 +8,6 @@ import android.view.WindowManager
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CompletableFuture
 import android.accessibilityservice.AccessibilityService
-import android.app.KeyguardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -30,7 +29,6 @@ class PhoneService : AccessibilityService() {
   @Volatile var stopRequested = false
   @Volatile var autoEnabled = false
   @Volatile var autoError = ""
-  @Volatile var autoLastContact = 0L
   private var autoGeneration = 0L
   private val main = Handler(Looper.getMainLooper())
   override fun onServiceConnected() { instance = this }
@@ -45,15 +43,17 @@ class PhoneService : AccessibilityService() {
     check(!autoEnabled) { "自动执行已开启" }
     check(!running && Journal(this).unfinished().isEmpty()) { "请先核对未完成记录，再开启自动执行" }
     check(!Vault(this).disconnected()) { "请先连接平台" }
-    check(!getSystemService(KeyguardManager::class.java).isKeyguardLocked) { "请先解锁手机" }
+    check(ConnectionService.unlocked(this)) { "请先解锁手机" }
+    ConnectionService.start(this)
     autoEnabled = true; autoError = ""; stopRequested = false
     val generation = ++autoGeneration
     thread(name = "beacon-auto-queue") {
       var autoJob: String? = null
       try {
         while (autoEnabled && generation == autoGeneration) {
-          val unlocked = !getSystemService(KeyguardManager::class.java).isKeyguardLocked
-          check(unlocked) { "手机已锁屏，请解锁后重新开启自动执行" }
+          val unlocked = ConnectionService.unlocked(this)
+          if (!unlocked) { Thread.sleep(1000); continue }
+          if (!ConnectionService.isConnected() || !ConnectionService.executionReady) { Thread.sleep(1000); continue }
           check(!Vault(this).disconnected()) { "平台连接已断开" }
           if (!running) {
             if (autoJob != null) {
@@ -63,11 +63,6 @@ class PhoneService : AccessibilityService() {
               }
               autoJob = null
             }
-            val vault = Vault(this)
-            val installed = PlatformAdapters.packages.filterValues { pkgs -> pkgs.any { try { packageManager.getPackageInfo(it, 0); true } catch (_: Exception) { false } } }.keys
-            request("/heartbeat", JSONObject().put("account", vault.account()).put("accounts", JSONObject(vault.accounts()))
-              .put("installed", org.json.JSONArray(installed.toList())).put("ready", true).put("accessibility", true).put("protocol", 2).put("app_version", "0.3.0"))
-            autoLastContact = System.currentTimeMillis()
             if (AutomaticPolicy.canClaim(autoEnabled && generation == autoGeneration, unlocked, running, Journal(this).unfinished().isNotEmpty())) {
               val response = request("/claim", JSONObject())
               check(response.optString("blocked").isBlank()) { response.optString("blocked") }
@@ -85,8 +80,6 @@ class PhoneService : AccessibilityService() {
         }
       } catch (e: Exception) {
         if (generation == autoGeneration) { autoError = e.message ?: "自动执行暂停"; pauseAutomatic() }
-      } finally {
-        if (!autoEnabled) try { request("/heartbeat", JSONObject().put("account", Vault(this).account()).put("accounts", JSONObject(Vault(this).accounts())).put("ready", false).put("accessibility", true).put("protocol", 2).put("app_version", "0.3.0")) } catch (_: Exception) { }
       }
     }
   }
@@ -100,7 +93,7 @@ class PhoneService : AccessibilityService() {
     return try { AccountInspector(this).inspect(channel) } finally { running = false }
   }
   private fun root(): AccessibilityNodeInfo {
-    check(!getSystemService(KeyguardManager::class.java).isKeyguardLocked) { "手机已锁屏" }
+    check(ConnectionService.unlocked(this)) { "手机已锁屏" }
     val r = rootInActiveWindow ?: error("无法读取页面")
     check(r.packageName?.toString() in (PlatformAdapters.packages[platform] ?: emptyList())) { "当前不在目标社媒应用，请人工接管" }
     return r
@@ -402,16 +395,30 @@ class PhoneService : AccessibilityService() {
       check(PlatformAdapters.input(r)?.text?.toString() == body) { "消息已改变" }
       val send = PlatformAdapters.sendButton(r) ?: error("发送按钮已变化")
       j.put("phase", "click_attempted"); Journal(this).save(j)
-      check(PlatformAdapters.click(send)) { "发送点击未完成" }
+      if (PlatformAdapters.linkedinForm(r)) {
+        // This Compose form rejects ACTION_CLICK. Dispatch ONE gesture as the primary
+        // action; never fall back after an ambiguous click that might already submit.
+        val b = android.graphics.Rect().also { send.getBoundsInScreen(it) }
+        val screen = android.graphics.Rect().also { r.getBoundsInScreen(it) }
+        check(!b.isEmpty && screen.contains(b)) { "发送按钮位置无效" }
+        val path = Path().apply { moveTo(b.exactCenterX(), b.exactCenterY()) }
+        check(dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 80)).build(), null, null)) { "发送点击未完成" }
+      } else check(PlatformAdapters.click(send)) { "发送点击未完成" }
     }
     progress(j, "verifying_send")
     var observed = false
+    var stableObservations = 0
     repeat(20) {
-      if (!observed) { Thread.sleep(500); observed = ui { try { val r = root(); PlatformAdapters.header(r, snapshot) != null && PlatformAdapters.count(r, body) > before && PlatformAdapters.sent(r, body) } catch (_: Exception) { false } } }
+      if (!observed) {
+        Thread.sleep(500)
+        val accepted = ui { try { val r = root(); PlatformAdapters.header(r, snapshot) != null && PlatformAdapters.count(r, body) > before && PlatformAdapters.sent(r, body) } catch (_: Exception) { false } }
+        stableObservations = if (accepted) stableObservations + 1 else 0
+        observed = stableObservations >= (if (platform == "instagram") 4 else 1)
+      }
     }
     check(observed) { "无法确认平台发送结果，请核对聊天；不会自动重发" }
     val outcomeAction = j.optString("observed_action", action)
-    settle(j, ChannelPolicy.sentOutcome(outcomeAction), if (outcomeAction == "message_request") "已观察到消息请求提交，请等待对方接受" else "已在目标私信观察到新增消息和发送状态")
+    settle(j, ChannelPolicy.sentOutcome(outcomeAction), if (outcomeAction == "message_request") "已观察到消息请求提交，请等待对方接受" else if (platform == "instagram") "已观察到新增发出气泡且输入框清空，未见发送中或失败；不代表送达或已读" else "已在目标私信观察到新增消息和发送状态")
   }
   fun captureReplies(raw: String): String {
     check(!running) { "正在执行，请稍后读取回复" }

@@ -142,3 +142,5 @@ D73（2026-10-22）：网页 Gmail OAuth，设置页 Web 客户端向导／分�
 2026-11-06 实机 FB 验收：用户随后明确允许测试，指定 https://www.facebook.com/aberdeenairport 和原文“你好”。社媒改用官方 App 当前登录账号，不再强制手工填写；WhatsApp 本方号码保留。FB 实际无稳定 resource-id，按语义标题／私信输入描述适配；首次“开始”可能真实发出消息，执行器不自动点击。当前验收结果见 plan/mobile-multichannel.md，不能把前文“延期测试”理解为本次仍禁止测试。
 
 2026-11-06 手机通知回复：原生 NotificationListenerService，默认关闭、按渠道开启、用户授予 Beacon 通知使用权；持久化待关联收件箱，首次人工关联、稳定会话后续明确入站自动回填，交接／幂等／撤销检查，不自动发送。迁移 d181a0010001，compatibility.json 同步，回滚兼容范围为空。专项 tests/test_mobile_notifications.py；模拟 UI scripts/verify_mobile_notifications_ui.py；原生 NotificationPolicyTest。当前仅本地及手机安装，真实通知验收见 plan/mobile-notifications.md。
+
+2026-11-08 手机后台连接：独立 Android remoteMessaging 前台服务维持跨设备消息会话，常驻通知暂停／断开，15 秒心跳与退避重连；锁屏／熄屏保持连接但不领取，恢复新鲜心跳后继续。系统重建仅恢复连接、不恢复自动发送；未知结果不重发。API 心跳新增兼容可选 unlocked 字段，网页区分在线等待解锁／执行暂停。无迁移；说明及实际验收见 apps/mobile-agent/README.md。本地与手机更新，未提交或云部署。

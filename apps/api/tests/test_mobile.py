@@ -1,5 +1,6 @@
 """Phone tests use fake messages only; no device or external send."""
 
+import uuid
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -324,3 +325,38 @@ def test_mobile_readiness_reports_missing_accessibility_and_start_separately(cli
     response = client.post(path, json={"device_id": device["device_id"], "preview_hash": "0" * 64})
     assert response.status_code == 409
     assert "任务页" in response.json()["detail"]
+
+
+def test_locked_phone_stays_online_and_preserves_queue(client, db):
+    tid, d, headers, _ = setup(client, db)
+    job, _ = enqueue(client, tid, d)
+    response = client.post(
+        "/api/mobile/device/heartbeat",
+        headers=headers,
+        json={
+            "account": "+447700900001",
+            "ready": True,
+            "accessibility": True,
+            "unlocked": False,
+            "app_version": "test",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    result = client.post("/api/mobile/device/claim", headers=headers, json={}).json()
+    assert result == {"job": None, "waiting": "等待手机解锁"}
+    db.expire_all()
+    assert db.get(Execution, uuid.UUID(job["id"])).status == "queued"
+    response = client.post(
+        "/api/mobile/device/heartbeat",
+        headers=headers,
+        json={
+            "account": "+447700900001",
+            "ready": True,
+            "accessibility": True,
+            "unlocked": True,
+            "app_version": "test",
+        },
+    )
+    assert response.status_code == 200
+    assert client.post("/api/mobile/device/claim", headers=headers, json={}).json()["job"]["id"] == job["id"]

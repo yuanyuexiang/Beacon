@@ -1,4 +1,5 @@
 "use client";
+import { phoneStatusLabel } from "@/lib/mobile-channels";
 import { Alert, Button, Card, Drawer, Empty, Input, Popconfirm, QRCode, Select, Space, Table, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
@@ -6,7 +7,7 @@ import { MOBILE_ACTIONS, MOBILE_LABELS } from "@/lib/mobile-channels";
 import { pairingServer } from "@/lib/mobile-channels";
 import { useOperator } from "@/lib/auth";
 
-type Device = { id: string; label: string; account: string | null; status: string; online?: boolean; last_seen_at: string | null; capabilities?: { protocol?: number; accounts?: Record<string, string>; installed?: string[] } };
+type Device = { id: string; label: string; account: string | null; status: string; online?: boolean; last_seen_at: string | null; capabilities?: { protocol?: number; accounts?: Record<string, string>; installed?: string[]; unlocked?: boolean | null } };
 type Job = { id: string; status: string; error: string | null; finished_at: string | null; snapshot: { channel?: string; action?: string; target: string; sender: string; body: string; lead_name: string } };
 const labels: Record<string, string> = { paired: "待运行检查", ready: "已就绪", revoked: "已解除", queued: "等待手机领取", claimed: "手机正在准备", sending: "发送中", sent: "已发送", unknown: "结果待核对", failed: "执行失败", cancelled: "已取消", needs_action: "需要手机处理", unavailable: "暂不可联系", request_submitted: "请求已提交，等待接受" };
 
@@ -54,7 +55,7 @@ export default function MobileSettings() {
     </Card>}
     <Table rowKey="id" dataSource={devices} pagination={false} style={{ marginTop: 16 }} locale={{ emptyText: <Empty description="尚未绑定手机" /> }} columns={[
       { title: "手机", dataIndex: "label" }, { title: "本方渠道账号", render: (_, d) => <Space direction="vertical">{Object.entries(d.capabilities?.accounts || (d.account ? { whatsapp: d.account } : {})).map(([p, v]) => <span key={p} style={{ overflowWrap: "anywhere" }}>{MOBILE_LABELS[p] || p} · {v}</span>)}</Space> },
-      { title: "状态", render: (_, d) => <Space direction="vertical"><Tag>{d.status === "revoked" ? "已解除" : !d.online ? "离线" : d.status === "ready" ? "在线 · 执行就绪" : "在线 · 待运行检查"}</Tag><small>{d.last_seen_at ? `最近连接 ${new Date(d.last_seen_at).toLocaleString("zh-CN")}` : "尚未连接"}</small></Space> },
+      { title: "状态", render: (_, d) => <Space direction="vertical"><Tag>{phoneStatusLabel(d)}</Tag><small>{d.last_seen_at ? `最近连接 ${new Date(d.last_seen_at).toLocaleString("zh-CN")}` : "尚未连接"}</small></Space> },
       { title: "操作", render: (_, d) => writable && <Space wrap>{d.status !== "revoked" && <Button danger loading={busy[d.id]} onClick={() => action(d.id, async () => { await api(`/api/mobile/devices/${d.id}/revoke`, json({})); await refresh(); })}>解除绑定</Button>}<Popconfirm title="从列表删除这台手机？" description="同时解除绑定，历史任务和发送记录会保留。未开始的任务取消，已开始的需核对结果。" okText="删除设备" cancelText="取消" onConfirm={() => action(`delete:${d.id}`, async () => { await api(`/api/mobile/devices/${d.id}`, {method:"DELETE"}); await refresh(); })}><Button danger loading={busy[`delete:${d.id}`]}>删除</Button></Popconfirm></Space> },
     ]} />
   </Card>;

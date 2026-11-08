@@ -56,6 +56,7 @@ class Heartbeat(Input):
     installed: list[str] = Field(default_factory=list, max_length=10)
     ready: bool = False
     accessibility: bool = False
+    unlocked: bool | None = None
     app_version: str = Field(max_length=64)
     protocol: Literal[1, 2] = 1
 
@@ -440,6 +441,8 @@ def claim(d: Device = Depends(device_auth), db: Session = Depends(get_db)):
             active.status, active.error = "unknown", "执行中断，请在手机核对结果；不会自动重发"
             db.commit()
         return {"job": None, "blocked": "存在未结算执行，请先恢复或核对"}
+    if (d.capabilities or {}).get("unlocked") is False:
+        return {"job": None, "waiting": "等待手机解锁"}
     j = db.scalar(
         select(Execution)
         .where(Execution.device_id == d.id, Execution.status == "queued")

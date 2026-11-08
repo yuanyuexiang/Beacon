@@ -8,7 +8,7 @@ export const MOBILE_ACTIONS: Record<string, { value: string; label: string }[]> 
   x: [{ value: 'direct_message', label: '发送私信' }, { value: 'message_request', label: '提交消息请求' }],
 };
 export const MOBILE_LABELS: Record<string, string> = { whatsapp: 'WhatsApp', facebook: 'Facebook', instagram: 'Instagram', linkedin: 'LinkedIn', tiktok: 'TikTok', youtube: 'YouTube', x: 'X' };
-export type ExecutionPhone = { id: string; label: string; status: string; online?: boolean; capabilities?: { protocol?: number; installed?: string[]; accounts?: Record<string,string>; accessibility?: boolean } };
+export type ExecutionPhone = { id: string; label: string; status: string; online?: boolean; capabilities?: { protocol?: number; installed?: string[]; accounts?: Record<string,string>; accessibility?: boolean; unlocked?: boolean | null } };
 export function phoneUnavailableReason(phone: ExecutionPhone, platform?: string): string | undefined {
   if (phone.status === 'revoked') return '已解除绑定';
   if (!phone.online) return '离线，请打开手机助手连接平台';
@@ -37,4 +37,11 @@ export function pairingServer(value: string): string {
   if (u.protocol !== 'https:' && !(u.protocol === 'http:' && (lan || usb))) throw new Error('云端使用 HTTPS；局域网填写电脑 IP，例如 http://192.168.1.100:8000');
   if (u.username || u.password || u.pathname !== '/' || u.search || u.hash) throw new Error('只填写服务器根地址');
   return u.origin;
+}
+
+export function phoneStatusLabel(phone: ExecutionPhone): string {
+  if (phone.status === 'revoked') return '已解除';
+  if (!phone.online) return '离线';
+  if (phone.status === 'ready') return phone.capabilities?.unlocked === false ? '在线 · 等待解锁' : '在线 · 执行就绪';
+  return '在线 · 执行已暂停';
 }

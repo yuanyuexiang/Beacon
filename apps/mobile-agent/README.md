@@ -75,3 +75,15 @@ App 各页面内容底部显示“© 当前年份 南京小当家文化咨询有
 底部固定任务、记录、设备。顶部紧凑连接状态可打开诊断；账号与配对、权限和通知进入设备分组；版权位于关于页。记录点击展开完整消息、实际结果与回复回填，新增本机更新时间，旧记录不补造日期。任务计数来自后端队列和本机最近记录，不代表全平台今日统计。所有原执行确认保留。
 
 新增检查 `pnpm --filter beacon-mobile lint`、`pnpm --filter beacon-mobile typecheck`；Expo Router 导航文件位于 `src/app/`，控制器复用 `App.tsx`，页面切换不重建任务执行状态。增加原生导航依赖后需执行 `pnpm --filter beacon-mobile exec expo prebuild --platform android --no-install` 并重新构建 APK。最低 Android 11（API 30）保持不变。
+
+## 后台连接（2026-11-08）
+
+连接平台后，Android `remoteMessaging` 前台服务维护跨设备消息会话，常驻通知提供“暂停执行”和“断开连接”。退出 Beacon 页面不再依赖 React Native 定时器保持在线；心跳正常间隔 15 秒，网络失败按 5／10／20／40／60 秒退避重连。通知正文不含客户消息或凭据。需允许 Beacon 显示通知，才能在通知栏操作。
+
+平台连接与社媒执行分开：暂停执行仍可在线和接收回复通知；锁屏／熄屏时不领取任务，服务器保留队列，解锁并恢复新鲜心跳后继续。领取请求结果不明、已有未结算记录仍停止执行，不自动重发。系统重建连接服务后只恢复通信，自动执行需重新开启。主动断开后不重连，可在“设备 → 连接与配对”重新连接或切换平台。
+
+“后台运行设置”打开本应用系统设置。小米／HyperOS 用户可允许自启动、后台运行，并将省电策略设为无限制；各机型入口不同。无需 VPN、USB 网络转发或长期 WakeLock。前台服务不能保证永不被系统终止：用户强行停止、省电限制和长时间 Doze 仍可能中断网络。深度休眠后先恢复心跳，再领取任务，不沿用旧的在线判断。首次安装／重启手机后请打开 App 检查状态。
+
+实现依据：[Android 前台服务类型](https://developer.android.com/develop/background-work/services/fgs/service-types#remote-messaging)、[后台启动限制](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)。本用途是用户主动开启的跨设备消息任务连续性，不冒充 VPN 服务。
+
+网络切换导致电脑 IP 改变时，在“设备 → 连接与配对 → 平台地址”填入新地址，点击“验证并更新地址”。先使用原设备凭据验证新地址，成功后才保存；保留配对、账号及回复监听配置，暂停执行。若实际换成另一套 Beacon 数据库，验证不通过，应使用“切换 Beacon 平台”重新配对。失败不覆盖旧地址。
