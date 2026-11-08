@@ -1,5 +1,6 @@
 package com.beacon.executor
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.PowerManager
@@ -15,6 +16,9 @@ class BeaconExecutorModule : Module() {
     Name("BeaconExecutor")
     Function("status") {
       val c = context()
+      val serviceName = ComponentName(c, PhoneService::class.java)
+      val accessibilityEnabled = Settings.Secure.getString(c.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        ?.split(':')?.any { ComponentName.unflattenFromString(it) == serviceName } == true
       val installed = try { c.packageManager.getPackageInfo("com.whatsapp", 0); true } catch (_: Exception) { false }
       val model = Build.MODEL.orEmpty().trim()
       val brand = Build.MANUFACTURER.orEmpty().trim()
@@ -25,7 +29,7 @@ class BeaconExecutorModule : Module() {
         "connectionError" to ConnectionService.error, "connectionLastContact" to ConnectionService.lastContact,
         "batteryUnrestricted" to c.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(c.packageName),
         "notificationPermission" to c.getSystemService(android.app.NotificationManager::class.java).areNotificationsEnabled(),
-        "autoEnabled" to (PhoneService.instance?.autoEnabled ?: false), "autoError" to (PhoneService.instance?.autoError ?: ""), "autoLastContact" to ConnectionService.lastContact, "deviceName" to defaultName, "accessibility" to (PhoneService.instance != null), "whatsapp" to installed,
+        "autoEnabled" to (PhoneService.instance?.autoEnabled ?: false), "autoError" to (PhoneService.instance?.autoError ?: ""), "autoLastContact" to ConnectionService.lastContact, "deviceName" to defaultName, "accessibilityEnabled" to accessibilityEnabled, "accessibility" to (PhoneService.instance != null), "whatsapp" to installed,
         "unlocked" to ConnectionService.unlocked(c),
         "running" to (PhoneService.instance?.running ?: false), "journal" to Journal(c).latest(),
         "history" to Journal(c).recent(), "savedAccount" to Vault(c).account(), "savedAccounts" to Vault(c).accounts(),

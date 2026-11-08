@@ -31,10 +31,12 @@ class PhoneService : AccessibilityService() {
   @Volatile var autoError = ""
   private var autoGeneration = 0L
   private val main = Handler(Looper.getMainLooper())
-  override fun onServiceConnected() { instance = this }
+  override fun onServiceConnected() { super.onServiceConnected(); instance = this }
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
   override fun onInterrupt() { pauseAutomatic() }
-  override fun onDestroy() { pauseAutomatic(); instance = null; super.onDestroy() }
+  private fun detach() { pauseAutomatic(); if (instance === this) instance = null }
+  override fun onUnbind(intent: Intent?): Boolean { detach(); return super.onUnbind(intent) }
+  override fun onDestroy() { detach(); super.onDestroy() }
 
   @Synchronized fun pauseAutomatic() {
     autoEnabled = false; autoGeneration++; stopRequested = true

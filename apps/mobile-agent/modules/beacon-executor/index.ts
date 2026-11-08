@@ -1,5 +1,5 @@
 import { requireNativeModule } from 'expo';
-export type PhoneStatus = { connectionService: boolean; platformConnected: boolean; connectionError: string; connectionLastContact: number; batteryUnrestricted: boolean; notificationPermission: boolean; autoEnabled: boolean; autoError: string; autoLastContact: number; deviceName: string; accessibility: boolean; whatsapp: boolean; unlocked: boolean; running: boolean; journal: string; history: string[]; savedAccount: string; savedAccounts: string; installed: string[] };
+export type PhoneStatus = { connectionService: boolean; platformConnected: boolean; connectionError: string; connectionLastContact: number; batteryUnrestricted: boolean; notificationPermission: boolean; autoEnabled: boolean; autoError: string; autoLastContact: number; deviceName: string; accessibilityEnabled: boolean; accessibility: boolean; whatsapp: boolean; unlocked: boolean; running: boolean; journal: string; history: string[]; savedAccount: string; savedAccounts: string; installed: string[] };
 export default requireNativeModule<{
   status(): PhoneStatus;
   inspectAccount(channel: string): Promise<string>;
