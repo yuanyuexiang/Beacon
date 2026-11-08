@@ -111,10 +111,6 @@ class PhoneService : AccessibilityService() {
     return s.getString("target") == s.getString("sender") &&
       (subtitle == "给自己发消息" || subtitle.equals("Message yourself", true))
   }
-  private fun clicked(n: AccessibilityNodeInfo): Boolean {
-    if (n.isClickable) return n.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-    return n.parent?.let { clicked(it) } ?: false
-  }
   private fun openKnownRecent(j: JSONObject): Boolean {
     val s = j.getJSONObject("snapshot")
     val r = root()
@@ -124,7 +120,7 @@ class PhoneService : AccessibilityService() {
         (s.getString("target") == s.getString("sender") &&
           listOf("（你）", "(你)", "(You)", "(you)").any { suffix -> name.endsWith(suffix) })
     }
-    return candidates.size == 1 && clicked(candidates.single())
+    return candidates.size == 1 && PlatformAdapters.click(candidates.single())
   }
   private fun waitForTarget(j: JSONObject, rounds: Int): Boolean {
     repeat(rounds) {
@@ -227,7 +223,7 @@ class PhoneService : AccessibilityService() {
           check(nodes(r, "entry").singleOrNull()?.text?.toString() == body) { "消息已改变" }
           val sendButton = nodes(r, "send").singleOrNull() ?: error("未找到发送按钮")
           j.put("phase", "click_attempted"); Journal(this).save(j); clickAttempted = true
-          check(clicked(sendButton)) { "发送点击未完成" }
+          check(PlatformAdapters.click(sendButton)) { "发送点击未完成" }
         }
         var observed = false
         repeat(20) {
@@ -286,8 +282,12 @@ class PhoneService : AccessibilityService() {
       val nodeId = if (advice.isNull("node_id")) -1 else advice.optInt("node_id", -1)
       if (nodeId >= 0) {
         val node = flat.getOrNull(nodeId) ?: return@ui false
-        check(!node.isEditable && !NavigationPolicy.forbidden(PageObservation.label(node))) { "该控件不是导航入口" }
-        return@ui PlatformAdapters.click(node)
+        check(node.isEnabled && !node.isEditable && !NavigationPolicy.forbidden(PageObservation.label(node))) { "该控件不是导航入口" }
+        if (PlatformAdapters.click(node)) return@ui true
+        val bounds = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+        if (!bounds.intersect(0, 0, page.getInt("width"), page.getInt("height")) || !node.isVisibleToUser) return@ui false
+        val path = Path().apply { moveTo(bounds.exactCenterX(), bounds.exactCenterY()) }
+        return@ui dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 80)).build(), null, null)
       }
       val x = advice.getInt("x") * page.getInt("width") / 1000f
       val y = advice.getInt("y") * page.getInt("height") / 1000f
@@ -303,15 +303,51 @@ class PhoneService : AccessibilityService() {
     }
     true
   }
+  private fun awaitNavigationPage(before: JSONObject? = null): JSONObject {
+    return NavigationWait.await(
+      sample = { observation() }, signature = { PageObservation.signature(it) },
+      before = before?.let { PageObservation.signature(it) },
+      cancelled = { stopRequested }, now = { android.os.SystemClock.elapsedRealtime() },
+      pause = { Thread.sleep(it) },
+    )
+  }
+
+  private fun navigationFeedback(j: JSONObject, advice: JSONObject, before: JSONObject, history: org.json.JSONArray, feedback: org.json.JSONArray): Boolean {
+    val dispatched = navigateStep(advice, before)
+    val after = if (dispatched) awaitNavigationPage(before) else observation()
+    val delta = NavigationFeedback.delta(PageObservation.keys(before), PageObservation.keys(after))
+    val changed = delta.first.isNotEmpty() || delta.second.isNotEmpty()
+    val rows = before.getJSONArray("nodes")
+    val target = (0 until rows.length()).map { rows.getJSONObject(it) }.firstOrNull { it.optInt("id") == advice.optInt("node_id", -1) }?.optString("text").orEmpty()
+    val outcome = if (!dispatched) "未执行，页面或控件已变化" else if (changed) "页面已变化" else "页面无明显变化"
+    val summary = "${advice.optString("action")}:$target:$outcome; 新增=${delta.first.joinToString().take(60)}; 消失=${delta.second.joinToString().take(60)}".take(240)
+    feedback.put(JSONObject().put("action", advice.optString("action")).put("target", target.take(200))
+      .put("dispatched", dispatched).put("changed", changed)
+      .put("appeared", org.json.JSONArray(delta.first.map { it.take(200) }))
+      .put("disappeared", org.json.JSONArray(delta.second.map { it.take(200) })))
+    while (feedback.length() > 12) feedback.remove(0)
+    history.put(summary)
+    while (history.length() > 12) history.remove(0)
+    j.put("navigation_history", history); Journal(this).save(j)
+    request("/jobs/${j.getString("id")}/progress", attempt(j).put("stage", "finding_entry").put("detail", outcome).put("navigation_history", history))
+    return dispatched
+  }
+  private fun navigationKey(page: JSONObject, advice: JSONObject): String {
+    val rows = page.getJSONArray("nodes")
+    val node = (0 until rows.length()).map { rows.getJSONObject(it) }
+      .firstOrNull { it.optInt("id") == advice.optInt("node_id", -1) }
+    val target = node?.let { "${it.optString("role")}|${it.optString("resource_id")}|${it.optString("text")}|${it.optJSONArray("bounds")}" }
+      ?: "${advice.optInt("x", -1)}:${advice.optInt("y", -1)}"
+    return NavigationFeedback.actionKey(PageObservation.signature(page), advice.optString("action"), target, advice.optString("direction", "down"))
+  }
   private fun reachComposer(j: JSONObject, snapshot: JSONObject) {
     val visited = mutableSetOf<String>()
     val history = org.json.JSONArray()
+    val feedback = org.json.JSONArray()
     var aiCalls = 0
     repeat(14) {
       check(!stopRequested) { "执行已暂停" }
-      Thread.sleep(650)
-      while (history.length() >= 12) history.remove(0)
-      val page = try { observation() } catch (_: Exception) { return@repeat }
+      val page = awaitNavigationPage()
       val id = page.getString("screen_id")
       val composer = ui { PlatformAdapters.input(root()) != null }
       if (composer && ui { PlatformAdapters.header(root(), snapshot) != null }) return
@@ -320,19 +356,17 @@ class PhoneService : AccessibilityService() {
       var rule: JSONObject? = null
       if (!composer) for (index in 0 until rows.length()) {
         val node = rows.getJSONObject(index)
-        val action = NavigationPolicy.navigationLabel(node.getString("text")) ?: continue
-        val key = "$id:$action:${node.getInt("id")}"
-        if (!visited.contains(key)) { visited.add(key); rule = JSONObject().put("action", action).put("node_id", node.getInt("id")); break }
+        val action = NavigationFeedback.ruleAction(node.getString("text"), node.optBoolean("editable"), node.optBoolean("enabled", true)) ?: continue
+        val candidate = JSONObject().put("action", action).put("node_id", node.getInt("id"))
+        if (visited.add(navigationKey(page, candidate))) { rule = candidate; break }
       }
-      if (rule != null && navigateStep(rule!!, page)) {
-        history.put(rule!!.optString("action")); return@repeat
-      }
+      if (rule != null && navigationFeedback(j, rule!!, page, history, feedback)) return@repeat
       if (aiCalls >= 4) throw NeedsPhoneAction("多次观察后仍未找到可用私信入口，消息已保留，可改用其他联系方式")
       progress(j, "reading_page")
       val picture = screenshot()
       if (observation().getString("screen_id") != id) return@repeat
       if (picture != null) page.put("image", picture)
-      page.put("history", history)
+      page.put("history", history).put("feedback", feedback)
       val advice = request("/jobs/${j.getString("id")}/navigation", attempt(j).put("screen", page), 65000)
       aiCalls++
       check(!stopRequested) { "执行已暂停" }
@@ -348,8 +382,10 @@ class PhoneService : AccessibilityService() {
       }
       if (action == "unavailable") throw ContactUnavailable(advice.optString("detail", "目标暂无私信入口"))
       if (action == "needs_action") throw NeedsPhoneAction(advice.optString("detail", "当前暂未找到私信入口，消息已保留"))
-      if (NavigationPolicy.mayContinue(action)) navigateStep(advice, page)
-      history.put("$action: ${advice.optString("detail")}".take(240))
+      if (NavigationPolicy.mayContinue(action)) {
+        if (!visited.add(navigationKey(page, advice))) throw NeedsPhoneAction("页面没有进展，已停止重复操作；消息已保留，可人工继续或换渠道")
+        navigationFeedback(j, advice, page, history, feedback)
+      }
     }
     throw NeedsPhoneAction("当前页面未能进入私信，消息已保留，可继续人工联系或选择其他渠道")
   }

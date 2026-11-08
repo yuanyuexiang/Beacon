@@ -4,8 +4,8 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from app.modules.mobile import navigation
 
+from app.modules.mobile import navigation
 from tests.test_mobile import enqueue, setup
 
 
@@ -82,7 +82,16 @@ def test_progress_and_navigation_do_not_block_final_result(client, db, monkeypat
     base = f"/api/mobile/device/jobs/{job['id']}"
     args = {"lease": c["lease"], "attempt": c["attempt"]}
     model(monkeypatch)
-    assert client.post(base + "/progress", headers=headers, json={**args, "stage": "finding_entry"}).status_code == 200
+    progress = {
+        **args,
+        "stage": "finding_entry",
+        "detail": "页面无明显变化",
+        "navigation_history": ["open_more:更多:页面无明显变化"],
+    }
+    assert client.post(base + "/progress", headers=headers, json=progress).status_code == 200
+    saved = client.get(f"/api/mobile/tasks/{tid}")
+    assert saved.status_code == 200
+    assert saved.json()["navigation_history"] == progress["navigation_history"]
     for _ in range(4):
         r = client.post(base + "/navigation", headers=headers, json={**args, "screen": page().model_dump()})
         assert r.status_code == 200, r.text
@@ -95,6 +104,9 @@ def test_progress_and_navigation_do_not_block_final_result(client, db, monkeypat
         r = client.post(base + "/result", headers=headers, json=result)
         assert r.status_code == 200, r.text
     assert r.json()["status"] == "request_submitted"
+    assert r.json()["navigation_history"] == progress["navigation_history"]
+    assert client.post(base + "/result", headers=headers, json={**result, "detail": "不同的结果"}).status_code == 409
+    assert client.get(f"/api/mobile/tasks/{tid}").json()["navigation_history"] == progress["navigation_history"]
     assert (
         client.post(base + "/navigation", headers=headers, json={**args, "screen": page().model_dump()}).status_code
         == 409
@@ -115,3 +127,37 @@ def test_cancelled_job_cannot_request_navigation(client, db, monkeypatch):
 def test_close_popup_without_position_uses_back(monkeypatch):
     model(monkeypatch, action="close_popup", node_id=None)
     assert navigation.advise.__wrapped__(page(), {"channel": "whatsapp", "target": "test"})["action"] == "back"
+
+
+def test_new_observation_attributes_and_old_defaults(monkeypatch):
+    old = page()
+    assert old.nodes[0].enabled is True
+    updated = old.model_dump()
+    updated["window_id"] = 7
+    updated["nodes"][0].update(enabled=False, role="android.widget.Button", resource_id="app:id/message")
+    model(monkeypatch)
+    with pytest.raises(ValueError, match="无效导航节点"):
+        navigation.advise.__wrapped__(
+            navigation.Screen.model_validate(updated), {"channel": "whatsapp", "target": "+447700900123"}
+        )
+
+
+def test_structured_feedback_reaches_model_and_is_bounded(monkeypatch):
+    from pydantic import ValidationError
+
+    p = page()
+    p.feedback = [navigation.NavigationFeedback(action="open_more", target="更多", dispatched=True, changed=False)]
+    model(monkeypatch)
+    original = navigation.ai_runtime.client("mobile").complete
+
+    def complete(messages, *args, **kwargs):
+        evidence = json.loads(messages[1]["content"][0]["text"])
+        assert evidence["screen"]["feedback"][0]["changed"] is False
+        assert evidence["screen"]["feedback"][0]["target"] == "更多"
+        return original(messages, *args, **kwargs)
+
+    monkeypatch.setattr(navigation.ai_runtime.client("mobile"), "complete", complete)
+    navigation.advise.__wrapped__(p, {"channel": "whatsapp", "target": "test"})
+    with pytest.raises(ValidationError):
+        navigation.NavigationFeedback(action="open_more", dispatched=True, changed=False, appeared=["x"] * 9)
+    assert navigation.Screen.model_validate(page().model_dump(exclude={"feedback"})).feedback == []

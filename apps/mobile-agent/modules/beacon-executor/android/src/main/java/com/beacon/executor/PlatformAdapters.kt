@@ -66,9 +66,6 @@ object PlatformAdapters {
       ChannelPolicy.identity(id(it), label(it), handle) || facebook && !it.isEditable && ChannelPolicy.facebookTitle(label(it), handle, bounds.top - rect.top, bounds.bottom - rect.top, rect.height(), chat)
     }?.let { label(it) }
   }
-  fun messageButton(r: AccessibilityNodeInfo): AccessibilityNodeInfo? = flatten(r).filter {
-    label(it) in setOf("Message", "Send message", "发消息", "发送消息", "私信") && !it.isEditable
-  }.mapNotNull { clickableNode(it) }.distinctBy { android.graphics.Rect().also { rect -> it.getBoundsInScreen(rect) }.toString() }.singleOrNull()
   fun linkedinForm(r: AccessibilityNodeInfo) = r.packageName?.toString() in packages["linkedin"].orEmpty() && ChannelPolicy.linkedinCompanyForm(flatten(r).map(::label))
   fun input(r: AccessibilityNodeInfo): AccessibilityNodeInfo? = flatten(r).filter {
     (linkedinForm(r) && it.isEditable) || ChannelPolicy.composer(id(it), it.isEditable) || NavigationPolicy.privateComposer(it.hintText?.toString().orEmpty(), id(it), it.isEditable) || r.packageName?.toString() in packages["facebook"].orEmpty() && ChannelPolicy.facebookComposer(it.hintText?.toString() ?: "", it.contentDescription?.toString() ?: "", it.isEditable)

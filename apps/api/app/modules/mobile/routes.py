@@ -7,7 +7,7 @@ import re
 import secrets
 import uuid
 from datetime import timedelta
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -131,6 +131,7 @@ def public_job(j: Execution) -> dict:
         "created_at": j.created_at,
         "finished_at": j.finished_at,
         "error": j.error,
+        "navigation_history": (j.result or {}).get("navigation_history", []),
     }
 
 
@@ -513,12 +514,17 @@ def result(identity: uuid.UUID, body: ResultIn, d: Device = Depends(device_auth)
         db.commit()
         return public_job(j)
     if j.result and "status" in j.result:
-        if j.result != payload:
+        if {key: j.result.get(key) for key in payload} != payload:
             raise HTTPException(409, "该尝试已有结果，请人工核对，不能覆盖")
         return public_job(j)
     if body.status in {"sent", "request_submitted"} and not j.started_at:
         raise HTTPException(409, "未完成发送前检查，不能记录已发送")
-    j.status, j.result, j.finished_at, j.error = body.status, payload, service.now(), body.detail or None
+    j.status, j.result, j.finished_at, j.error = (
+        body.status,
+        {**(j.result or {}), **payload},
+        service.now(),
+        body.detail or None,
+    )
     if body.status == "request_submitted" and j.snapshot.get("action", "direct_message") not in {
         "direct_message",  # The app may present a message request after navigation.
         "message_request",
@@ -626,6 +632,7 @@ class NavigationIn(AttemptIn):
 
 
 class ProgressIn(AttemptIn):
+    navigation_history: list[Annotated[str, Field(max_length=240)]] = Field(default_factory=list, max_length=12)
     stage: Literal["opening", "finding_entry", "reading_page", "composing", "verifying_send"]
     detail: str = Field(default="", max_length=240)
 
@@ -680,7 +687,9 @@ def execution_progress(
         "composing": "正在填写消息",
         "verifying_send": "正在核对发送结果",
     }
-    j.error = stages[body.stage]
-    j.result = {**(j.result or {}), "progress": stages[body.stage], "stage": body.stage}
+    j.error = stages[body.stage] + (f"：{body.detail}" if body.detail else "")
+    j.result = {**(j.result or {}), "progress": j.error, "stage": body.stage}
+    if body.navigation_history:
+        j.result = {**j.result, "navigation_history": body.navigation_history}
     db.commit()
     return {"status": j.status, "progress": j.error}

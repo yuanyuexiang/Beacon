@@ -18,7 +18,20 @@ class Node(BaseModel):
     text: str = Field(max_length=200)
     clickable: bool = False
     editable: bool = False
+    enabled: bool = True
+    role: str = Field(default="", max_length=100)
+    resource_id: str = Field(default="", max_length=200)
+    scrollable: bool = False
     bounds: list[int] = Field(min_length=4, max_length=4)
+
+
+class NavigationFeedback(BaseModel):
+    action: str = Field(max_length=40)
+    target: str = Field(default="", max_length=200)
+    dispatched: bool
+    changed: bool
+    appeared: list[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=8)
+    disappeared: list[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=8)
 
 
 class Screen(BaseModel):
@@ -26,9 +39,11 @@ class Screen(BaseModel):
     package: str = Field(min_length=1, max_length=100)
     width: int = Field(ge=1, le=5000)
     height: int = Field(ge=1, le=10000)
+    window_id: int | None = None
     nodes: list[Node] = Field(max_length=160)
     image: str | None = Field(default=None, max_length=1_400_000)
     history: list[Annotated[str, Field(max_length=240)]] = Field(default_factory=list, max_length=12)
+    feedback: list[NavigationFeedback] = Field(default_factory=list, max_length=12)
 
 
 class Advice(BaseModel):
@@ -121,7 +136,10 @@ def advise(screen: Screen, snapshot: dict) -> dict:
                             "A numeric Facebook URL can match the supplied lead_name; do not require a "
                             "visible numeric ID. "
                             "Distinguish private messages and message requests from public comment fields. "
-                            "Explore more/contact menus before declaring unavailable; one missing "
+                            "History includes action outcomes and appeared/disappeared controls. "
+                            "Do not repeat no-effect actions; "
+                            "disabled nodes are not actionable. Explore more/contact menus before "
+                            "declaring unavailable; one missing "
                             "button is insufficient. "
                             "LinkedIn may require connection/InMail; YouTube may need an invitation; "
                             "request needs_action "
@@ -142,7 +160,7 @@ def advise(screen: Screen, snapshot: dict) -> dict:
         if value.confidence != "high":
             return {"action": "needs_action", "detail": "页面暂未识别清楚，消息已保留", "screen_id": screen.screen_id}
         if value.action in {"open_messages", "open_more", "close_popup"}:
-            if value.node_id is not None and (node is None or node.editable):
+            if value.node_id is not None and (node is None or node.editable or not node.enabled):
                 raise ValueError("模型引用了无效导航节点")
             if node is None and (
                 value.x is None or value.y is None or picture is None or not getattr(client, "value", {}).get("vision")

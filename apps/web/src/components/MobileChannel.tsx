@@ -8,7 +8,7 @@ import { pairingServer } from "@/lib/mobile-channels";
 import { useOperator } from "@/lib/auth";
 
 type Device = { id: string; label: string; account: string | null; status: string; online?: boolean; last_seen_at: string | null; capabilities?: { protocol?: number; accounts?: Record<string, string>; installed?: string[]; unlocked?: boolean | null } };
-type Job = { id: string; status: string; error: string | null; finished_at: string | null; snapshot: { channel?: string; action?: string; target: string; sender: string; body: string; lead_name: string } };
+type Job = { navigation_history?: string[]; id: string; status: string; error: string | null; finished_at: string | null; snapshot: { channel?: string; action?: string; target: string; sender: string; body: string; lead_name: string } };
 const labels: Record<string, string> = { paired: "待运行检查", ready: "已就绪", revoked: "已解除", queued: "等待手机领取", claimed: "手机正在准备", sending: "发送中", sent: "已发送", unknown: "结果待核对", failed: "执行失败", cancelled: "已取消", needs_action: "需要手机处理", unavailable: "暂不可联系", request_submitted: "请求已提交，等待接受" };
 
 export default function MobileSettings() {
@@ -86,7 +86,7 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
   return <><Button onClick={() => { setOpen(true); setPreview(undefined); void act("load", async () => { await Promise.all([loadDevices(), refresh()]); }); }}>手机执行／查看结果</Button>
     <Drawer title={`${MOBILE_LABELS[platform] || platform} 手机执行`} open={open} onClose={() => setOpen(false)} width={620}>
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
-      {job ? <><Tag color={job.status === "sent" ? "green" : ["failed", "unknown"].includes(job.status) ? "orange" : "blue"}>{labels[job.status] || job.status}</Tag><p>{job.error}</p>{job.finished_at && <p>更新时间：{new Date(job.finished_at).toLocaleString("zh-CN")}</p>}<p>动作：{MOBILE_ACTIONS[job.snapshot.channel || platform]?.find(a => a.value === job.snapshot.action)?.label || "发送消息"}</p><p>收件人：{job.snapshot.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{job.snapshot.body}</p>
+      {job ? <><Tag color={job.status === "sent" ? "green" : ["failed", "unknown"].includes(job.status) ? "orange" : "blue"}>{labels[job.status] || job.status}</Tag><p>{job.error}</p>{!!job.navigation_history?.length && <details><summary>查看执行步骤</summary><ol>{job.navigation_history.map((step, index) => <li key={index}>{step}</li>)}</ol></details>}{job.finished_at && <p>更新时间：{new Date(job.finished_at).toLocaleString("zh-CN")}</p>}<p>动作：{MOBILE_ACTIONS[job.snapshot.channel || platform]?.find(a => a.value === job.snapshot.action)?.label || "发送消息"}</p><p>收件人：{job.snapshot.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{job.snapshot.body}</p>
         {job.status === "queued" && <Alert type="info" showIcon message="已交给手机，等待自动执行。请在手机任务页开启“自动执行”并保持解锁；执行结果会自动回填。" />}
         {writable && ["queued", "claimed", "sending"].includes(job.status) && <Button danger loading={busy.cancel} onClick={() => act("cancel", async () => { setJob(await api(`/api/mobile/tasks/${taskId}/cancel`, json({}))); onChanged(); })}>停止本次执行</Button>}
         {["needs_action", "unavailable", "request_submitted"].includes(job.status) && <Alert type="info" showIcon message={labels[job.status]} description="在手机执行记录中打开目标应用、复制消息或记录客户回复；完成手动操作后在沟通页回填实际结果。请求提交不会计为私信已发送。" />}

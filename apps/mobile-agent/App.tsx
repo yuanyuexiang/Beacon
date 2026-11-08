@@ -173,7 +173,7 @@ export default function App() {
   const stateLabel = status?.running ? '正在执行' : status?.autoEnabled && !status.unlocked ? '等待解锁' : executionReady ? status?.autoEnabled ? '自动执行中' : '已就绪' : '待运行检查';
   const platformLabel = !paired ? '未绑定' : connectionPaused ? '已断开' : connected ? '已连接' : connectionError ? '连接中断' : '连接中';
   const row = (title: string, detail: string, onPress: () => void) => <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingRow}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.rowDetail}>{detail}</Text></Pressable>;
-  const entries: { raw: string; j: { id: string; phase: string; outcome?: string; detail?: string; reported?: boolean; updated_at?: number; snapshot: Job['snapshot'] } }[] = (status?.history || []).flatMap(raw => { try { return [{ raw, j: JSON.parse(raw) }]; } catch { return []; } });
+  const entries: { raw: string; j: { id: string; phase: string; navigation_history?: string[]; outcome?: string; detail?: string; reported?: boolean; updated_at?: number; snapshot: Job['snapshot'] } }[] = (status?.history || []).flatMap(raw => { try { return [{ raw, j: JSON.parse(raw) }]; } catch { return []; } });
   const completed = entries.filter(({j}) => ['sent', 'request_submitted'].includes(j.outcome || '')).length;
   const needsAction = entries.filter(({j}) => ['unknown', 'failed', 'needs_action', 'unavailable'].includes(j.outcome || '') || !j.reported && j.phase !== 'claimed').length;
   const records = entries.filter(({j}) => recordFilter === '全部' || (recordFilter === '已完成' ? ['sent', 'request_submitted'].includes(j.outcome || '') : ['unknown', 'failed', 'needs_action', 'unavailable'].includes(j.outcome || '') || !j.reported));
@@ -271,7 +271,7 @@ export default function App() {
         {records.length ? records.map(({raw,j}) => <View key={j.id} style={styles.card}>
           <Pressable accessibilityRole="button" accessibilityState={{expanded:expandedRecord === j.id}} onPress={() => setExpandedRecord(expandedRecord === j.id ? undefined : j.id)} style={styles.recordHeader}>{platformBadge(j.snapshot?.channel || 'whatsapp')}<View style={{flex:1}}><Text style={styles.accountLabel}>{j.snapshot?.lead_name || '未命名客户'}</Text><Text style={styles.caption}>{channelLabel(j.snapshot?.channel)} · {ACTIONS[j.snapshot?.action || 'direct_message']}</Text></View><Text style={[styles.badge, ['sent','request_submitted'].includes(j.outcome || '') && styles.successBadge]}>{outcomeLabels[j.outcome || j.phase] || '处理中'}</Text></Pressable>
           <View style={styles.sectionRow}><Text style={styles.caption}>{j.reported ? '已回填 Beacon' : '尚未回填'}</Text><Text style={styles.caption}>{j.updated_at ? '更新于 ' + new Date(j.updated_at).toLocaleString() : '历史时间未记录'}</Text></View>
-          {expandedRecord === j.id && <><Text selectable style={styles.small}>收件人：{j.snapshot?.target}</Text><Text style={styles.message}>{j.snapshot?.body}</Text>{!!j.detail && <Text style={styles.small}>{j.detail}</Text>}
+          {expandedRecord === j.id && <><Text selectable style={styles.small}>收件人：{j.snapshot?.target}</Text><Text style={styles.message}>{j.snapshot?.body}</Text>{!!j.detail && <Text style={styles.small}>{j.detail}</Text>}{j.navigation_history?.map((step, index) => <Text key={index} style={styles.caption}>{index + 1}. {step}</Text>)}
         {j.reported && <>
           {button('打开目标应用处理', 'open-' + j.id, () => Executor.openTarget(raw), true)}
           {button('复制本次消息', 'copy-' + j.id, () => { Executor.copyMessage(j.snapshot.body); setNotice('已复制消息。请核对目标后人工处理，并在网页记录实际结果。'); }, true)}

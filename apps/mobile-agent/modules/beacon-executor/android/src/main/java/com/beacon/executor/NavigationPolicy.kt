@@ -14,7 +14,6 @@ object NavigationPolicy {
   fun forbidden(value: String): Boolean = value.trim().lowercase() in setOf(
     "send", "发送", "post", "发布", "comment", "评论", "reply", "回复", "follow", "关注", "like", "赞", "connect", "建立联系", "add friend", "加为好友", "call", "打电话", "inmail", "subscribe", "订阅", "buy", "购买", "log out", "退出登录"
   )
-  fun request(value: String) = value.trim().lowercase() in setOf("message request", "send message request", "invite to chat", "消息请求", "发送消息请求", "邀请聊天")
   fun privateComposer(hint: String, resourceId: String, editable: Boolean): Boolean = editable &&
     !Regex("comment|search|reply_to").containsMatchIn(resourceId.lowercase()) &&
     hint.trim().lowercase() in setOf("message", "message…", "message...", "write a message", "write a message…", "write a message...", "type a message", "type a message…", "输入消息", "输入消息…", "输入消息...", "发消息", "发送消息")
