@@ -87,3 +87,5 @@ App 各页面内容底部显示“© 当前年份 南京小当家文化咨询有
 实现依据：[Android 前台服务类型](https://developer.android.com/develop/background-work/services/fgs/service-types#remote-messaging)、[后台启动限制](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)。本用途是用户主动开启的跨设备消息任务连续性，不冒充 VPN 服务。
 
 网络切换导致电脑 IP 改变时，在“设备 → 连接与配对 → 平台地址”填入新地址，点击“验证并更新地址”。先使用原设备凭据验证新地址，成功后才保存；保留配对、账号及回复监听配置，暂停执行。若实际换成另一套 Beacon 数据库，验证不通过，应使用“切换 Beacon 平台”重新配对。失败不覆盖旧地址。
+
+2026-11-08 真机复验：Xiaomi 14 Pro 使用手机热点下电脑地址连接，无 ADB reverse 映射。旧设备记录已撤销，原凭据被拒绝；重新配对后 App 显示已连接，后台收到新心跳。退到桌面后心跳继续更新，系统报告连接服务 `isForeground=true`（通知 ID 1801）。本轮保持执行暂停、活动任务为 0，没有发送消息。此前已验证短时服务中断后恢复心跳；长时间 Doze、厂商清理及通知栏按钮仍需独立真机验收，不能据此承诺永久在线。
