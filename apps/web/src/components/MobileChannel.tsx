@@ -4,7 +4,7 @@ import { Alert, Button, Card, Drawer, Empty, Input, Popconfirm, QRCode, Select, 
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { MOBILE_ACTIONS, MOBILE_LABELS } from "@/lib/mobile-channels";
-import { pairingServer } from "@/lib/mobile-channels";
+import { pairingAddress, pairingServer } from "@/lib/mobile-channels";
 import { useOperator } from "@/lib/auth";
 
 type Device = { id: string; label: string; account: string | null; status: string; online?: boolean; last_seen_at: string | null; capabilities?: { protocol?: number; accounts?: Record<string, string>; installed?: string[]; unlocked?: boolean | null } };
@@ -25,8 +25,7 @@ export default function MobileSettings() {
   useEffect(() => { if (!pairing) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [pairing]);
   useEffect(() => {
     if (!pairing) return;
-    const local = ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
-    setServer(pairing.server || (!local ? window.location.origin : localStorage.getItem("beacon-mobile-server") || ""));
+    setServer(current => pairingAddress(current, localStorage.getItem("beacon-mobile-server"), window.location.origin, pairing.server));
   }, [pairing]);
   let address = "";
   try { address = pairingServer(server); } catch { /* Wait for the reachable address. */ }
@@ -46,6 +45,7 @@ export default function MobileSettings() {
           <p>服务器：<Typography.Text copyable>{address}</Typography.Text></p>
           <p>手机访问地址（修改后二维码同步更新）：</p><Input aria-label="手机访问地址" value={server} placeholder="http://192.168.1.100:8000" onChange={e => { setServer(e.target.value); localStorage.setItem("beacon-mobile-server", e.target.value); }} />
           {!address && <p>本地请填写电脑局域网 IP 和端口，手机与电脑连接同一网络。</p>}
+          {pairing.server && server !== pairing.server && <p><Button onClick={() => { const next = pairingServer(pairing.server!); setServer(next); localStorage.setItem("beacon-mobile-server", next); }}>使用服务器推荐地址</Button> <Typography.Text type="secondary">{pairing.server}</Typography.Text></p>}
           <p>局域网不使用 localhost 或 127.0.0.1；USB 转发仅为调试备用。</p>
           <p>手动配对码：<Typography.Text copyable>{pairing.code}</Typography.Text></p>
           <Typography.Text type="secondary">{Date.parse(pairing.expires_at) <= now ? "已过期，请刷新二维码" : `剩余 ${Math.max(0, Math.ceil((Date.parse(pairing.expires_at) - now) / 1000))} 秒，仅可使用一次。`}</Typography.Text>

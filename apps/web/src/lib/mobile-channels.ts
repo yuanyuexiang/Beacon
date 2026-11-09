@@ -8,13 +8,17 @@ export const MOBILE_ACTIONS: Record<string, { value: string; label: string }[]> 
   x: [{ value: 'direct_message', label: '发送私信' }, { value: 'message_request', label: '提交消息请求' }],
 };
 export const MOBILE_LABELS: Record<string, string> = { whatsapp: 'WhatsApp', facebook: 'Facebook', instagram: 'Instagram', linkedin: 'LinkedIn', tiktok: 'TikTok', youtube: 'YouTube', x: 'X' };
+export function pairingAddress(current: string, saved: string | null, origin: string, configured?: string): string {
+  if (current.trim()) return current;
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(new URL(origin).hostname);
+  return local ? saved || configured || '' : origin;
+}
 export type ExecutionPhone = { id: string; label: string; status: string; online?: boolean; capabilities?: { protocol?: number; installed?: string[]; accounts?: Record<string,string>; accessibility?: boolean; unlocked?: boolean | null } };
 export function phoneUnavailableReason(phone: ExecutionPhone, platform?: string): string | undefined {
   if (phone.status === 'revoked') return '已解除绑定';
   if (!phone.online) return '离线，请打开手机助手连接平台';
   if ((phone.capabilities?.protocol || 1) < 2 && platform !== 'whatsapp') return '请更新手机助手';
   if (phone.capabilities?.protocol === 2 && (!platform || !phone.capabilities.installed?.includes(platform))) return `未安装 ${MOBILE_LABELS[platform || ''] || '对应应用'}`;
-  if (platform === 'whatsapp' && phone.capabilities?.protocol === 2 && !phone.capabilities.accounts?.whatsapp) return '请在手机填写 WhatsApp 本方号码';
   if (phone.capabilities?.accessibility === false) return '请开启 Beacon 无障碍服务';
   if (phone.status !== 'ready') return '在线，待开启执行：请在手机任务页点击“连接并检查任务”';
   return undefined;

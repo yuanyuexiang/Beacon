@@ -6,7 +6,7 @@ it('explains connected but paused phones without requiring a recorded Facebook n
   expect(phoneUnavailableReason({...phone,status:'ready'},'facebook')).toBeUndefined();
   expect(phoneUnavailableReason({...phone,status:'ready',online:false},'facebook')).toContain('离线');
   expect(phoneUnavailableReason(phone,'tiktok')).toContain('未安装 TikTok');
-  expect(phoneUnavailableReason({...phone,capabilities:{...phone.capabilities,installed:['whatsapp']}},'whatsapp')).toContain('本方号码');
+  expect(phoneUnavailableReason({...phone,status:'ready',capabilities:{...phone.capabilities,installed:['whatsapp']}},'whatsapp')).toBeUndefined();
 });
 it('shows actual platform names and never treats arbitrary links as phone channels', () => {
   expect(mobilePlatform('other_social', 'https://www.youtube.com/@shop')).toBe('youtube');

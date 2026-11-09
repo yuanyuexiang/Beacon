@@ -1,9 +1,9 @@
 """Multi-channel phone contracts are simulated; these tests never open or message real accounts."""
 
 import pytest
+
 from app.modules.mobile.channels import destination
 from app.modules.sales.models import Event, ManualTask, TaskStatus
-
 from tests.test_mobile import enqueue, setup
 from tests.test_sales import _elig
 
@@ -172,23 +172,37 @@ def test_mobile_composer_prepares_task_without_provider_or_send(client, db):
     assert task.execution_mode == "mobile" and task.sent_at is None
 
 
-def test_installed_facebook_uses_current_app_account_without_manual_name(client, db):
+@pytest.mark.parametrize(
+    "platform,contact,label",
+    [
+        ("facebook", "https://facebook.com/test_shop", "Facebook"),
+        ("whatsapp", "+447700900123", "WhatsApp"),
+    ],
+)
+def test_installed_platform_uses_current_app_account_without_manual_name(client, db, platform, contact, label):
     tid, device, headers, heartbeat = social_task(client, db)
     heartbeat["accounts"] = {}
     heartbeat["account"] = ""
-    heartbeat["installed"] = ["facebook"]
+    heartbeat["installed"] = [platform]
     assert client.post("/api/mobile/device/heartbeat", headers=headers, json=heartbeat).status_code == 200
     t = db.get(ManualTask, tid)
     from app.modules.sales.models import Channel, ChannelEligibility
 
     e = db.get(ChannelEligibility, t.eligibility_id)
-    e.channel = Channel.facebook
-    e.contact_ref = "https://facebook.com/test_shop"
-    t.channel = Channel.facebook
+    e.channel = Channel(platform)
+    e.contact_ref = contact
+    t.channel = Channel(platform)
     db.commit()
     p = client.post(
         f"/api/mobile/tasks/{tid}/preview", json={"device_id": device["device_id"], "preview_hash": "0" * 64}
     )
     assert p.status_code == 200, p.text
     assert p.json()["payload"]["sender_mode"] == "current_app"
-    assert p.json()["payload"]["sender"] == "Facebook 当前登录账号"
+    assert p.json()["payload"]["sender"] == f"{label} 当前登录账号"
+    heartbeat["installed"] = []
+    assert client.post("/api/mobile/device/heartbeat", headers=headers, json=heartbeat).status_code == 200
+    missing = client.post(
+        f"/api/mobile/tasks/{tid}/preview", json={"device_id": device["device_id"], "preview_hash": "0" * 64}
+    )
+    assert missing.status_code == 409
+    assert f"手机尚未检测到 {label}" in missing.json()["detail"]

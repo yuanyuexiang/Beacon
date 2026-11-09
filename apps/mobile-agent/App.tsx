@@ -155,14 +155,13 @@ export default function App() {
   }
   async function start() {
     if (connectionPaused) await reconnect();
-    const configured: Record<string, string> = { ...accounts, ...(account ? { whatsapp: account } : {}) };
     const installed = Executor.status().installed || [];
-    if (!Object.values(configured).some(Boolean) && !installed.some(p => p !== 'whatsapp')) throw new Error('请安装社媒应用，或填写 WhatsApp 号码');
+    if (!installed.length) throw new Error('请先安装对应社媒应用');
     if (account && !/^\+[1-9]\d{6,14}$/.test(account)) throw new Error('请核对 WhatsApp 的完整国际号码');
     const s = Executor.status();
     if (!s.accessibility) { if (!s.accessibilityEnabled) Executor.permissions(); setNotice(s.accessibilityEnabled ? '无障碍已开启，但系统尚未连接服务。请先退出手机自动化检查工具；若仍未恢复，在系统设置关闭再开启“Beacon 手机执行”。恢复后重新开启执行。' : '请在系统设置开启“Beacon 手机执行”无障碍服务，返回后点击“开启自动执行”。'); return; }
     if (!s.unlocked) throw new Error('请先解锁手机屏幕');
-    if (!s.installed?.some(p => p !== 'whatsapp' || configured[p])) throw new Error('请安装对应社媒应用；使用 WhatsApp 时填写本方号码');
+    if (!s.installed?.length) throw new Error('请先安装对应社媒应用');
     const profile = await heartbeat(true);
     if (profile.status !== 'ready') throw new Error('平台已连接，但运行检查未通过，请检查无障碍服务。');
     if (account) Executor.rememberAccount(account); Executor.rememberAccounts(JSON.stringify({ ...accounts, ...(account ? { whatsapp: account } : {}) })); Executor.startAutomatic(); setReady(true); setNotice('自动执行已开启，网页确认后会自动打开对应社媒执行；请保持解锁。');
@@ -258,7 +257,7 @@ export default function App() {
           })}
           {button('放弃本次结果', 'discard-account', () => setAccountCandidate(undefined), true)}
         </View>}
-        {selectedChannel === 'whatsapp' ? <>{field('+国家区号与电话号码', account, v => { setReady(false); setAccount(v); })}{button('保存 WhatsApp 号码', 'save-accounts', () => { Executor.rememberAccount(account); setNotice('号码已保存，请回工作台连接检查。'); }, true)}</> : <>{field(CHANNELS.find(c => c.id === selectedChannel)?.hint || '账号名称或主页链接（可选）', accounts[selectedChannel] || '', v => { setReady(false); setAccounts(old => ({ ...old, [selectedChannel]: v })); })}{button('保存账号记录', 'save-accounts', () => { Executor.rememberAccounts(JSON.stringify(accounts)); setNotice('账号记录已保存。请在官方 App 核对当前登录身份，再连接检查。'); }, true)}<Text style={styles.small}>可识别资料页后确认保存，也可手动记录。留空仍使用当前 App 账号；切换账号后请重新识别。</Text></>}
+        {selectedChannel === 'whatsapp' ? <>{field('本方电话号码（可选，含国家区号）', account, v => { setReady(false); setAccount(v); })}{button('保存 WhatsApp 号码', 'save-accounts', () => { Executor.rememberAccount(account); setNotice('号码已保存，请回工作台连接检查。'); }, true)}<Text style={styles.small}>留空使用 WhatsApp 当前登录账号，号码仅用于记录及本人会话识别。</Text></> : <>{field(CHANNELS.find(c => c.id === selectedChannel)?.hint || '账号名称或主页链接（可选）', accounts[selectedChannel] || '', v => { setReady(false); setAccounts(old => ({ ...old, [selectedChannel]: v })); })}{button('保存账号记录', 'save-accounts', () => { Executor.rememberAccounts(JSON.stringify(accounts)); setNotice('账号记录已保存。请在官方 App 核对当前登录身份，再连接检查。'); }, true)}<Text style={styles.small}>可识别资料页后确认保存，也可手动记录。留空仍使用当前 App 账号；切换账号后请重新识别。</Text></>}
         <Text style={styles.small}>设备凭据由 Android 安全存储加密保存。社媒账号在官方 App 登录。</Text>
         </View>}
         {panel === 'permissions' && <View style={styles.card}><Text style={styles.heading}>运行检查</Text><Text style={styles.small}>{paired ? '✓ 已配对' : '○ 尚未配对'}</Text><Text style={styles.small}>{status?.accessibility ? '✓ 无障碍已开启并连接' : status?.accessibilityEnabled ? '○ 无障碍已开启，等待系统连接' : '○ 无障碍尚未开启'}</Text>{status?.accessibilityEnabled && !status?.accessibility && <Text style={styles.caption}>权限已开启，无需重复授权。请退出手机自动化检查工具并稍候；仍未恢复时，可在系统设置关闭再开启“Beacon 手机执行”。连接状态会自动刷新。</Text>}<Text style={styles.small}>{status?.unlocked ? '✓ 手机已解锁' : '○ 请解锁手机'}</Text><Text style={styles.small}>已安装渠道：{status?.installed?.map(channelLabel).join('、') || '尚未检测到'}</Text>{button('打开无障碍设置', 'permissions', () => Executor.permissions(), true)}{paired && button('开启自动执行', 'start', start)}<Text style={styles.caption}>完成检查不会领取或发送任务。</Text></View>}

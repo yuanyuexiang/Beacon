@@ -20,7 +20,7 @@ async def main():
         elif path == "/api/mobile/devices/mock-device" and route.request.method == "DELETE":
             device["removed"] = True
             data = {"removed": True}
-        elif path == "/api/mobile/pairing": data = dict(code="123456", expires_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(), owner="tester")
+        elif path == "/api/mobile/pairing": data = dict(code="123456", expires_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(), owner="tester", server="http://192.168.3.103:8000")
         elif path.endswith("/revoke"):
             device["status"] = "revoked"
             data = device
@@ -37,7 +37,13 @@ async def main():
         await expect(page.get_by_text("123456", exact=True)).to_be_visible()
         await expect(page.locator(".ant-qrcode")).to_be_visible()
         await expect(page.get_by_text("绑定账号：tester", exact=True)).to_be_visible()
-        await expect(page.get_by_text("http://127.0.0.1:8000", exact=True)).to_be_visible()
+        address = page.get_by_role("textbox", name="手机访问地址", exact=True)
+        await address.fill("http://192.168.86.32:8000")
+        await page.get_by_role("button", name="刷新配对码", exact=True).click()
+        await expect(address).to_have_value("http://192.168.86.32:8000")
+        await expect(page.get_by_text("http://192.168.86.32:8000", exact=True)).to_be_visible()
+        await page.get_by_role("button", name="使用服务器推荐地址", exact=True).click()
+        await expect(address).to_have_value("http://192.168.3.103:8000")
         await expect(page.get_by_role("button", name="刷新手机", exact=True)).not_to_have_class("ant-btn-loading")
         out = Path("data/devchecks/mobile"); out.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(out / "settings-desktop.png"), full_page=True)

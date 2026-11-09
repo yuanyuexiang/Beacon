@@ -334,11 +334,13 @@ def destination_payload(
     if platform != "whatsapp" and not modern:
         raise HTTPException(409, "请更新手机助手并配置此平台账号")
     sender = (capabilities.get("accounts") or {}).get(platform) if modern else d.account
-    current_app = modern and platform != "whatsapp" and not sender
+    current_app = modern and not sender
     if current_app:
         sender = str(PLATFORMS[platform]["label"]) + " 当前登录账号"
-    if not sender or modern and platform not in capabilities.get("installed", []):
-        raise HTTPException(409, "请先在手机确认该平台账号并检查应用安装状态")
+    if modern and platform not in capabilities.get("installed", []):
+        raise HTTPException(409, f"手机尚未检测到 {PLATFORMS[platform]['label']}，请安装后返回手机助手刷新运行检查")
+    if not sender:
+        raise HTTPException(409, "旧版手机助手需要记录本方号码，请更新手机助手或填写本方号码")
     if d.status == "revoked":
         raise HTTPException(409, "手机已解除绑定，请重新配对")
     if (

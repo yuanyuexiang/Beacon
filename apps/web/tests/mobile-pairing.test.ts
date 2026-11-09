@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { pairingServer as webServer } from '../src/lib/mobile-channels';
+import { pairingAddress, pairingServer as webServer } from '../src/lib/mobile-channels';
 import { pairingServer, parsePairingTicket } from '../../mobile-agent/lib/pairing';
 const now = Date.parse('2026-11-05T00:00:00Z');
 const ticket = { type: 'beacon-pair', version: 1, server: 'https://beacon.example.com', code: '012345', owner: 'sales', expires_at: '2026-11-05T00:05:00Z' };
 describe('phone pairing QR input', () => {
+  it('keeps an edited or saved LAN address when refreshing a code with stale server configuration', () => {
+    const old = 'http://192.168.3.103:8000';
+    const current = 'http://192.168.86.32:8000';
+    expect(pairingAddress(current, old, 'http://localhost:3000', old)).toBe(current);
+    expect(pairingAddress('', current, 'http://localhost:3000', old)).toBe(current);
+    expect(pairingAddress('', null, 'http://localhost:3000', old)).toBe(old);
+    expect(pairingAddress('', old, 'https://beacon.example.com', old)).toBe('https://beacon.example.com');
+  });
   it('preserves leading-zero codes and USB/server addresses', () => {
     expect(parsePairingTicket(JSON.stringify(ticket), now).code).toBe('012345');
     expect(pairingServer('http://127.0.0.1:8000/')).toBe('http://127.0.0.1:8000');
