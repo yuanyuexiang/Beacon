@@ -20,7 +20,7 @@ async function request(url: string, options: RequestInit) {
     if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail) ? data.detail.map((d: { msg: string }) => d.msg).join('；') : `请求失败 ${response.status}`);
     return data;
   } catch (e) {
-    if (e instanceof Error && (e.name === 'AbortError' || e instanceof TypeError)) {
+    if (e instanceof Error && (e.name === 'AbortError' || e instanceof TypeError || /fetch.*cancel|network request failed/i.test(e.message))) {
       throw new Error('连接不到 Beacon。局域网请检查手机和电脑是否在同一网络、电脑 IP 和端口是否正确；云端请检查网络。配对仍保留，可重新连接。');
     }
     throw e;
@@ -256,7 +256,7 @@ export default function App() {
           {button('确认绑定', 'scan-pair', async () => { const p = parsePairingTicket(JSON.stringify(ticket)); await pairDevice(p.server, p.code); setTicket(undefined); })}
           {button('取消', 'scan-cancel', () => setTicket(undefined), true)}
         </View>}
-        <Pressable onPress={() => { setManual(v => !v); setTicket(undefined); }}><Text style={{ color: RED }}>{manual ? '收起手动配对' : '无法扫码？手动配对'}</Text></Pressable>
+        <Pressable onPress={() => { if (ticket) setServer(ticket.server); setManual(v => !v); setTicket(undefined); }}><Text style={{ color: RED }}>{manual ? '收起手动配对' : '无法扫码？手动配对'}</Text></Pressable>
         {manual && <>
           <Text style={styles.small}>本地优先使用同一 Wi-Fi 下电脑的 IP，例如 http://192.168.1.100:8000；云端填写 HTTPS 地址，无需 USB。</Text>
           <TextInput style={styles.input} placeholder="服务器地址" value={server} onChangeText={setServer} keyboardType="url" autoCapitalize="none" autoCorrect={false} />

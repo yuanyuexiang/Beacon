@@ -338,7 +338,36 @@ class PhoneService : AccessibilityService() {
           if (!uncertain && e is ExecutionFailure) j.put("reason_code", e.reason)
           try { settle(j, if (uncertain) "unknown" else if (e is ExecutionFailure) e.outcome else if (e is ContactUnavailable) "unavailable" else if (e is NeedsPhoneAction) "needs_action" else "failed", e.message?.take(500) ?: "执行中断") } catch (_: Exception) { }
         }
-      } finally { running = false }
+      } finally {
+        try { returnToBeacon(j) } catch (_: Exception) { /* Saved result remains authoritative. */ }
+        running = false
+      }
+    }
+  }
+  // Returning is presentation only: never change or repeat the saved execution result.
+  private fun returnToBeacon(j: JSONObject) {
+    if (j.optString("outcome") !in setOf("sent", "request_submitted", "unavailable", "failed")) return
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("beacon-mobile:///?tab=" + Uri.encode("任务")))
+      .setClassName(packageName, "$packageName.MainActivity")
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    try {
+      val manager = getSystemService(android.app.NotificationManager::class.java)
+      val channel = "execution-results"
+      manager.createNotificationChannel(android.app.NotificationChannel(channel, "任务处理结果", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+      val open = android.app.PendingIntent.getActivity(this, 700, intent,
+        android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+      manager.notify(700, android.app.Notification.Builder(this, channel)
+        .setSmallIcon(android.R.drawable.stat_notify_sync).setContentTitle("任务已处理")
+        .setContentText(if (j.optBoolean("reported")) "结果已回填，点击返回 Beacon" else "结果已保存在手机，等待同步；点击返回 Beacon")
+        .setContentIntent(open).setAutoCancel(true).build())
+    } catch (_: Exception) { /* Notification permission may be disabled. */ }
+    ui {
+      val r = rootInActiveWindow
+      val targetForeground = r?.packageName?.toString() in (PlatformAdapters.packages[platform] ?: emptyList())
+      val passwordVisible = r?.let { PlatformAdapters.flatten(it).any { node -> node.isPassword } } ?: true
+      if (TaskReturnPolicy.shouldReturn(j.optString("outcome"), ConnectionService.unlocked(this), targetForeground, passwordVisible)) {
+        try { startActivity(intent) } catch (_: Exception) { /* Result notification remains available. */ }
+      }
     }
   }
   private fun progress(j: JSONObject, stage: String) {

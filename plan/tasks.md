@@ -769,3 +769,17 @@ D73 验证：邮件服务 20 项、API／登录 27 项、前端 25 项，mypy／
 - [x] 渲染阶段 ref 写入改为提交后同步，移动提前使用的状态声明，时钟初始化延迟到 state initializer。
 - [x] 外部状态初始化统一可撤销调度，保留轮询／订阅清理；新增 Strict Mode 初始化取消测试，不放宽 ESLint 规则。
 - [x] CI 同等命令通过：后端 Ruff／格式／mypy（182 文件）／716 测试，Web 类型／Lint（0错误，2条原有图片建议）／42 测试／生产构建，Mobile 类型／导出，部署声明校验。授权设置、用户管理、客户沟通模拟 UI 通过；旧名单／详情 UI 脚本的旧流程断言失败，不计为通过。
+
+## 手机任务结束返回（2026-11-10）
+
+- [x] 共用执行 finally 在保存结果／截图及尝试回填之后返回任务页，覆盖所有手机渠道。
+- [x] sent／request_submitted／unavailable／failed 返回；unknown／needs_action 保留社媒现场；锁屏、密码控件、其他应用前台不抢占。
+- [x] 独立结果通知可点击返回；未回填提示手机已保存等待同步，不修改执行结果、不重发。
+- [x] TaskReturnPolicy 单元测试、Android release 构建、Mobile typecheck／lint 通过。
+- [ ] 真机执行结束自动返回验收（本轮未发送、未安装，沿用现有手机版本）。
+
+## 云端手机配对检查（2026-11-10）
+
+- [x] 复现 App 配对 fetch canceled；同机 shell 健康接口200／无效配对422／过期码409均正常。
+- [x] Expo58 官方支持开关切回 RN 全局 fetch，Metro 配置固定生效；扫码切手动继承二维码服务器，取消请求错误转为可读连接提示。
+- [x] Mobile typecheck／lint、release APK 构建及安装；真机 HTTPS 云端显示已连接和最近通信，未开启自动发送。
