@@ -33,8 +33,12 @@ def make_task(key, body):
         "kind": body["kind"],
         "status": "pending",
         "step": 0,
-        "steps": (["google", "screen", "contacts"] if body.get("phase") == "review"
-                  else (["pool"] if body["kind"] != "enrich" else []) + ["overture", "google_sync"]),
+        "steps": (
+            ["google", "screen", "contacts"]
+            if body.get("phase") == "review"
+            else (["pool"] if body["kind"] != "enrich" else [])
+            + ["overture", "google_sync"]
+        ),
         "params": {**body, "seed": None},
         "results": [],
         "error": None,
@@ -44,7 +48,7 @@ def make_task(key, body):
 
 
 async def handle(route):
-    global fail_overture, cancel_fail_once
+    global cancel_fail_once
     request = route.request
     path = urlsplit(request.url).path
     body = (
@@ -56,7 +60,18 @@ async def handle(route):
     requests.append((request.method, path, body))
     status = 200
     if path == "/api/auth/me":
-        result = {"id": "ui", "username": "ui-test", "role": "admin", "display_name": None, "must_change_password": False}
+        result = {
+            "id": "ui",
+            "username": "ui-test",
+            "role": "admin",
+            "display_name": None,
+            "must_change_password": False,
+        }
+    elif path == "/api/outreach-identity":
+        result = {
+            "sender_identity": "UI Test",
+            "opt_out_text": "Please let me know if you would prefer not to hear from us again.",
+        }
     elif path == "/api/directory/regions":
         result = [
             {
@@ -168,7 +183,13 @@ async def background(key):
                     "phone_found": 1,
                 }
             elif stage == "google_sync":
-                r = {"synced": 2, "retry": 1, "remaining": 1, "done": True, "note": "Google quota; list available"}
+                r = {
+                    "synced": 2,
+                    "retry": 1,
+                    "remaining": 1,
+                    "done": True,
+                    "note": "Google quota; list available",
+                }
             elif stage == "google":
                 r = {"verified": 1, "review": 1, "failed": 0, "done": True}
             elif stage == "screen":
@@ -200,7 +221,12 @@ async def main():
         await page.route("**/api/**", handle)
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on(
-            "console", lambda m: errors.append(m.text) if m.type == "error" and "409" not in m.text else None
+            "console",
+            lambda m: (
+                errors.append(m.text)
+                if m.type == "error" and "409" not in m.text
+                else None
+            ),
         )
         await page.goto("http://localhost:3000/leads")
         await page.get_by_text("ui-test", exact=True).wait_for()
@@ -280,11 +306,17 @@ async def main():
         await page.locator(".ant-drawer-close").click()
         await page.get_by_role("button", name="完善名单", exact=True).click()
         await page.get_by_role("radio", name="AI 核验与完善", exact=True).check()
-        await page.screenshot(path="data/devchecks/list-review-phase.png", full_page=True)
+        await page.screenshot(
+            path="data/devchecks/list-review-phase.png", full_page=True
+        )
         before_review = len(advances)
         await page.get_by_role("button", name="开始 AI 核验与完善", exact=True).click()
         await page.get_by_text("处理完成", exact=True).wait_for()
-        assert [stage for _, _, stage in advances[before_review:]] == ["google", "screen", "contacts"]
+        assert [stage for _, _, stage in advances[before_review:]] == [
+            "google",
+            "screen",
+            "contacts",
+        ]
         await page.locator(".ant-drawer-close").click()
         await page.get_by_role("button", name="追加商户", exact=True).click()
         await expect(
@@ -318,16 +350,24 @@ async def main():
         await expect(confirm).not_to_be_visible()
         assert tasks["ui-workflow"]["status"] == "pending"
         await page.get_by_role("button", name="结束任务", exact=True).click()
-        await confirm.get_by_role("button", name="结束任务", exact=True).click(timeout=5000)
+        await confirm.get_by_role("button", name="结束任务", exact=True).click(
+            timeout=5000
+        )
         await expect(confirm.get_by_text("未能结束任务", exact=True)).to_be_visible()
         assert tasks["ui-workflow"]["status"] == "pending"
-        await page.screenshot(path="data/devchecks/list-workflow-cancel-retry.png", full_page=True)
-        await confirm.get_by_role("button", name="结束任务", exact=True).click(timeout=5000)
+        await page.screenshot(
+            path="data/devchecks/list-workflow-cancel-retry.png", full_page=True
+        )
+        await confirm.get_by_role("button", name="结束任务", exact=True).click(
+            timeout=5000
+        )
         await expect(page.get_by_role("dialog")).to_have_count(0)
         assert tasks["ui-workflow"]["status"] == "cancelled"
         assert len(leads["ui-workflow"]) == 5
         await page.reload()
-        await expect(page.get_by_role("button", name="完善名单", exact=True)).to_be_enabled()
+        await expect(
+            page.get_by_role("button", name="完善名单", exact=True)
+        ).to_be_enabled()
         # 完整保留 CSV、空名单创建路径。
         await page.get_by_role("button", name="建立名单", exact=True).click()
         await page.get_by_role("radio", name="导入 CSV", exact=True).check()

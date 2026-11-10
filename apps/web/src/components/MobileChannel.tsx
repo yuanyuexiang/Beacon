@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { phoneStatusLabel } from "@/lib/mobile-channels";
 import { Alert, Button, Card, Drawer, Empty, Image, Input, Popconfirm, QRCode, Select, Space, Table, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -29,14 +30,14 @@ export default function MobileSettings() {
   const [server, setServer] = useState("");
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string>();
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const refresh = useCallback(async () => { try { setDevices(await api<Device[]>("/api/mobile/devices")); setError(undefined); } catch (e) { setError(String(e)); } }, []);
-  useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(), 15000); const onFocus = () => void refresh(); window.addEventListener("focus", onFocus); return () => {clearInterval(timer); window.removeEventListener("focus", onFocus);}; }, [refresh]);
+  useEffect(() => afterCommit(() => { void refresh(); const timer = setInterval(() => void refresh(), 15000); const onFocus = () => void refresh(); window.addEventListener("focus", onFocus); return () => {clearInterval(timer); window.removeEventListener("focus", onFocus);}; }), [refresh]);
   useEffect(() => { if (!pairing) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [pairing]);
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     if (!pairing) return;
     setServer(current => pairingAddress(current, localStorage.getItem("beacon-mobile-server"), window.location.origin, pairing.server));
-  }, [pairing]);
+  }), [pairing]);
   let address = "";
   try { address = pairingServer(server); } catch { /* Wait for the reachable address. */ }
   async function action(key: string, fn: () => Promise<void>) { setBusy(old => ({ ...old, [key]: true })); try { await fn(); setError(undefined); } catch (e) { setError(String(e)); } finally { setBusy(old => ({ ...old, [key]: false })); } }
@@ -79,12 +80,13 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
   const [device, setDevice] = useState<string>();
   const [contactAction, setContactAction] = useState(MOBILE_ACTIONS[platform]?.[0]?.value || "direct_message");
   const supports = useCallback((d: Device) => d.status === "ready" && d.online && (d.capabilities?.protocol === 2 ? d.capabilities.installed?.includes(platform) : platform === "whatsapp"), [platform]);
-  useEffect(() => { setContactAction(MOBILE_ACTIONS[platform]?.[0]?.value || "direct_message"); setDevice(undefined); setPreview(undefined); }, [platform, taskId]);
+
   const [reason, setReason] = useState("");
   const [job, setJob] = useState<Job | null>(null);
   const [preview, setPreview] = useState<{ preview_hash: string; payload: Job["snapshot"] }>();
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string>();
+  useEffect(() => afterCommit(() => { setContactAction(MOBILE_ACTIONS[platform]?.[0]?.value || "direct_message"); setDevice(undefined); setPreview(undefined); }), [platform, taskId]);
   const refresh = useCallback(async () => { setJob(await api<Job | null>(`/api/mobile/tasks/${taskId}`)); }, [taskId]);
   const loadDevices = useCallback(async () => {
     const rows = await api<Device[]>("/api/mobile/devices"); setDevices(rows);

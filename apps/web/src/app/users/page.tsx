@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -20,7 +21,7 @@ export default function UsersPage() {
   const [target, setTarget] = useState<User | null>(null);
   const [form] = Form.useForm();
   const load = useCallback(async () => { try { setUsers(await api<User[]>("/api/users")); } catch (e) { setError((e as Error).message); } }, []);
-  useEffect(() => { if (me?.role === "admin" || me?.role === "director") void load(); }, [load, me?.role]);
+  useEffect(() => afterCommit(() => { if (me?.role === "admin" || me?.role === "director") void load(); }), [load, me?.role]);
   useEffect(() => { if (mode) { form.resetFields(); if (target) form.setFieldsValue({ display_name: target.display_name, role: target.role }); } }, [mode, target, form]);
   if (me?.role !== "admin" && me?.role !== "director") return null;
   const act = async (work: () => Promise<void>) => { setBusy(true); setError(undefined); setSuccess(undefined); try { await work(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };

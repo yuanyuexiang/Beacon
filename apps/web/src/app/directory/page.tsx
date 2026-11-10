@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { Alert, Button, Card, Collapse, Drawer, Form, Modal, Select, Space, Switch, Table, Tag, Input, message } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
@@ -40,7 +41,7 @@ export default function DirectoryPage() {
     setRegions(rows); setOnline(worker.online);
     setSelected((value) => value ?? rows[0]?.id);
   }, []);
-  useEffect(() => { load().catch(error); const timer = setInterval(() => load().catch(() => {}), 5000); return () => clearInterval(timer); }, [load]);
+  useEffect(() => afterCommit(() => { load().catch(error); const timer = setInterval(() => load().catch(() => {}), 5000); return () => clearInterval(timer); }), [load]);
   const region = regions.find((r) => r.id === selected);
   const latest = region?.latest_sync;
   const loadEntries = useCallback(async () => {
@@ -50,7 +51,7 @@ export default function DirectoryPage() {
     const result = await api<{ items: Entry[]; total: number }>(`/api/directory/entries?${params}`);
     setEntries(result.items); setTotal(result.total);
   }, [selected, view, page, q, kind]);
-  useEffect(() => { loadEntries().catch(error); }, [loadEntries, latest?.id, latest?.status]);
+  useEffect(() => afterCommit(() => { loadEntries().catch(error); }), [loadEntries, latest?.id, latest?.status]);
   const refreshAuthorities = async () => {
     setBusy("authorities");
     try { await api("/api/directory/authorities/refresh", { method: "POST" }); setAuthorities(await api<Authority[]>("/api/directory/authorities")); message.success("地区名录已更新"); }

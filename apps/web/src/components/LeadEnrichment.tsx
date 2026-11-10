@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 
 import { Alert, Checkbox, Drawer, List, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,7 +23,7 @@ export default function LeadEnrichment({ leadId, onChanged, onMenus, dataRevisio
   const [notice, setNotice] = useState<string>();
   const revision = useRef<string | undefined>(undefined);
   const changed = useRef(onChanged);
-  changed.current = onChanged;
+  useEffect(() => { changed.current = onChanged; }, [onChanged]);
   const load = useCallback(async () => {
     const value = await api<State>(`/api/leads/${leadId}/enrichment`);
     const next = value.task ? `${value.task.id}:${value.task.step}:${value.task.status}` : "none";
@@ -31,7 +32,7 @@ export default function LeadEnrichment({ leadId, onChanged, onMenus, dataRevisio
     setState(value);
     if (value.task && !["pending", "running"].includes(value.task.status)) setNotice(undefined);
   }, [leadId]);
-  useEffect(() => { void load().catch((e) => setError(e.message)); }, [load, dataRevision]);
+  useEffect(() => afterCommit(() => { void load().catch((e) => setError(e.message)); }), [load, dataRevision]);
   const active = !!state?.task && ["pending", "running"].includes(state.task.status);
   useEffect(() => {
     if (!active) return;

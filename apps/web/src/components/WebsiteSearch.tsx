@@ -1,7 +1,7 @@
 "use client";
 import Button from "@/components/AccessButton";
 import { Alert, Checkbox, Form, Input, Modal, Space, Table, Tag, Typography, message } from "antd";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 
 type Candidate = { id: string; title: string; url: string; excerpt: string; postcode_seen: boolean; warnings: string[] };
@@ -41,7 +41,13 @@ export default function WebsiteSearch({ id, name, address, postcode, website, on
     } catch (e) { message.error((e as Error).message); }
     finally { setSaving(false); }
   };
-  const expired = !!lookup && new Date(lookup.expires_at).getTime() < Date.now();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!lookup) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [lookup]);
+  const expired = !!lookup && new Date(lookup.expires_at).getTime() < now;
   const requiredCheck = { validator: (_: unknown, value: boolean) => value ? Promise.resolve() : Promise.reject(new Error("请完成核对后勾选")) };
   return <>
     <Button onClick={show}>搜索官网候选</Button>

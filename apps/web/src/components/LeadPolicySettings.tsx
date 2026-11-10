@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Card, Form, InputNumber, Select, Space, Switch } from "antd";
 import { useSettingsDraft } from "./SettingsState";
@@ -15,7 +16,7 @@ export default function LeadPolicySettings({ section = "screen" }: { section?: "
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string>();
   const load = useCallback(async () => { try { const value = await api<Policy>("/api/lead-policy"); setSaved(value); form.setFieldsValue(value); setDirty(false); setError(undefined); } catch (e) { setError((e as Error).message); } }, [form]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => afterCommit(() => { void load(); }), [load]);
   return <Card title={section === "screen" ? "客户筛选与准入" : "数据补充"} style={{ marginBottom: 24 }}>
     {success && <Alert type="success" showIcon message="策略已保存，新任务生效" style={{ marginBottom: 16 }} />}
     {error && <Alert type="error" showIcon message={error} action={<Button onClick={() => { if (!dirty || window.confirm("刷新会放弃未保存的策略，是否继续？")) void load(); }}>刷新策略</Button>} />}

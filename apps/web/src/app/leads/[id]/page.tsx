@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import PhoneWhatsApp from "@/components/PhoneWhatsApp";
 import LeadTimes, { displayTime } from "@/components/LeadTimes";
 import LeadEnrichment from "@/components/LeadEnrichment";
@@ -69,7 +70,7 @@ export default function LeadDetail() {
   const [pendingReview, setPendingReview] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string>();
   const [back, setBack] = useState("/leads");
-  useEffect(() => { setBack(safeReturnTo(new URLSearchParams(window.location.search).get("returnTo") || "/leads")); }, [id]);
+  useEffect(() => afterCommit(() => { setBack(safeReturnTo(new URLSearchParams(window.location.search).get("returnTo") || "/leads")); }), [id]);
   const [lead, setLead] = useState<Lead | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [analyses, setAnalyses] = useState<Record<string, Analysis[]>>({});
@@ -97,12 +98,12 @@ export default function LeadDetail() {
     setSectionErrors(Object.fromEntries(results.flatMap((r, i) => r.status === "rejected" ? [[names[i], r.reason?.message || "读取失败"]] : [])));
     setLoading(false);
   }, [id, form]);
-  useEffect(() => { setLead(null); setTab(({ website: "sources", contacts: "sales", menus: "menus", analysis: "menus" } as Record<string, string>)[new URLSearchParams(window.location.search).get("section") || ""] || "sales"); form.resetFields(); setWebsiteConflict(false); setSelectedMenu(undefined); setComposerContact(undefined); void reload(); return () => { generation.current += 1; }; }, [reload, form]);
-  useEffect(() => {
+  useEffect(() => afterCommit(() => { setLead(null); setTab(({ website: "sources", contacts: "sales", menus: "menus", analysis: "menus" } as Record<string, string>)[new URLSearchParams(window.location.search).get("section") || ""] || "sales"); form.resetFields(); setWebsiteConflict(false); setSelectedMenu(undefined); setComposerContact(undefined); void reload(); return () => { generation.current += 1; }; }), [reload, form]);
+  useEffect(() => afterCommit(() => {
     if (!pendingReview || tab !== "menus") return;
     const target = document.getElementById(`menu-review-${pendingReview}`);
     if (target) { target.scrollIntoView({ behavior: "smooth", block: "start" }); setPendingReview(null); }
-  }, [pendingReview, analyses, tab]);
+  }), [pendingReview, analyses, tab]);
   const linkedSection = useRef(false);
   useEffect(() => { linkedSection.current = false; }, [id]);
   useEffect(() => {
@@ -117,7 +118,7 @@ export default function LeadDetail() {
     }, 100);
     return () => clearTimeout(timer);
   }, [loading, lead]);
-  useEffect(() => { setContactLookup(null); setContactPicked([]); setContactOpen(false); }, [id, lead?.website]);
+  useEffect(() => afterCommit(() => { setContactLookup(null); setContactPicked([]); setContactOpen(false); }), [id, lead?.website]);
   if (!lead) return <Card loading={loading}>{!loading && <Alert type="error" showIcon message={sectionErrors["基本资料"] || "无法读取门店资料"} action={<Button readOnlySafe onClick={() => void reload()}>重试加载</Button>} />}</Card>;
 
   // 显式 AI 查找会保存证据并评估既有渠道准入；新候选勾选记录后按缓存证据再评估。

@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsDraft, useSettingsStatus } from "./SettingsState";
@@ -29,11 +30,11 @@ export default function SocialSettings() {
     const [next, rows] = await Promise.all([api<Status>("/api/outreach/status"), api<ChannelAccount[]>("/api/outreach/accounts")]);
     setStatus(next); setAccounts(rows);
   }, []);
-  useEffect(() => { appForm.setFieldsValue({ redirect_uri: window.location.origin + "/api/outreach/oauth/callback" }); refresh().catch((e) => message.error(e.message));
+  useEffect(() => afterCommit(() => { appForm.setFieldsValue({ redirect_uri: window.location.origin + "/api/outreach/oauth/callback" }); refresh().catch((e) => message.error(e.message));
     const result = new URLSearchParams(window.location.search).get("meta");
     if (result === "connected") message.success("Meta 账号身份已核验，发送已暂停；消息权限与订阅仍需联调");
     if (result === "failed") message.error("Meta 授权未完成，原连接已保留；请从当前管理员会话重试并核对应用权限与回调地址");
-  }, [refresh, appForm]);
+  }), [refresh, appForm]);
   const act = async (key: string, work: () => Promise<void>) => {
     const scope = scopeOf(key);
     if (locks.current.has("app") || locks.current.has(scope) || (scope === "app" && locks.current.size)) return;

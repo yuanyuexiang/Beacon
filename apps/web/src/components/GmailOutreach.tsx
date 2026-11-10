@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import Button from "@/components/AccessButton";
 import { Alert, Checkbox, Input, Modal, Space, Table, Tag, Typography, message } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -10,7 +11,7 @@ const labels: Record<string, string> = { preview: "待确认发送", ready: "排
 export default function GmailOutreach({ tasks, name, onChanged, focusTaskId }: { tasks: Task[]; name: (id: string) => string; onChanged: () => Promise<void>; focusTaskId?: string }) {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [selected, setSelected] = useState<React.Key[]>([]);
-  useEffect(() => { if (focusTaskId) setSelected([focusTaskId]); }, [focusTaskId]);
+  useEffect(() => afterCommit(() => { if (focusTaskId) setSelected([focusTaskId]); }), [focusTaskId]);
   const [subject, setSubject] = useState("");
   const [previews, setPreviews] = useState<Delivery[]>([]);
   const [confirmed, setConfirmed] = useState(false);
@@ -20,11 +21,11 @@ export default function GmailOutreach({ tasks, name, onChanged, focusTaskId }: {
   const [error, setError] = useState<string>();
   useEffect(() => { api<typeof status>("/api/gmail/status").then(setStatus).catch((e) => setError(e.message)); }, []);
   const refresh = useCallback(async () => { setDeliveries(await api<Delivery[]>("/api/gmail/deliveries")); }, []);
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     refresh().catch((e) => message.error(e.message));
     const timer = setInterval(() => { refresh().catch(() => {}); onChanged().catch(() => {}); }, 5000);
     return () => clearInterval(timer);
-  }, [refresh, onChanged]);
+  }), [refresh, onChanged]);
   const act = async (work: () => Promise<void>, key = "record") => {
     setAction(key); setError(undefined); try { await work(); await refresh(); await onChanged(); } catch (e) { setError((e as Error).message); } finally { setAction(undefined); }
   };

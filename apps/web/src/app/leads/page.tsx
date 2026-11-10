@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { displayTime } from "@/components/LeadTimes";
 import LeadCompleteness from "@/components/LeadCompleteness";
 import { UserIdentity } from "@/components/UserAvatar";
@@ -41,7 +42,7 @@ function LeadsInner() {
   const sp = useSearchParams();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => afterCommit(() => { setMounted(true); }), []);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [batchKey, setBatchKey] = useState<string | undefined>(sp.get("batch") ?? undefined);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -56,7 +57,7 @@ function LeadsInner() {
   const [contactError, setContactError] = useState<string>();
   const [prepareLeadIds, setPrepareLeadIds] = useState<string[] | null>(null);
   const selectionKey = `beacon-list-selection:${me?.id}:${batchKey}`;
-  useEffect(() => { try { setSelectedRows(JSON.parse(sessionStorage.getItem(selectionKey) || "[]")); } catch { setSelectedRows([]); } }, [selectionKey]);
+  useEffect(() => afterCommit(() => { try { setSelectedRows(JSON.parse(sessionStorage.getItem(selectionKey) || "[]")); } catch { setSelectedRows([]); } }), [selectionKey]);
   const selectRows = (keys: React.Key[]) => { setSelectedRows(keys); sessionStorage.setItem(selectionKey, JSON.stringify(keys)); };
   const locationParams = new URLSearchParams();
   if (batchKey) locationParams.set("batch", batchKey);
@@ -91,7 +92,7 @@ function LeadsInner() {
   const [enrichPhase, setEnrichPhase] = useState<"sync" | "review">("sync");
   const [mode, setMode] = useState<"enrich" | "append" | "progress">("enrich");
   const activeKey = useRef(batchKey);
-  activeKey.current = batchKey;
+  useEffect(() => { activeKey.current = batchKey; }, [batchKey]);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const locked = !canManage || creating || !!busy || workflowLoading || workflowLoadError || workflowBlocksActions(workflow);
@@ -110,7 +111,7 @@ function LeadsInner() {
     getAllBatchLeads<Lead>(key).then((rows) => { if (activeKey.current === key) setLeads(rows); }).catch(err);
   }, []);
   useEffect(() => { loadBatches(); }, [loadBatches]);
-  useEffect(() => { loadLeads(batchKey); }, [batchKey, loadLeads]);
+  useEffect(() => afterCommit(() => { loadLeads(batchKey); }), [batchKey, loadLeads]);
   useEffect(() => { router.replace(returnTo, { scroll: false }); }, [returnTo, router]);
   const workflowRefresh = useRef("");
   const loadWorkflow = useCallback(async (key: string) => {
@@ -118,13 +119,13 @@ function LeadsInner() {
     if (activeKey.current === key) { setWorkflow(task); setWorkflowLoadError(false); const signature = task ? `${task.id}:${task.step}:${task.status}` : ""; if (signature !== workflowRefresh.current && task) { workflowRefresh.current = signature; loadLeads(key); } }
     return task;
   }, [loadLeads]);
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     setWorkflow(null);
     setWorkflowLoadError(false);
     if (!batchKey) { setWorkflowLoading(false); return; }
     setWorkflowLoading(true);
     loadWorkflow(batchKey).catch((e: Error) => { if (activeKey.current === batchKey) setWorkflowLoadError(true); err(e); }).finally(() => { if (activeKey.current === batchKey) setWorkflowLoading(false); });
-  }, [batchKey, loadWorkflow]);
+  }), [batchKey, loadWorkflow]);
   useEffect(() => {
     if (!batchKey || creating) return;
     const timer = setInterval(() => { loadWorkflow(batchKey).catch(() => {}); }, 5000);
@@ -132,12 +133,12 @@ function LeadsInner() {
   }, [batchKey, creating, loadWorkflow]);
   const currentBatch = batches.find((b) => b.batch_key === batchKey);
   const appendAuthority = authorities.find((a) => a.name === currentBatch?.region);
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     if (!buildOpen || mode !== "append") return;
     loadAuthorities();
     const ids = currentBatch?.business_type?.startsWith("fsa:") ? currentBatch.business_type.slice(4).split(",").map(Number).filter((id) => BUSINESS_TYPES.some((t) => t.value === id)) : [1];
     fsaForm.setFieldsValue({ exclude_awaiting: false, business_type_ids: ids.length ? ids : [1] });
-  }, [buildOpen, mode, currentBatch?.business_type, fsaForm, loadAuthorities]);
+  }), [buildOpen, mode, currentBatch?.business_type, fsaForm, loadAuthorities]);
 
   const executeWorkflow = async (key: string, task: ListWorkflow) => {
     setCreating(true);
@@ -232,13 +233,13 @@ function LeadsInner() {
       .finally(() => setDelBusy(false));
   };
 
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     let current = true;
     const result = workflow?.results[workflow.steps.indexOf("contacts")];
     setContactRun(null); setContactError(undefined);
     if (buildOpen && result?.run_id) api<NonNullable<typeof contactRun>>(`/api/runs/${result.run_id}`).then((value) => { if (current) setContactRun(value); }).catch((e) => { if (current) setContactError(e.message); });
     return () => { current = false; };
-  }, [buildOpen, workflow]);
+  }), [buildOpen, workflow]);
   const filtered = useMemo(() => leads.filter((l) => (me?.role !== "member" ? (ownerView !== "mine" || l.assigned_to === me?.username) && (ownerView !== "unassigned" || !l.assigned_to) && (ownerView !== "returned" || (!l.assigned_to && !!l.assignment_return)) && (!ownerFilter || l.assigned_to === ownerFilter) : true) && (!businessType || l.business_type_id === businessType) && (!screen || l.screening_class === screen) && (!q || l.name.toLowerCase().includes(q.toLowerCase()) || (l.postcode ?? "").toLowerCase().includes(q.toLowerCase()))), [leads, businessType, screen, q, me?.role, me?.username, ownerView, ownerFilter]);
   const stats = useMemo(() => ({ total: leads.length, website: leads.filter((l) => l.website).length, candidate: leads.filter((l) => l.screening_class === "candidate").length, unchecked: leads.filter((l) => l.screening_class === "unchecked").length }), [leads]);
   const run = (name: string, p: Promise<unknown>, done: (r: never) => string) => { setBusy(name); p.then((r) => { message.success(done(r as never)); loadLeads(batchKey); loadBatches(); }).catch(err).finally(() => setBusy(null)); };

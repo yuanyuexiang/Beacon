@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { Alert, Button, Card, Form, Input, InputNumber, Modal, Space, Typography } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSettingsDraft, useSettingsStatus } from "./SettingsState";
@@ -45,12 +46,12 @@ export default function GmailSettings() {
     const next = await api<Status>("/api/gmail/status");
     setStatus(next); if (next.policy && !policyDirty.current) form.setFieldsValue(next.policy);
   }, [form]);
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     refresh().catch((e) => setError(e.message));
     const params = new URLSearchParams(window.location.search);
     if (params.get("gmail") === "connected") setNotice("Gmail 已连接，可预览并确认发送邮件。");
     if (params.get("gmail") === "failed") setError(ERRORS[params.get("gmail_error") || "oauth_failed"] || ERRORS.oauth_failed);
-  }, [refresh]);
+  }), [refresh]);
   const act = async (action: Action, work: () => Promise<void>) => {
     if (inFlight.current) return;
     inFlight.current = true;

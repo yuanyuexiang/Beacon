@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import Button from "@/components/AccessButton";
 import { Alert, Checkbox, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -14,7 +15,7 @@ export default function SocialOutreach({ tasks, name, onChanged, focusTaskId }: 
   const [deliveries, setDeliveries] = useState<SocialDelivery[]>([]);
   const [previews, setPreviews] = useState<SocialDelivery[]>([]);
   const [selected, setSelected] = useState<React.Key[]>([]);
-  useEffect(() => { if (focusTaskId) setSelected([focusTaskId]); }, [focusTaskId]);
+  useEffect(() => afterCommit(() => { if (focusTaskId) setSelected([focusTaskId]); }), [focusTaskId]);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -28,7 +29,7 @@ export default function SocialOutreach({ tasks, name, onChanged, focusTaskId }: 
     const [a, c, d] = await Promise.all([api<ChannelAccount[]>("/api/outreach/accounts"), api<Conversation[]>("/api/outreach/conversations"), api<SocialDelivery[]>("/api/outreach/deliveries")]);
     setAccounts(a); setConversations(c); setDeliveries(d);
   }, []);
-  useEffect(() => { refresh().catch((e) => message.error(e.message)); const timer = setInterval(() => { refresh().catch(() => {}); onChanged().catch(() => {}); }, 5000); return () => clearInterval(timer); }, [refresh, onChanged]);
+  useEffect(() => afterCommit(() => { refresh().catch((e) => message.error(e.message)); const timer = setInterval(() => { refresh().catch(() => {}); onChanged().catch(() => {}); }, 5000); return () => clearInterval(timer); }), [refresh, onChanged]);
   const act = async (work: () => Promise<void>) => {
     setBusy(true); setError(undefined); try { await work(); await refresh(); await onChanged(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };

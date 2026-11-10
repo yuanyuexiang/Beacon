@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { Alert, Button, Collapse, Drawer, Empty, Space, Tag, Typography } from "antd";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -14,7 +15,7 @@ export default function EnrichmentHistory({ batchKey, leadId }: { batchKey?: str
   const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(false);
   const url = leadId ? `/api/leads/${leadId}/enrichment-history` : batchKey ? `/api/batches/${encodeURIComponent(batchKey)}/enrichment-history` : "";
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     let active = true;
     setRows([]); setLoaded(false); setError("");
     if (!url) return;
@@ -22,7 +23,7 @@ export default function EnrichmentHistory({ batchKey, leadId }: { batchKey?: str
     void load();
     const timer = setInterval(() => void load(), 5000);
     return () => { active = false; clearInterval(timer); };
-  }, [url]);
+  }), [url]);
   if (!url) return null;
   const latest = rows[0];
   return <>

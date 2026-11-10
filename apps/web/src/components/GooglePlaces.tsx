@@ -65,7 +65,7 @@ export default function GooglePlaces({ id, name, address, postcode, website, onW
   const [officialChecked, setOfficialChecked] = useState(false);
   const [websiteAddressChecked, setWebsiteAddressChecked] = useState(false);
   const [websiteEvidence, setWebsiteEvidence] = useState("");
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     let active = true;
     api<PlacesState>(`/api/leads/${id}/google-places`, { cache: "no-store" }).then((v) => { if (active) setState(v); }).catch((e) => { if (active) setError(e.message); });

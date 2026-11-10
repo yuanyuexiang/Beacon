@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { Alert, Card, Collapse, Form, Input, Select, Space, Tag, Typography } from "antd";
 import Button from "@/components/AccessButton";
 import { useEffect, useRef, useState } from "react";
@@ -31,7 +32,7 @@ export default function OutreachProfileSettings() {
       setDirty(false); setSuggestion(undefined); setPreview(undefined);
     } catch (e) { setError((e as Error).message); } finally { setBusy(undefined); }
   };
-  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => afterCommit(() => { void load(); }), []); // eslint-disable-line react-hooks/exhaustive-deps
   const runAI = async (action: "organise" | "preview") => {
     const at = revision.current;
     setBusy(action); setError(undefined);

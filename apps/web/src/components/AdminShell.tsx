@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { UserAvatar } from "@/components/UserAvatar";
 import { DashboardOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
 import { Alert, Breadcrumb, Dropdown, Layout, Menu, Space, Tooltip, Typography } from "antd";
@@ -30,11 +31,11 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<Operator | null>(null);
   const refresh = useCallback(async () => { const value = await api<Operator>("/api/auth/me"); setMe(value); }, []);
   const [collapsed, setCollapsed] = useState(false);
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     if (path === "/login") { setMe(null); return; }
     if (["/terms", "/privacy"].includes(path)) return;
     refresh().catch(() => { setMe(null); router.replace("/login"); });
-  }, [path, router, refresh]);
+  }), [path, router, refresh]);
   useEffect(() => {
     const invalid = () => { setMe(null); router.replace("/login"); };
     const password = () => router.replace("/account");

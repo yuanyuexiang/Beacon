@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Checkbox, Drawer, Empty, Select, Space, Tabs, Tag, Typography } from "antd";
 import { useRouter } from "next/navigation";
@@ -31,7 +32,7 @@ export default function MobileReplies({ onChanged }: { onChanged: () => Promise<
     const [p, l] = await Promise.all([api<Notice[]>("/api/mobile/notifications"), api<Notice[]>("/api/mobile/notifications?status=linked")]);
     setPending(p); setLinked(l);
   }, []);
-  useEffect(() => { void refresh().catch(e => setError(String(e))); const timer = setInterval(() => { if (!document.hidden) void refresh().catch(e => setError(String(e))); }, 15000); return () => clearInterval(timer); }, [refresh]);
+  useEffect(() => afterCommit(() => { void refresh().catch(e => setError(String(e))); const timer = setInterval(() => { if (!document.hidden) void refresh().catch(e => setError(String(e))); }, 15000); return () => clearInterval(timer); }), [refresh]);
   const loadTargets = async (q = "") => { const version = ++searchVersion.current; try { const rows = await api<Target[]>(`/api/mobile/reply-targets?q=${encodeURIComponent(q)}`); if (version === searchVersion.current) setTargets(rows); } catch (e) { setError(String(e)); } };
   async function act(key: string, fn: () => Promise<void>) { setBusy(old => ({ ...old, [key]: true })); try { await fn(); setError(undefined); await refresh(); await onChanged(); } catch (e) { setError(String(e)); } finally { setBusy(old => ({ ...old, [key]: false })); } }
   const unread = linked.filter(n => !n.read).length;

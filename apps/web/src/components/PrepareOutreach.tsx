@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import { useOutreachIdentity } from "@/lib/useOutreachIdentity";
 import { Alert, Card, Collapse, Drawer, Input, Select, Space, Table, Tag, Typography } from "antd";
 import Button from "@/components/AccessButton";
@@ -12,7 +13,8 @@ import { channelLabel } from "@/lib/format";
 
 export default function PrepareOutreach({ open, leadIds, batchKey, returnTo, onClose, onChanged, initialChannel = "email", savedDrafts, purpose = "initial", onViewMenus, embedded = false, initialContactId, preferredAnalysisId, dataRevision, selectionRequest, onSelectedContact, onSelectionBusyChange }: { onSelectedContact?: (id: string | null) => void; onSelectionBusyChange?: (busy: boolean) => void; onViewMenus?: () => void; embedded?: boolean; dataRevision?: string; selectionRequest?: number; initialContactId?: string; preferredAnalysisId?: string; open: boolean; leadIds: string[]; batchKey?: string; returnTo: string; onClose: () => void; onChanged?: () => void; initialChannel?: string; savedDrafts?: Draft[]; purpose?: "initial" | "followup" }) {
   const [channel, setChannel] = useState(initialChannel);
-  const channelRef = useRef(channel); channelRef.current = channel;
+  const channelRef = useRef(channel);
+  useEffect(() => { channelRef.current = channel; }, [channel]);
   const [mode, setMode] = useState(defaultExecutionMode(initialChannel));
   const [assigned, setAssigned] = useState<string>();
   const [rows, setRows] = useState<Prepared[]>([]);
@@ -21,8 +23,10 @@ export default function PrepareOutreach({ open, leadIds, batchKey, returnTo, onC
   const [working, setWorking] = useState<Record<string,boolean>>({});
   const workingChange = (id:string,active:boolean) => setWorking(old => old[id] === active ? old : {...old,[id]:active});
   const locked = busy || Object.values(working).some(Boolean);
-  const selectionCallback = useRef(onSelectedContact); selectionCallback.current = onSelectedContact;
-  const busyCallback = useRef(onSelectionBusyChange); busyCallback.current = onSelectionBusyChange;
+  const selectionCallback = useRef(onSelectedContact);
+  useEffect(() => { selectionCallback.current = onSelectedContact; }, [onSelectedContact]);
+  const busyCallback = useRef(onSelectionBusyChange);
+  useEffect(() => { busyCallback.current = onSelectionBusyChange; }, [onSelectionBusyChange]);
   const selectedId = rows[0]?.draft?.eligibility_id || rows[0]?.existing_task?.eligibility_id || initialContactId || null;
   useEffect(() => { selectionCallback.current?.(selectedId); }, [selectedId]);
 
@@ -40,7 +44,7 @@ export default function PrepareOutreach({ open, leadIds, batchKey, returnTo, onC
   const identity = leadIds.length === 1 ? leadIds[0] : undefined;
   const selectedRequest = useRef<string | undefined>(undefined);
   const initialized = useRef<string | undefined>(undefined);
-  useEffect(() => {
+  useEffect(() => afterCommit(() => {
     if (!open) return;
     let active = true;
     const epoch = rowsEpoch.current;
@@ -69,7 +73,7 @@ export default function PrepareOutreach({ open, leadIds, batchKey, returnTo, onC
       })().catch((e) => { if (active) setError(e.message); }).finally(() => { if (active) setLoadingContext(false); });
     }
     return () => { active = false; };
-  }, [open, initialChannel, savedDrafts, embedded, initialContactId, leadKey, purpose, identity, dataRevision, selectionRequest]);
+  }), [open, initialChannel, savedDrafts, embedded, initialContactId, leadKey, purpose, identity, dataRevision, selectionRequest]);
 
   const check = async () => { rowsEpoch.current++; setBusy(true); setError(undefined); const collected: Prepared[] = []; try { for (let offset = 0; offset < leadIds.length; offset += 25) { const next = await api<{ items: Prepared[] }>("/api/communication/prepare", json({ lead_ids: leadIds.slice(offset, offset + 25), channel, execution_mode: mode, batch_key: batchKey, assigned_to: assigned, purpose })); collected.push(...next.items); setRows([...collected]); setNote(leadIds.length > 1 ? `已准备 ${collected.length}/${leadIds.length} 家` : undefined); } onChanged?.(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   const body = <>

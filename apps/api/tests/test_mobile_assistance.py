@@ -112,4 +112,6 @@ def test_mobile_purpose_uses_selected_connection(client, db):
     assert response.status_code == 200, response.text
     assert response.json()["routes"]["mobile"] == "test"
     assert configuration.PURPOSES["mobile"] == "手机页面理解"
-    assert assistance.ai_runtime.selected("mobile")["model"] == "test-model"
+    selected = assistance.ai_runtime.selected("mobile")
+    assert selected is not None
+    assert selected["model"] == "test-model"

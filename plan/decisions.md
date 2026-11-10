@@ -621,3 +621,7 @@ Facebook 发送回执可能是文字节点，不应以 ImageView 控件类型作
 ### 2026-11-10 明确不可联系也是任务完成
 
 手机 unavailable 是已判明本次渠道不可联系的终态，ManualTask.status 保存 completed（既有 VARCHAR(40)，无数据库约束变更），sent_at／sent_recorded_at 不写入，不能当发送成功；Execution.status 与原因码、截图原样保留。手机仅在结果回填确认后继续下一条；网络故障、登录问题、身份不确定及发送未知保留处理路径。既有 unavailable 历史执行在进展投影同样显示已完成，不改写历史发送事实。completed 是新增应用状态，旧应用版本不能直接回滚读取该值，现有回滚兼容清单为空。
+
+### 2026-11-10 CI 生命周期检查修复
+
+保留全量 ESLint 与 mypy，不通过关闭规则绕过部署失败。外部数据、存储、表单与授权返回同步使用 afterCommit 可取消初始化：未执行的旧 setup 在 cleanup 后取消，已执行的计时器／订阅仍执行原 cleanup，避免 Strict Mode 清理后继续启动初始化。渲染不再写 ref；倒计时使用状态时钟，WebsiteSearch 候选时效随时钟更新。后端测试先明确验证 selected 配置非空，再核对模型。六份附件内容相同，不代表六组不同故障。

@@ -1,4 +1,5 @@
 "use client";
+import { afterCommit } from "@/lib/after-commit";
 import Button from "@/components/AccessButton";
 import { Alert, Modal, Space, Table, Typography, message } from "antd";
 import { useEffect, useState } from "react";
@@ -13,7 +14,7 @@ export default function WebsiteMenus({ id, website, onAdded, onIngest }: { id: s
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<Candidate | null>(null);
-  useEffect(() => { setLookup(null); setPicked(null); setOpen(false); }, [website, id]);
+  useEffect(() => afterCommit(() => { setLookup(null); setPicked(null); setOpen(false); }), [website, id]);
   const search = async () => {
     setOpen(true); setBusy(true); setError(null); setLookup(null);
     try { setLookup(await api<Lookup>(`/api/leads/${id}/menu-candidates`, json({}))); }
