@@ -2,6 +2,9 @@
 
 import asyncio
 import json
+import io
+
+from PIL import Image
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -20,6 +23,11 @@ async def main():
         path = urlsplit(route.request.url).path
         body = route.request.post_data_json if route.request.post_data else {}
         calls.append((path, body))
+        if path.endswith("/screenshot"):
+            picture = io.BytesIO()
+            Image.new("RGB", (200, 400), "white").save(picture, "JPEG")
+            await route.fulfill(content_type="image/jpeg", body=picture.getvalue())
+            return
         if path == "/api/auth/me":
             data = dict(id="tester", username="tester", role="admin", must_change_password=False)
         elif path == "/api/batches":
@@ -130,13 +138,15 @@ async def main():
         await page.get_by_role("button", name="确认交给手机执行", exact=True).click()
         await expect(page.get_by_text("等待手机领取", exact=True)).to_be_visible()
         # A completed navigation failure keeps the message and its diagnostic steps.
-        job.update(status="needs_action", error="未找到私信入口", navigation_history=["open_more:更多:页面无明显变化"])
+        job.update(status="needs_action", error="未找到私信入口", reason_code="entry_not_found", finished_at="2026-11-09T08:00:00Z", screenshot_url=f"/api/mobile/tasks/{TASK}/screenshot", navigation_history=["open_more:更多:页面无明显变化"])
         await page.reload()
         await page.get_by_role("button", name="手机执行／查看结果", exact=True).click()
         await expect(page.get_by_text("未找到私信入口", exact=True)).to_be_visible()
         await page.get_by_text("查看执行步骤", exact=True).click()
         await expect(page.get_by_text("open_more:更多:页面无明显变化", exact=True)).to_be_visible()
         await expect(page.get_by_text("Simulated message only", exact=True)).to_be_visible()
+        await page.get_by_text("查看执行截图", exact=True).click()
+        await expect(page.get_by_alt_text("手机执行结果截图")).to_be_visible()
         out = Path("data/devchecks/mobile")
         out.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(out / "instagram-queue-mock.png"), full_page=True)

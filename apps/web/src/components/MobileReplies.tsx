@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, json } from "@/lib/api";
 import { MOBILE_LABELS } from "@/lib/mobile-channels";
 
-type Notice = { id: string; channel: string; title: string; body: string; occurred_at: string; status: string; stable_thread: boolean; structured: boolean; read: boolean; lead_id: string | null; lead_name: string | null };
+type Notice = { source?: string; time_basis?: string; id: string; channel: string; title: string; body: string; occurred_at: string; status: string; stable_thread: boolean; structured: boolean; read: boolean; lead_id: string | null; lead_name: string | null };
 type Target = { id: string; channel: string; lead_name: string; target: string };
 export default function MobileReplies({ onChanged }: { onChanged: () => Promise<void> }) {
   const router = useRouter();
@@ -19,6 +19,14 @@ export default function MobileReplies({ onChanged }: { onChanged: () => Promise<
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string>();
   const searchVersion = useRef(0);
+  const linkedVersion = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const version = linked.map(n => n.id).sort().join(",");
+    if (linkedVersion.current !== undefined && linkedVersion.current !== version) {
+      void onChanged().catch(e => setError(String(e)));
+    }
+    linkedVersion.current = version;
+  }, [linked, onChanged]);
   const refresh = useCallback(async () => {
     const [p, l] = await Promise.all([api<Notice[]>("/api/mobile/notifications"), api<Notice[]>("/api/mobile/notifications?status=linked")]);
     setPending(p); setLinked(l);
@@ -30,11 +38,11 @@ export default function MobileReplies({ onChanged }: { onChanged: () => Promise<
   return <>
     <Card size="small" style={{ marginBottom: 16 }}><Space wrap><strong>手机回复</strong><Tag color={pending.length ? "orange" : undefined}>待关联 {pending.length}</Tag><Tag color={unread ? "green" : undefined}>新回复 {unread}</Tag><Button onClick={() => { setOpen(true); void loadTargets(); void refresh().catch(e => setError(String(e))); }}>查看手机回复</Button><Typography.Text type="secondary">首次关联门店后，同一稳定会话的新回复自动回填。</Typography.Text></Space>{error && <Alert type="error" message={error} />}</Card>
     <Drawer title="手机回复" width={680} open={open} onClose={() => setOpen(false)}>
-      <Alert type="info" showIcon message="来自手机通知，不代表完整聊天记录。请核对首条通知属于哪家门店；自动回填不会发送消息。" style={{ marginBottom: 16 }} />
+      <Alert type="info" showIcon message="来自手机通知或任务聊天页面补收，不代表完整聊天记录。未关联通知需确认门店；自动回填不会发送消息。" style={{ marginBottom: 16 }} />
       <Tabs activeKey={tab} onChange={setTab} items={[{ key: "pending", label: `待关联（${pending.length}）` }, { key: "linked", label: `已回填（${unread} 条未读）` }]} />
       {(tab === "pending" ? pending : linked).map(n => <Card key={n.id} size="small" title={<Space><Tag>{MOBILE_LABELS[n.channel] || n.channel}</Tag>{n.title}</Space>} style={{ marginBottom: 12 }}>
         <Typography.Paragraph style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{n.body}</Typography.Paragraph>
-        <p>{new Date(n.occurred_at).toLocaleString("zh-CN")}</p>
+        <p>{n.source === "mobile_foreground" && <Tag>聊天补收</Tag>}{n.time_basis === "observed" ? "读取时间：" : "消息时间："}{new Date(n.occurred_at).toLocaleString("zh-CN")}</p>
         {tab === "pending" ? <Space direction="vertical" style={{ width: "100%" }}>
           {!n.structured && <Typography.Text type="secondary">普通通知，需要确认这确实是客户回复。</Typography.Text>}
           <Select aria-label="关联回复门店" showSearch filterOption={false} onSearch={q => void loadTargets(q)} placeholder="搜索并选择同渠道门店会话" style={{ width: "100%" }} value={selection[n.id]} onChange={v => setSelection(old => ({ ...old, [n.id]: v }))} options={targets.filter(t => t.channel === n.channel).map(t => ({ value: t.id, label: `${t.lead_name} · ${t.target}` }))} />

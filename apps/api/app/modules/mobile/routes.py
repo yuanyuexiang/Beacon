@@ -1,5 +1,6 @@
 """Authenticated operators confirm jobs; paired devices can only execute their own frozen jobs."""
 
+import base64
 import hashlib
 import hmac
 import json
@@ -9,9 +10,9 @@ import uuid
 from datetime import timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.core.auth import current_operator, may_send
@@ -25,6 +26,7 @@ from app.modules.mobile.assistance import assist as assist_page
 from app.modules.mobile.channels import PLATFORMS, destination
 from app.modules.mobile.models import Device, Execution, Pairing
 from app.modules.mobile.navigation import Screen, advise
+from app.modules.mobile.results import screenshot_jpeg
 from app.modules.sales import service
 from app.modules.sales.models import ChannelEligibility, ManualTask, TaskStatus
 
@@ -77,6 +79,23 @@ class AttemptIn(Input):
 class ResultIn(AttemptIn):
     status: Literal["sent", "failed", "unknown", "needs_action", "request_submitted", "unavailable"]
     detail: str = Field(default="", max_length=1000)
+    reason_code: (
+        Literal[
+            "not_registered",
+            "messaging_unavailable",
+            "connection_required",
+            "network_error",
+            "account_action_required",
+            "target_unverified",
+            "entry_not_found",
+            "send_unconfirmed",
+            "execution_error",
+            "sent",
+            "request_submitted",
+        ]
+        | None
+    ) = None
+    screenshot: str | None = Field(default=None, max_length=900_000, repr=False)
 
 
 def operator_device(db: Session, identity: uuid.UUID, op: Operator) -> Device:
@@ -132,6 +151,8 @@ def public_job(j: Execution) -> dict:
         "finished_at": j.finished_at,
         "error": j.error,
         "navigation_history": (j.result or {}).get("navigation_history", []),
+        "reason_code": (j.result or {}).get("reason_code"),
+        "screenshot_url": f"/api/mobile/tasks/{j.task_id}/screenshot" if (j.result or {}).get("screenshot") else None,
     }
 
 
@@ -361,6 +382,7 @@ def destination_payload(
         "content_hash": p.content_hash,
         "lead_name": lead.name if lead else "",
         "owner": d.owner,
+        "task_owner": assigned_to,
         "channel": platform,
         "protocol": 2 if modern else 1,
         **({"action": action} if modern else {}),
@@ -380,6 +402,19 @@ def task_state(identity: uuid.UUID, db: Session = Depends(get_db), op: Operator 
     task_for(db, identity)
     j = db.scalar(select(Execution).where(Execution.task_id == identity))
     return public_job(j) if j else None
+
+
+@router.get("/tasks/{identity}/screenshot")
+def execution_screenshot(identity: uuid.UUID, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
+    task = task_for(db, identity)
+    lead = db.get(Lead, task.lead_id)
+    if not lead or op.role == "member" and lead.assigned_to != op.username:
+        raise HTTPException(404, "任务不存在")
+    j = db.scalar(select(Execution).where(Execution.task_id == identity))
+    picture = (j.result or {}).get("screenshot") if j else None
+    if not picture:
+        raise HTTPException(404, "本次执行没有截图，可能是系统未允许截屏或页面已离开")
+    return Response(base64.b64decode(picture), media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/tasks/{identity}/preview")
@@ -506,6 +541,20 @@ def start(identity: uuid.UUID, body: AttemptIn, d: Device = Depends(device_auth)
 def result(identity: uuid.UUID, body: ResultIn, d: Device = Depends(device_auth), db: Session = Depends(get_db)):
     j = attempt(db, identity, d, body)
     payload = {"status": body.status, "detail": body.detail}
+    if body.reason_code:
+        payload["reason_code"] = body.reason_code
+    if body.screenshot:
+        try:
+            payload["screenshot"] = screenshot_jpeg(body.screenshot)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+    # Keep the text audit trail; remove old image payloads as new results arrive.
+    db.execute(
+        update(Execution)
+        .where(Execution.finished_at < service.now() - timedelta(days=30), Execution.result.has_key("screenshot"))
+        .values(result=Execution.result.op("-")("screenshot"))
+        .execution_options(synchronize_session=False)
+    )
     if j.result and "resolution" in j.result:
         prior = j.result.get("late_result")
         if prior and prior != payload:

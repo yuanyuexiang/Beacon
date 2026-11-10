@@ -15,9 +15,9 @@ from app.core.models import Operator
 from app.modules.leads.models import Lead
 from app.modules.mobile.channels import PLATFORMS
 from app.modules.mobile.models import Device, Execution, ReplyNotification, ReplyThread
-from app.modules.mobile.routes import Input, device_auth, lock
+from app.modules.mobile.routes import Input, check_device_access, device_auth, lock
 from app.modules.sales import service
-from app.modules.sales.models import ManualTask
+from app.modules.sales.models import Event, EventKind, ManualTask
 
 router = APIRouter(prefix="/mobile", tags=["mobile-replies"])
 worker_router = APIRouter(prefix="/api/mobile/device", tags=["mobile-replies"])
@@ -31,6 +31,9 @@ class NoticeIn(Input):
     body: str = Field(min_length=1, max_length=4000)
     occurred_at: AwareDatetime
     structured: bool = False
+    source: Literal["notification", "foreground"] = "notification"
+    execution_id: uuid.UUID | None = None
+    verified_target: str | None = Field(default=None, max_length=2000)
 
 
 class LinkIn(Input):
@@ -43,26 +46,58 @@ def permitted(db: Session, j: Execution, d: Device | None) -> bool:
         return False
     t, lead = db.get(ManualTask, j.task_id), db.get(Lead, j.lead_id)
     owner = db.scalar(select(Operator).where(Operator.username == d.owner))
-    return bool(
+    if not (
         t
         and lead
         and owner
-        and may_send(db, d.owner)
-        and (t.assigned_to or t.created_by) == d.owner
-        and (owner.role != "member" or lead.assigned_to == d.owner)
         and d.status != "revoked"
         and j.device_id == d.id
         and j.status in {"sent", "request_submitted", "unknown"}
-    )
+    ):
+        return False
+    if "task_owner" in j.snapshot and j.snapshot["task_owner"] != (t.assigned_to or t.created_by):
+        return False
+    try:
+        check_device_access(db, j.lead_id, d, t.assigned_to or t.created_by, j.confirmed_by)
+    except (HTTPException, service.SalesError):
+        return False
+    return True
 
 
-def record(db: Session, n: ReplyNotification, j: Execution, d: Device, automatic: bool) -> None:
+def record(
+    db: Session, n: ReplyNotification, j: Execution, d: Device, automatic: bool, source: str = "notification"
+) -> None:
     if not permitted(db, j, d):
         raise HTTPException(409, "门店已交接或执行记录不可关联，请刷新")
     if automatic and n.body.strip() == j.snapshot.get("body", "").strip():
         raise HTTPException(409, "与本方消息相同，请核对通知，不会自动回填")
     t = db.get(ManualTask, j.task_id)
     assert t is not None
+    # The same reply can arrive from the chat and its OS notification. Only collapse
+    # cross-source copies within a short window; repeated replies on one source remain distinct.
+    previous = db.scalars(
+        select(Event).where(
+            Event.lead_id == j.lead_id,
+            Event.kind == EventKind.reply,
+            Event.occurred_at >= n.occurred_at - timedelta(minutes=2),
+            Event.occurred_at <= n.occurred_at + timedelta(minutes=2),
+        )
+    ).all()
+    duplicate = next(
+        (
+            e
+            for e in previous
+            if (e.payload or {}).get("task_id") == str(j.task_id)
+            and (e.payload or {}).get("summary", "").strip() == n.body.strip()
+            and (e.payload or {}).get("source") in {"mobile_notification", "mobile_foreground"}
+            and (e.payload or {}).get("source") != "mobile_" + source
+        ),
+        None,
+    )
+    if duplicate:
+        n.status, n.execution_id, n.event_id = "linked", j.id, duplicate.id
+        db.commit()
+        return
     event, _ = service.record_event(
         db,
         j.lead_id,
@@ -73,7 +108,8 @@ def record(db: Session, n: ReplyNotification, j: Execution, d: Device, automatic
             "occurred_at": n.occurred_at,
             "payload": {
                 "summary": n.body,
-                "source": "mobile_notification",
+                "source": "mobile_" + source,
+                "time_basis": "observed" if source == "foreground" else "platform",
                 "task_id": str(j.task_id),
                 "notification_id": str(n.id),
                 "automatic": automatic,
@@ -110,7 +146,19 @@ def receive(body: NoticeIn, d: Device = Depends(device_auth), db: Session = Depe
     if prior:
         return {"id": str(prior.id), "status": prior.status, "created": False}
     clean(db)
-    n = ReplyNotification(device_id=d.id, **body.model_dump())
+    foreground = None
+    if body.source == "foreground":
+        foreground = db.get(Execution, body.execution_id) if body.execution_id else None
+        if (
+            not foreground
+            or not permitted(db, foreground, d)
+            or foreground.snapshot.get("channel", "whatsapp") != body.channel
+            or foreground.snapshot.get("target") != body.verified_target
+            or not body.structured
+            or body.body.strip() == foreground.snapshot.get("body", "").strip()
+        ):
+            raise HTTPException(409, "当前聊天与手机执行记录不一致，请重新检查")
+    n = ReplyNotification(device_id=d.id, **body.model_dump(exclude={"source", "execution_id", "verified_target"}))
     db.add(n)
     db.flush()
     binding = (
@@ -122,7 +170,7 @@ def receive(body: NoticeIn, d: Device = Depends(device_auth), db: Session = Depe
         if n.thread_key
         else None
     )
-    j = db.get(Execution, binding.execution_id) if binding else None
+    j = foreground or (db.get(Execution, binding.execution_id) if binding else None)
     # Explicit incoming message + a previously confirmed stable conversation, never a title guess.
     if (
         j
@@ -131,7 +179,7 @@ def receive(body: NoticeIn, d: Device = Depends(device_auth), db: Session = Depe
         and n.occurred_at >= j.created_at
         and n.body.strip() != j.snapshot.get("body", "").strip()
     ):
-        record(db, n, j, d, True)
+        record(db, n, j, d, True, body.source)
     else:
         db.commit()
     return {"id": str(n.id), "status": n.status, "created": True}
@@ -139,7 +187,11 @@ def receive(body: NoticeIn, d: Device = Depends(device_auth), db: Session = Depe
 
 def public(db: Session, n: ReplyNotification) -> dict:
     j = db.get(Execution, n.execution_id) if n.execution_id else None
+    event = db.get(Event, n.event_id) if n.event_id else None
+    payload = (event.payload or {}) if event else {}
     return {
+        "source": payload.get("source", "mobile_notification"),
+        "time_basis": payload.get("time_basis", "platform"),
         "id": str(n.id),
         "channel": n.channel,
         "title": n.title,

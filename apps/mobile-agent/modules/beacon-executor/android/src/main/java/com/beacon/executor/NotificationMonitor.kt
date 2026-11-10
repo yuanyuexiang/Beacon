@@ -50,7 +50,15 @@ class NotificationMonitor : NotificationListenerService() {
         val senderId = sender?.key ?: sender?.name?.toString()
         val selfId = self?.key ?: self?.name?.toString()
         val body = m.text?.toString()?.trim().orEmpty()
-        if (!NotificationPolicy.incoming(body, senderId, selfId, m.timestamp, enabledAt)) continue
+        if (!NotificationPolicy.incoming(body, senderId, selfId, m.timestamp, enabledAt)) {
+          // Some OEM/platform notifications omit the local user. Preserve a candidate,
+          // rather than silently discarding it or guessing that it is incoming.
+          if (selfId.isNullOrBlank() && !senderId.isNullOrBlank() && body.isNotBlank() &&
+              m.timestamp >= enabledAt && m.timestamp <= System.currentTimeMillis() + 300000) {
+            queue(channel, title, body, m.timestamp, null, false, sbn.packageName)
+          }
+          continue
+        }
         val thread = n.shortcutId?.takeIf { it.isNotBlank() }?.let { sha("${sbn.packageName}|$selfId|$it") }
         queue(channel, title, body, m.timestamp, thread, true, sbn.packageName)
       }
@@ -65,10 +73,24 @@ class NotificationMonitor : NotificationListenerService() {
       .put("channel", channel).put("thread_key", thread ?: JSONObject.NULL).put("title", title.take(200))
       .put("body", body.take(4000)).put("occurred_at", Instant.ofEpochMilli(at).toString()).put("structured", structured)
     Journal(this).use { it.notice(value) }
+    getSharedPreferences("beacon-notifications", MODE_PRIVATE).edit()
+      .putLong("captured", System.currentTimeMillis()).putString("captureSource", "系统通知").apply()
   }
   companion object {
     @Volatile private var connected = false
     private fun sha(s: String) = MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+    fun foreground(c: Context, job: JSONObject, body: String) {
+      val snapshot = job.getJSONObject("snapshot")
+      val value = JSONObject().put("event_key", sha("foreground|${job.getString("id")}|$body"))
+        .put("channel", snapshot.optString("channel", "whatsapp"))
+        .put("title", snapshot.optString("lead_name").take(200))
+        .put("body", body).put("occurred_at", Instant.now().toString()).put("structured", true)
+        .put("source", "foreground").put("execution_id", job.getString("id"))
+        .put("verified_target", snapshot.getString("target"))
+      Journal(c).use { it.notice(value) }
+      c.getSharedPreferences("beacon-notifications", Context.MODE_PRIVATE).edit()
+        .putLong("captured", System.currentTimeMillis()).putString("captureSource", "聊天页面").apply()
+    }
     fun enabled(c: Context): Boolean = (Settings.Secure.getString(c.contentResolver, "enabled_notification_listeners") ?: "")
       .split(':').mapNotNull { ComponentName.unflattenFromString(it) }.contains(ComponentName(c, NotificationMonitor::class.java))
     fun channels(c: Context): String = c.getSharedPreferences("beacon-notifications", MODE_PRIVATE).getString("channels", "[]") ?: "[]"
@@ -85,7 +107,7 @@ class NotificationMonitor : NotificationListenerService() {
     }
     @Synchronized fun flush(c: Context) {
       val prefs = c.getSharedPreferences("beacon-notifications", MODE_PRIVATE)
-      if (Vault(c).disconnected() || !enabled(c) || JSONArray(channels(c)).length() == 0) return
+      if (Vault(c).disconnected() || JSONArray(channels(c)).length() == 0) return
       try {
         val credentials = Vault(c).read()
         if (credentials["token"].isNullOrBlank()) return
@@ -100,8 +122,7 @@ class NotificationMonitor : NotificationListenerService() {
             conn.outputStream.use { it.write(notice.toString().toByteArray()) }
             val code = conn.responseCode
             if (code in 200..299) { conn.inputStream.use { it.readBytes() }; queue.noticeUploaded(notice.getString("event_key")) }
-            else if (code == 422) { queue.noticeUploaded(notice.getString("event_key")) }
-            else { prefs.edit().putString("error", "通知同步失败（HTTP $code），恢复连接后重试").apply(); return }
+            else { prefs.edit().putString("error", "回复上传失败（HTTP $code），记录已保留；请检查平台连接或更新 App 后重试").apply(); return }
           } finally { conn.disconnect() }
         }
         }
@@ -111,7 +132,9 @@ class NotificationMonitor : NotificationListenerService() {
     fun status(c: Context): Map<String, Any> {
       val prefs = c.getSharedPreferences("beacon-notifications", MODE_PRIVATE)
       return mapOf("granted" to enabled(c), "connected" to connected, "channels" to channels(c), "pending" to Journal(c).use { it.noticeCount() },
-        "error" to (prefs.getString("error", "") ?: ""), "synced" to prefs.getLong("synced", 0))
+        "error" to (prefs.getString("error", "") ?: ""), "synced" to prefs.getLong("synced", 0), "captured" to prefs.getLong("captured", 0),
+        "captureSource" to (prefs.getString("captureSource", "") ?: ""),
+        "pageStatus" to (prefs.getString("pageStatus", "") ?: "尚未匹配任务聊天"))
     }
   }
 }

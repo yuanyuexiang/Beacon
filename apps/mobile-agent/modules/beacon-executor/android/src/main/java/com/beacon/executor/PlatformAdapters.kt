@@ -88,7 +88,26 @@ object PlatformAdapters {
     val desc = n.contentDescription?.toString() ?: return false
     val bounds = android.graphics.Rect().also { n.getBoundsInScreen(it) }
     return n.packageName?.toString() in packages["facebook"].orEmpty() &&
-      (desc.startsWith("你, $body，") || desc.startsWith("你，$body，") || desc.startsWith("$body，双击") || desc.startsWith("You, $body,") || ChannelPolicy.facebookOutgoingCaption(desc, body, bounds.left, center))
+      (desc.startsWith("你, $body，") || desc.startsWith("你，$body，") || desc.startsWith("$body，双击") || desc.startsWith("You, $body,") || ChannelPolicy.facebookOutgoingCaption(desc, body, bounds.left, center, bounds.right))
+  }
+  fun incoming(r: AccessibilityNodeInfo, snapshot: JSONObject, afterOutgoing: Boolean = false): List<String> {
+    val title = header(r, snapshot) ?: return emptyList()
+    val body = snapshot.optString("body")
+    val screen = android.graphics.Rect().also { r.getBoundsInScreen(it) }
+    val anchor = flatten(r).filter { bodyNode(it, body, screen.centerX()) }.maxOfOrNull {
+      android.graphics.Rect().also { b -> it.getBoundsInScreen(b) }.bottom
+    }
+    if (afterOutgoing && anchor == null) return emptyList()
+    return flatten(r).mapNotNull { n ->
+      val bounds = android.graphics.Rect().also { n.getBoundsInScreen(it) }
+      if (n.isEditable || afterOutgoing && bounds.top < (anchor ?: Int.MAX_VALUE)) null
+      else if (r.packageName?.toString() in packages["facebook"].orEmpty()) {
+        ReplyCapturePolicy.facebook(n.contentDescription?.toString().orEmpty(), title, body,
+          bounds.left - screen.left + screen.width() * .04 < screen.right - bounds.right)
+      } else if (id(n).contains(Regex("incoming_message|received_text|message_in_text"))) {
+        n.text?.toString()?.trim()?.takeIf { it.isNotBlank() && it != body && it.length <= 4000 }
+      } else null
+    }.distinct().takeLast(10)
   }
   fun count(r: AccessibilityNodeInfo, body: String): Int {
     val screen = android.graphics.Rect().also { r.getBoundsInScreen(it) }
@@ -106,6 +125,14 @@ object PlatformAdapters {
         ChannelPolicy.facebookReceipt(status, b.left, b.top, b.bottom, screen.centerX(), screen.height(), messageBounds.top, messageBounds.bottom)
       }
       if (receipt) return true
+      val entry = input(r)
+      val empty = entry != null && (entry.text.isNullOrBlank() || entry.isShowingHintText ||
+        (!entry.hintText.isNullOrBlank() && entry.text == entry.hintText))
+      val pending = flatten(r).any { label(it).lowercase() in setOf(
+        "sending", "sending…", "sending...", "failed to send", "not sent", "retry", "发送中", "发送中…", "发送失败", "未发送", "重试") }
+      // Exact NEW outgoing bubble + cleared composer means local submission, not delivery/read.
+      if (ChannelPolicy.facebookAccepted(messageBounds.left - rootBounds.left, messageBounds.right - rootBounds.left,
+          rootBounds.width(), empty, pending)) return true
     }
     if (r.packageName?.toString() in packages["instagram"].orEmpty()) {
       val entry = input(r)

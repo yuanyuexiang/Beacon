@@ -3,7 +3,7 @@ export type PhoneStatus = { connectionService: boolean; platformConnected: boole
 export default requireNativeModule<{
   status(): PhoneStatus;
   inspectAccount(channel: string): Promise<string>;
-  notificationStatus(): { granted: boolean; connected: boolean; channels: string; pending: number; error: string; synced: number };
+  notificationStatus(): { granted: boolean; connected: boolean; channels: string; pending: number; error: string; synced: number; captured: number; captureSource: string; pageStatus: string };
   notificationSettings(): void;
   notificationChannels(raw: string): void;
   syncNotifications(): Promise<void>;

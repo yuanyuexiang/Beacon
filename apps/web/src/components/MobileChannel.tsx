@@ -1,6 +1,6 @@
 "use client";
 import { phoneStatusLabel } from "@/lib/mobile-channels";
-import { Alert, Button, Card, Drawer, Empty, Input, Popconfirm, QRCode, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Drawer, Empty, Image, Input, Popconfirm, QRCode, Select, Space, Table, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { MOBILE_ACTIONS, MOBILE_LABELS } from "@/lib/mobile-channels";
@@ -8,7 +8,17 @@ import { pairingAddress, pairingServer } from "@/lib/mobile-channels";
 import { useOperator } from "@/lib/auth";
 
 type Device = { id: string; label: string; account: string | null; status: string; online?: boolean; last_seen_at: string | null; capabilities?: { protocol?: number; accounts?: Record<string, string>; installed?: string[]; unlocked?: boolean | null } };
-type Job = { navigation_history?: string[]; id: string; status: string; error: string | null; finished_at: string | null; snapshot: { channel?: string; action?: string; target: string; sender: string; body: string; lead_name: string } };
+type Job = { reason_code?: string; screenshot_url?: string | null; navigation_history?: string[]; id: string; status: string; error: string | null; finished_at: string | null; snapshot: { channel?: string; action?: string; target: string; sender: string; body: string; lead_name: string } };
+const resultHelp: Record<string, string> = {
+  not_registered: '对方未注册，请选择其他联系方式；普通电话仍可保留。',
+  messaging_unavailable: '对方未开放此联系入口，可换渠道或人工处理。',
+  connection_required: '需要先建立连接，请在手机处理。',
+  network_error: '检查手机网络后，可重新准备本次触达。',
+  account_action_required: '请在手机处理登录或账号状态，再重新准备。',
+  target_unverified: '未能确认目标聊天，可查看截图后人工处理。',
+  entry_not_found: '暂未找到发送入口，可人工接管。',
+  send_unconfirmed: '先核对实际聊天，确认结果前不要重复发送。',
+};
 const labels: Record<string, string> = { paired: "待运行检查", ready: "已就绪", revoked: "已解除", queued: "等待手机领取", claimed: "手机正在准备", sending: "发送中", sent: "已发送", unknown: "结果待核对", failed: "执行失败", cancelled: "已取消", needs_action: "需要手机处理", unavailable: "暂不可联系", request_submitted: "请求已提交，等待接受" };
 
 export default function MobileSettings() {
@@ -68,7 +78,7 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
   const [devices, setDevices] = useState<Device[]>([]);
   const [device, setDevice] = useState<string>();
   const [contactAction, setContactAction] = useState(MOBILE_ACTIONS[platform]?.[0]?.value || "direct_message");
-  const supports = useCallback((d: Device) => d.status === "ready" && d.online && (d.capabilities?.protocol === 2 ? (platform !== "whatsapp" || !!d.capabilities.accounts?.[platform]) && d.capabilities.installed?.includes(platform) : platform === "whatsapp"), [platform]);
+  const supports = useCallback((d: Device) => d.status === "ready" && d.online && (d.capabilities?.protocol === 2 ? d.capabilities.installed?.includes(platform) : platform === "whatsapp"), [platform]);
   useEffect(() => { setContactAction(MOBILE_ACTIONS[platform]?.[0]?.value || "direct_message"); setDevice(undefined); setPreview(undefined); }, [platform, taskId]);
   const [reason, setReason] = useState("");
   const [job, setJob] = useState<Job | null>(null);
@@ -88,6 +98,8 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
       {job ? <><Tag color={job.status === "sent" ? "green" : ["failed", "unknown"].includes(job.status) ? "orange" : "blue"}>{labels[job.status] || job.status}</Tag><p>{job.error}</p>{!!job.navigation_history?.length && <details><summary>查看执行步骤</summary><ol>{job.navigation_history.map((step, index) => <li key={index}>{step}</li>)}</ol></details>}{job.finished_at && <p>更新时间：{new Date(job.finished_at).toLocaleString("zh-CN")}</p>}<p>动作：{MOBILE_ACTIONS[job.snapshot.channel || platform]?.find(a => a.value === job.snapshot.action)?.label || "发送消息"}</p><p>收件人：{job.snapshot.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{job.snapshot.body}</p>
         {job.status === "queued" && <Alert type="info" showIcon message="已交给手机，等待自动执行。请在手机任务页开启“自动执行”并保持解锁；执行结果会自动回填。" />}
+        {job.reason_code && resultHelp[job.reason_code] && <Alert style={{ marginBottom: 12 }} type={job.status === "unknown" ? "warning" : "info"} showIcon message={resultHelp[job.reason_code]} />}
+        {job.finished_at && <details style={{ margin: "12px 0" }}><summary>查看执行截图{!job.screenshot_url && "（未获取）"}</summary>{job.screenshot_url ? <><p>任务结束时的手机页面，点击可放大。</p><Image src={job.screenshot_url} alt="手机执行结果截图" width={240} style={{ maxWidth: "100%" }} /></> : <p>本次未获取截图：可能是旧版记录、系统禁止截屏或已离开目标应用。文字结果仍保留。</p>}</details>}
         {writable && ["queued", "claimed", "sending"].includes(job.status) && <Button danger loading={busy.cancel} onClick={() => act("cancel", async () => { setJob(await api(`/api/mobile/tasks/${taskId}/cancel`, json({}))); onChanged(); })}>停止本次执行</Button>}
         {["needs_action", "unavailable", "request_submitted"].includes(job.status) && <Alert type="info" showIcon message={labels[job.status]} description="在手机执行记录中打开目标应用、复制消息或记录客户回复；完成手动操作后在沟通页回填实际结果。请求提交不会计为私信已发送。" />}
         {["failed", "cancelled"].includes(job.status) && <Alert type="info" message="本次没有确认发送成功，记录已保留。请核对手机聊天及上述原因；可返回任务切换为人工执行。" />}
@@ -95,8 +107,8 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
       </> : <>
         <p>选择你绑定的手机，预览完整消息后确认。手机上仍会核对目标，防止用错会话。</p>
         <Select aria-label="手机联系动作" style={{ width: "100%", marginBottom: 12 }} value={contactAction} options={MOBILE_ACTIONS[platform] || []} onChange={v => { setContactAction(v); setPreview(undefined); }} />
-        <Select placeholder="选择已就绪手机" style={{ width: "100%" }} value={device} onChange={v => { setDevice(v); setPreview(undefined); }} options={devices.filter(d => d.status !== "revoked").map(d => ({ value: d.id, disabled: !supports(d), label: `${d.label} · ${d.capabilities?.accounts?.[platform] || (platform !== "whatsapp" ? "App 当前登录账号" : d.account || "待填写号码")} · ${!d.online ? "离线" : labels[d.status] || d.status}` }))} />
-        {!devices.some(supports) && <Alert style={{ marginTop: 12 }} type="info" message="请先在手机点击“开启自动执行”。保持对应应用已安装并登录；仅 WhatsApp 需要填写本方号码。" />}
+        <Select placeholder="选择已就绪手机" style={{ width: "100%" }} value={device} onChange={v => { setDevice(v); setPreview(undefined); }} options={devices.filter(d => d.status !== "revoked").map(d => ({ value: d.id, disabled: !supports(d), label: `${d.label} · ${d.capabilities?.accounts?.[platform] || (platform !== "whatsapp" ? "App 当前登录账号" : d.account || "App 当前登录账号")} · ${!d.online ? "离线" : labels[d.status] || d.status}` }))} />
+        {!devices.some(supports) && <Alert style={{ marginTop: 12 }} type="info" message="请先在手机点击“开启自动执行”，保持对应应用已安装并登录。" />}
         <p><a href="/settings?section=mobile">管理手机与配对</a></p>
         <Button disabled={!device || !writable} loading={busy.preview} onClick={() => act("preview", async () => setPreview(await api(`/api/mobile/tasks/${taskId}/preview`, json({ device_id: device, preview_hash: "0".repeat(64), action: contactAction }))))}>预览消息</Button>
         {preview && <Card title="确认本次发送" style={{ marginTop: 16 }}><p>本方账号：{preview.payload.sender}</p><p>收件人：{preview.payload.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{preview.payload.body}</p><Button type="primary" disabled={!writable} loading={busy.confirm} onClick={() => act("confirm", async () => { setJob(await api(`/api/mobile/tasks/${taskId}/confirm`, json({ device_id: device, preview_hash: preview.preview_hash, action: contactAction }))); setPreview(undefined); onChanged(); })}>确认交给手机执行</Button></Card>}

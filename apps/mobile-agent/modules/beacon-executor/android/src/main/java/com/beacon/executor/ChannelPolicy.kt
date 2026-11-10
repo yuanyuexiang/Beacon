@@ -11,8 +11,12 @@ object ChannelPolicy {
       top >= 0 && bottom > top && bottom <= height * (if (chat) 0.18 else 0.5)
   fun facebookComposer(hint: String, description: String, editable: Boolean): Boolean = editable &&
     hint in setOf("发消息", "输入消息...", "输入消息…", "Message", "Write a message…", "Type a message") && description in setOf("输入消息", "Message", "Type a message")
-  fun facebookOutgoingCaption(description: String, body: String, left: Int, center: Int): Boolean =
-    left >= center && body.isNotBlank() && description.endsWith(", $body") && description.length > body.length + 2
+  fun facebookOutgoingCaption(description: String, body: String, left: Int, center: Int, right: Int = left): Boolean =
+    (left >= center || facebookAccepted(left, right, center * 2, true, false)) && body.isNotBlank() &&
+      (description.substringBefore("，双击").substringBefore(", Double tap").endsWith(", $body")) && description.length >= body.length + 2
+  fun facebookAccepted(left: Int, right: Int, width: Int, composerEmpty: Boolean, pending: Boolean): Boolean =
+    width > 0 && left >= 0 && right > left && right <= width &&
+      left - (width - right) > width * .08 && composerEmpty && !pending
   fun facebookReceipt(status: String, left: Int, top: Int, bottom: Int, center: Int, height: Int, messageTop: Int, messageBottom: Int): Boolean =
     (status in setOf("已发送", "已送达", "已读", "Sent", "Delivered", "Read") || status.endsWith("已读")) &&
       left > center && top >= messageTop && bottom <= messageBottom + height * .12

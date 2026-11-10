@@ -31,8 +31,78 @@ class PhoneService : AccessibilityService() {
   @Volatile var autoError = ""
   private var autoGeneration = 0L
   private val main = Handler(Looper.getMainLooper())
-  override fun onServiceConnected() { super.onServiceConnected(); instance = this }
-  override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+  override fun onServiceConnected() {
+    super.onServiceConnected(); instance = this
+    main.post(object : Runnable {
+      override fun run() {
+        if (instance !== this@PhoneService) return
+        val event = AccessibilityEvent.obtain().apply { packageName = "com.facebook.katana" }
+        onAccessibilityEvent(event)
+        event.recycle()
+        main.postDelayed(this, 5000)
+      }
+    })
+  }
+  private var replyCheckPending = false
+  private val replyStable = mutableMapOf<String, Int>()
+  override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+    if (replyCheckPending || running || event?.packageName?.toString() !in PlatformAdapters.packages.values.flatten()) return
+    replyCheckPending = true
+    main.postDelayed({
+      thread(name = "beacon-chat-replies") {
+        try { observeReplies() } catch (_: Exception) { /* A different screen is normal. */ }
+        finally { main.post { replyCheckPending = false } }
+      }
+    }, 1200)
+  }
+  private fun replyHash(body: String) = java.security.MessageDigest.getInstance("SHA-256")
+    .digest(body.toByteArray()).joinToString("") { "%02x".format(it) }
+  private fun seedReplies(j: JSONObject, texts: List<String>) {
+    j.put("_reply_policy", 2).put("_reply_seen", org.json.JSONArray(texts.map(::replyHash)))
+    Journal(this).use { it.save(j) }
+  }
+  private fun observeReplies() {
+    if (running || Vault(this).disconnected() || !ConnectionService.unlocked(this)) return
+    val enabled = org.json.JSONArray(NotificationMonitor.channels(this))
+    val jobs = Journal(this).use { it.recent() }.map(::JSONObject)
+    for (j in jobs) {
+      val snapshot = j.optJSONObject("snapshot") ?: continue
+      val channel = snapshot.optString("channel", "whatsapp")
+      if (!(0 until enabled.length()).any { enabled.optString(it) == channel } ||
+          j.optString("outcome") !in setOf("sent", "request_submitted", "unknown")) continue
+      val texts = ui {
+        if (running) return@ui emptyList<String>()
+        val r = rootInActiveWindow ?: return@ui emptyList<String>()
+        if (r.packageName?.toString() !in PlatformAdapters.packages[channel].orEmpty()) return@ui emptyList<String>()
+        val values = PlatformAdapters.incoming(r, snapshot, true)
+        if (PlatformAdapters.header(r, snapshot) != null) {
+          getSharedPreferences("beacon-notifications", MODE_PRIVATE).edit()
+            .putString("pageStatus", "聊天已匹配 · 可识别回复 ${values.size} 项").apply()
+        }
+        values
+      }
+      if (texts.isEmpty()) continue
+      // Older app versions have no baseline. Only messages BELOW this task's exact
+      // outgoing body can be recovered; unrelated chat history is never scanned.
+      val seen = if (j.optInt("_reply_policy") == 2) j.optJSONArray("_reply_seen") ?: org.json.JSONArray() else org.json.JSONArray()
+      val known = (0 until seen.length()).map { seen.optString(it) }.toMutableSet()
+      for (body in texts) {
+        val hash = replyHash(body)
+        if (hash in known) continue
+        val key = j.getString("id") + hash
+        replyStable[key] = (replyStable[key] ?: 0) + 1
+        if (replyStable[key]!! < 2) continue
+        NotificationMonitor.foreground(this, j, body)
+        known.add(hash)
+      }
+      if (known.size != seen.length() && !running) {
+        j.put("_reply_policy", 2).put("_reply_seen", org.json.JSONArray(known.toList().takeLast(100)))
+        Journal(this).use { it.save(j) }
+      }
+      NotificationMonitor.flush(this)
+      break // One screen belongs to one most recent execution, never multiple jobs.
+    }
+  }
   override fun onInterrupt() { pauseAutomatic() }
   private fun detach() { pauseAutomatic(); if (instance === this) instance = null }
   override fun onUnbind(intent: Intent?): Boolean { detach(); return super.onUnbind(intent) }
@@ -127,12 +197,16 @@ class PhoneService : AccessibilityService() {
       check(!stopRequested) { "执行已暂停" }
       Thread.sleep(500)
       if (ui { try { target(root(), j) } catch (_: Exception) { false } }) return true
-      val disconnected = ui {
-        try { root().findAccessibilityNodeInfosByViewId("android:id/message").any {
-          it.text?.toString() in setOf("无法连接，请稍后重试。", "Couldn't connect. Please try again later.")
-        } } catch (_: Exception) { false }
+      val issue = ui {
+        try {
+          val r = root(); val texts = PlatformAdapters.flatten(r).mapNotNull { it.text?.toString() }
+          val invite = texts.any { it == "邀请使用 WhatsApp" || it.equals("Invite to WhatsApp", true) }
+          val message = r.findAccessibilityNodeInfosByViewId("android:id/message").mapNotNull { it.text?.toString() }.joinToString(" ")
+          ExecutionResultPolicy.whatsappDialog(if (invite) texts.joinToString(" ") else message, invite)
+        } catch (_: Exception) { null }
       }
-      check(!disconnected) { "WhatsApp 查询号码时无法连接，请先在 WhatsApp 打开目标聊天后再执行" }
+      if (issue == "not_registered") throw ExecutionFailure(issue, "unavailable", "电话号码 ${j.getJSONObject("snapshot").getString("target")} 没有 WhatsApp 账户，请选择其他联系方式")
+      if (issue == "network_error") throw ExecutionFailure(issue, "failed", "WhatsApp 查询号码时无法连接，请检查网络后重试")
     }
     return false
   }
@@ -151,7 +225,16 @@ class PhoneService : AccessibilityService() {
     try {
       conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
       val code = conn.responseCode
-      if (code !in 200..299) error("服务端检查未通过（HTTP $code），请回 Beacon 查看任务")
+      if (code !in 200..299) {
+        val raw = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        val diagnostic = try {
+          val data = JSONObject(raw); val detail = data.opt("detail")
+          if (detail is String) detail.take(300) else if (detail is org.json.JSONArray) (0 until detail.length()).joinToString("; ") { i ->
+            val item = detail.getJSONObject(i); "${item.optJSONArray("loc")}: ${item.optString("msg")}"
+          }.take(300) else ""
+        } catch (_: Exception) { "" }
+        error("回填／执行检查失败（HTTP $code）${if (diagnostic.isBlank()) "" else "：$diagnostic"}")
+      }
       return JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
     } finally { conn.disconnect() }
   }
@@ -171,9 +254,19 @@ class PhoneService : AccessibilityService() {
   }
   private fun settle(j: JSONObject, status: String, detail: String) {
     // Persist the exact result before networking; retries replay this result, never the send action.
+    j.put("reason_code", ExecutionResultPolicy.resultReason(j.optString("reason_code"), status, detail))
+    if (!j.optBoolean("screenshot_checked")) {
+      j.put("screenshot_checked", true)
+      // Do not capture another app, lock screen or password page after an interruption.
+      val allowed = ui { try { val r = root(); !PlatformAdapters.flatten(r).any { it.isPassword } } catch (_: Exception) { false } }
+      if (allowed) screenshot()?.takeIf { it.length <= 900000 }?.let { j.put("screenshot", it) }
+    }
     j.put("outcome", status).put("detail", detail).put("reported", false)
     Journal(this).save(j)
-    request("/jobs/${j.getString("id")}/result", attempt(j).put("status", status).put("detail", detail))
+    val payload = attempt(j).put("status", status).put("detail", detail).put("reason_code", j.getString("reason_code"))
+    if (j.has("screenshot")) payload.put("screenshot", j.getString("screenshot"))
+    request("/jobs/${j.getString("id")}/result", payload)
+    j.remove("screenshot")
     j.put("reported", true); Journal(this).save(j)
   }
   @Synchronized fun execute(raw: String) {
@@ -193,6 +286,7 @@ class PhoneService : AccessibilityService() {
           return@thread
         }
         val number = snapshot.getString("target").removePrefix("+")
+        progress(j, "opening")
         // Reuse an already open, verified conversation before requesting a fresh number lookup.
         ui {
           val launch = packageManager.getLaunchIntentForPackage("com.whatsapp") ?: error("WhatsApp 未安装")
@@ -203,10 +297,12 @@ class PhoneService : AccessibilityService() {
           verified = waitForTarget(j, 4)
         }
         if (!verified) {
+          progress(j, "finding_entry")
           ui { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$number")).setPackage("com.whatsapp").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
           verified = waitForTarget(j, 30)
         }
         check(verified && !stopRequested) { "未能核对目标电话号码。请在 WhatsApp 核对或使用人工执行" }
+        progress(j, "composing")
         val before = ui {
           val r = root(); check(target(r, j)); val entry = nodes(r, "entry").singleOrNull() ?: error("未找到输入框")
           check(entry.text.isNullOrBlank() || entry.text.toString() in setOf("发消息", "Message")) { "聊天已有草稿，已暂停，避免覆盖" }
@@ -216,7 +312,8 @@ class PhoneService : AccessibilityService() {
         }
         check(!stopRequested)
         // Permission is checked first. Only the persisted final click boundary is uncertain on recovery.
-        j.put("phase", "preflight"); Journal(this).save(j)
+        seedReplies(j, ui { PlatformAdapters.incoming(root(), snapshot) })
+    j.put("phase", "preflight"); Journal(this).save(j)
         request("/jobs/${j.getString("id")}/start", attempt(j))
         ui {
           val r = root(); check(!stopRequested && target(r, j)) { "目标改变或已暂停" }
@@ -234,7 +331,9 @@ class PhoneService : AccessibilityService() {
       } catch (e: Exception) {
         // If result upload failed, preserve the already observed outcome.
         if (!j.has("outcome")) {
-          try { settle(j, if (clickAttempted || j.optString("phase") == "click_attempted") "unknown" else if (e is ContactUnavailable) "unavailable" else if (e is NeedsPhoneAction) "needs_action" else "failed", e.message?.take(500) ?: "执行中断") } catch (_: Exception) { }
+          val uncertain = clickAttempted || j.optString("phase") == "click_attempted"
+          if (!uncertain && e is ExecutionFailure) j.put("reason_code", e.reason)
+          try { settle(j, if (uncertain) "unknown" else if (e is ExecutionFailure) e.outcome else if (e is ContactUnavailable) "unavailable" else if (e is NeedsPhoneAction) "needs_action" else "failed", e.message?.take(500) ?: "执行中断") } catch (_: Exception) { }
         }
       } finally { running = false }
     }
@@ -425,6 +524,7 @@ class PhoneService : AccessibilityService() {
     }
     if (!sendReady) throw NeedsPhoneAction("消息已填入但未找到唯一发送按钮，请人工核对；系统未点击发送")
     check(!stopRequested) { "执行已暂停" }
+    seedReplies(j, ui { PlatformAdapters.incoming(root(), snapshot) })
     j.put("phase", "preflight"); Journal(this).save(j)
     request("/jobs/${j.getString("id")}/start", attempt(j))
     ui {
@@ -451,7 +551,7 @@ class PhoneService : AccessibilityService() {
         Thread.sleep(500)
         val accepted = ui { try { val r = root(); PlatformAdapters.header(r, snapshot) != null && PlatformAdapters.count(r, body) > before && PlatformAdapters.sent(r, body) } catch (_: Exception) { false } }
         stableObservations = if (accepted) stableObservations + 1 else 0
-        observed = stableObservations >= (if (platform == "instagram") 4 else 1)
+        observed = stableObservations >= (if (platform in setOf("instagram", "facebook")) 4 else 1)
       }
     }
     check(observed) { "无法确认平台发送结果，请核对聊天；不会自动重发" }
@@ -474,10 +574,7 @@ class PhoneService : AccessibilityService() {
     platform = snapshot.optString("channel", "whatsapp")
     val r = root()
     check(if (platform == "whatsapp") target(r, j) else PlatformAdapters.header(r, snapshot) != null) { "当前聊天无法与目标关联，请核对后人工填写回复" }
-    val texts = PlatformAdapters.flatten(r).filter { n ->
-      !n.isEditable && !n.text.isNullOrBlank() && n.text.toString() != snapshot.optString("body") &&
-      (n.viewIdResourceName ?: "").contains(Regex("incoming_message|received_text|message_in_text"))
-    }.map { it.text.toString() }.distinct().takeLast(5)
+    val texts = PlatformAdapters.incoming(r, snapshot)
     org.json.JSONArray(texts).toString()
     }
   }
@@ -487,7 +584,7 @@ class PhoneService : AccessibilityService() {
     thread {
       try {
         for (j in Journal(this).unfinished()) {
-          try { settle(j, j.optString("outcome", if (j.optString("phase") == "click_attempted") "unknown" else "failed"), j.optString("detail", "进程中断，需核对实际聊天")) } catch (_: Exception) { }
+          try { settle(j, j.optString("outcome", if (j.optString("phase") == "click_attempted") "unknown" else "failed"), j.optString("detail", "进程中断，需核对实际聊天")) } catch (e: Exception) { autoError = e.message ?: "结果尚未回填，请稍后重试" }
         }
       } finally { running = false }
     }

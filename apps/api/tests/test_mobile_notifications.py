@@ -142,3 +142,63 @@ def test_invalid_notifications_and_explicit_no_remember(client, db):
     )
     assert not db.scalar(select(ReplyThread))
     assert push(client, headers, notice(2))["status"] == "pending"
+
+
+def test_foreground_reply_binds_execution_and_deduplicates_notification(client, db):
+    _, job, headers = prepared(client, db)
+    j = db.get(Execution, uuid.UUID(job["id"]))
+    body = notice(source="foreground", execution_id=job["id"], verified_target=j.snapshot["target"])
+    first = push(client, headers, body)
+    assert first["status"] == "linked"
+    assert push(client, headers, body)["created"] is False
+    event = db.scalar(select(Event).where(Event.kind == EventKind.reply))
+    assert event.payload["source"] == "mobile_foreground"
+    assert event.payload["time_basis"] == "observed"
+    incoming = push(client, headers, notice(2, body=body["body"]))
+    assert (
+        client.post(f"/api/mobile/notifications/{incoming['id']}/link", json={"execution_id": job["id"]}).status_code
+        == 200
+    )
+    assert len(list(db.scalars(select(Event).where(Event.kind == EventKind.reply)))) == 1
+
+
+def test_foreground_reply_rejects_wrong_target_outgoing_and_handoff(client, db):
+    tid, job, headers = prepared(client, db)
+    j = db.get(Execution, uuid.UUID(job["id"]))
+    body = notice(source="foreground", execution_id=job["id"], verified_target=j.snapshot["target"])
+    for change in [
+        {"verified_target": "https://wrong.example"},
+        {"channel": "facebook"},
+        {"body": j.snapshot["body"]},
+        {"structured": False},
+        {"execution_id": str(uuid.uuid4())},
+    ]:
+        assert (
+            client.post("/api/mobile/device/notifications", headers=headers, json={**body, **change}).status_code == 409
+        )
+    db.add(Operator(username="different-owner", password_hash="test-only", role="member", is_active=True))
+    db.flush()
+    db.get(ManualTask, uuid.UUID(tid)).assigned_to = "different-owner"
+    db.commit()
+    assert client.post("/api/mobile/device/notifications", headers=headers, json=body).status_code == 409
+    assert not db.scalar(select(Event).where(Event.kind == EventKind.reply))
+
+
+def test_admin_phone_reply_uses_same_delegation_rule_as_sending(client, db):
+    tid, job, headers = prepared(client, db)
+    j = db.get(Execution, uuid.UUID(job["id"]))
+    db.add(Operator(username="sales-reply-owner", password_hash="test-only", role="member", is_active=True))
+    db.flush()
+    db.get(ManualTask, uuid.UUID(tid)).assigned_to = "sales-reply-owner"
+    j.snapshot = {**j.snapshot, "task_owner": "sales-reply-owner"}
+    db.commit()
+    body = notice(source="foreground", execution_id=job["id"], verified_target=j.snapshot["target"])
+    assert push(client, headers, body)["status"] == "linked"
+    db.get(ManualTask, uuid.UUID(tid)).assigned_to = "tester"
+    db.commit()
+    assert (
+        client.post(
+            "/api/mobile/device/notifications", headers=headers, json={**body, "event_key": digest("after-transfer")}
+        ).status_code
+        == 409
+    )
