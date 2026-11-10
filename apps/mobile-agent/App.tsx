@@ -26,7 +26,7 @@ async function request(url: string, options: RequestInit) {
     throw e;
   } finally { clearTimeout(timer); }
 }
-const outcomeLabels: Record<string, string> = { sent: '已发送', failed: '未发送', unknown: '结果待核对', claimed: '待确认执行', preparing: '正在核对聊天', preflight: '正在检查发送条件', click_attempted: '正在核对发送结果', needs_action: '需要手机处理', request_submitted: '请求已提交', unavailable: '暂不可联系' };
+const outcomeLabels: Record<string, string> = { sent: '已发送', failed: '未发送', unknown: '结果待核对', claimed: '待确认执行', preparing: '正在核对聊天', preflight: '正在检查发送条件', click_attempted: '正在核对发送结果', needs_action: '需要手机处理', request_submitted: '请求已提交', unavailable: '已完成 · 不可联系' };
 export default function App() {
   const params = useLocalSearchParams<{ tab?: string; panel?: string }>();
   const tab = ['任务', '记录', '设备'].includes(params.tab || '') ? params.tab! : '任务';
@@ -67,9 +67,14 @@ export default function App() {
   const [connectionError, setConnectionError] = useState('');
   const [connectedAt, setConnectedAt] = useState<string>();
   const [pending, setPending] = useState(0);
+  const [replyPermission, setReplyPermission] = useState(false);
+  const [checksExpanded, setChecksExpanded] = useState(false);
+  const [hasWorked, setHasWorked] = useState(false);
   function inspect() {
     try {
       const s = Executor.status(); setStatus(s); setReady(s.autoEnabled);
+      setReplyPermission(Executor.notificationStatus().granted);
+      if (s.autoEnabled) setHasWorked(true);
       const paused = Executor.connectionPaused(); setConnectionPaused(paused);
       setConnected(!paused && s.platformConnected); setConnectionError(s.connectionError);
       if (s.connectionLastContact) setConnectedAt(new Date(s.connectionLastContact).toLocaleTimeString());
@@ -154,12 +159,12 @@ export default function App() {
     setNotice('已解除绑定，可以扫描另一平台的配对码。');
   }
   async function start() {
-    if (connectionPaused) await reconnect();
+    if (connectionPaused || !connected) await reconnect();
     const installed = Executor.status().installed || [];
     if (!installed.length) throw new Error('请先安装对应社媒应用');
     if (account && !/^\+[1-9]\d{6,14}$/.test(account)) throw new Error('请核对 WhatsApp 的完整国际号码');
     const s = Executor.status();
-    if (!s.accessibility) { if (!s.accessibilityEnabled) Executor.permissions(); setNotice(s.accessibilityEnabled ? '无障碍已开启，但系统尚未连接服务。请先退出手机自动化检查工具；若仍未恢复，在系统设置关闭再开启“Beacon 手机执行”。恢复后重新开启执行。' : '请在系统设置开启“Beacon 手机执行”无障碍服务，返回后点击“开启自动执行”。'); return; }
+    if (!s.accessibility) { if (!s.accessibilityEnabled) Executor.permissions(); setNotice(s.accessibilityEnabled ? '无障碍已开启，但系统尚未连接服务。请先退出手机自动化检查工具；若仍未恢复，在系统设置关闭再开启“Beacon 手机执行”。恢复后重新开启执行。' : '请在系统设置开启“Beacon 手机执行”无障碍服务，返回后点击“开始工作”。'); return; }
     if (!s.unlocked) throw new Error('请先解锁手机屏幕');
     if (!s.installed?.length) throw new Error('请先安装对应社媒应用');
     const profile = await heartbeat(true);
@@ -173,9 +178,9 @@ export default function App() {
   const platformLabel = !paired ? '未绑定' : connectionPaused ? '已断开' : connected ? '已连接' : connectionError ? '连接中断' : '连接中';
   const row = (title: string, detail: string, onPress: () => void) => <Pressable accessibilityRole="button" onPress={onPress} style={styles.settingRow}><Text style={styles.rowTitle}>{title}</Text><Text style={styles.rowDetail}>{detail}</Text></Pressable>;
   const entries: { raw: string; j: { id: string; phase: string; navigation_history?: string[]; outcome?: string; detail?: string; reported?: boolean; updated_at?: number; snapshot: Job['snapshot'] } }[] = (status?.history || []).flatMap(raw => { try { return [{ raw, j: JSON.parse(raw) }]; } catch { return []; } });
-  const completed = entries.filter(({j}) => ['sent', 'request_submitted'].includes(j.outcome || '')).length;
-  const needsAction = entries.filter(({j}) => ['unknown', 'failed', 'needs_action', 'unavailable'].includes(j.outcome || '') || !j.reported && j.phase !== 'claimed').length;
-  const records = entries.filter(({j}) => recordFilter === '全部' || (recordFilter === '已完成' ? ['sent', 'request_submitted'].includes(j.outcome || '') : ['unknown', 'failed', 'needs_action', 'unavailable'].includes(j.outcome || '') || !j.reported));
+  const completed = entries.filter(({j}) => ['sent', 'request_submitted', 'unavailable'].includes(j.outcome || '')).length;
+  const needsAction = entries.filter(({j}) => ['unknown', 'failed', 'needs_action'].includes(j.outcome || '') || !j.reported && j.phase !== 'claimed').length;
+  const records = entries.filter(({j}) => recordFilter === '全部' || (recordFilter === '已完成' ? ['sent', 'request_submitted', 'unavailable'].includes(j.outcome || '') : ['unknown', 'failed', 'needs_action'].includes(j.outcome || '') || !j.reported));
   const platformBadge = (platform: string) => <View style={[styles.platformIcon, { backgroundColor: platform === 'whatsapp' ? '#edf6ef' : platform === 'instagram' ? '#fbf0f3' : '#eef3fa' }]}><Text style={[styles.platformLetter, { color: platform === 'whatsapp' ? '#3d8651' : platform === 'instagram' ? '#b35b7a' : '#3568a8' }]}>{({whatsapp:'W',facebook:'f',instagram:'◎',linkedin:'in',tiktok:'♪',youtube:'▶',x:'X'} as Record<string,string>)[platform] || '•'}</Text></View>;
   const panelTitles: Record<string,string> = { connection: '连接与配对', accounts: '本方社媒账号', permissions: '运行权限', notifications: '客户回复通知', about: '关于手机助手' };
   return <SafeAreaView style={styles.root} edges={['top', 'bottom']}><StatusBar barStyle="dark-content" />
@@ -187,9 +192,40 @@ export default function App() {
       {!!status?.autoError && <Text accessibilityRole="alert" style={styles.notice}>{status.autoError}</Text>}
       {!!notice && notice !== status?.autoError && <Text accessibilityRole="alert" style={styles.notice}>{notice}</Text>}
       {tab === '任务' && <>
-        <View style={styles.summary}>{[[String(pending + (job ? 1 : 0)), '待处理'], [String(completed), '本机完成记录'], [String(needsAction), '需核对记录']].map(([count, title]) => <View key={title} style={styles.stat}><Text style={styles.statNumber}>{count}</Text><Text style={styles.caption}>{title}</Text></View>)}</View>
+        <View style={styles.workCard}>
+          <Text style={styles.sectionLabel}>{savedLabel}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel={status?.running ? '正在执行，暂停领取新任务' : executionReady ? '工作中，点击暂停' : !paired ? '绑定手机' : !connected ? '重新连接' : '开始工作'} accessibilityState={{disabled: !!busy, busy: busy === 'work'}} disabled={!!busy} style={[styles.workCircle, executionReady && styles.workGreen, hasWorked && !status?.autoEnabled && connected && styles.workPaused, !!busy && {opacity:.65}]} onPress={() => void action('work', async () => {
+            if (!paired) { setTab('设备'); router.setParams({tab:'设备',panel:'connection'}); return; }
+            if (!connected) { await reconnect(); return; }
+            if (Executor.status().autoEnabled) {
+              Executor.pauseReceiving(); setReady(false);
+              setNotice(status?.running ? '已暂停领取新任务，当前任务继续处理并回填结果。' : '已暂停，点击圆形按钮继续工作。');
+              if (connected && !status?.running) await heartbeat(false);
+              return;
+            }
+            await start();
+          })}>
+            <Ionicons name={busy === 'work' ? 'hourglass-outline' : status?.autoEnabled ? 'pause' : !paired ? 'qr-code-outline' : !connected ? 'refresh' : 'play'} size={38} color="#fff" />
+            <Text style={styles.workTitle}>{busy === 'work' ? '检查中' : status?.running ? '正在执行' : executionReady ? '工作中' : !paired ? '绑定手机' : !connected ? '重新连接' : hasWorked ? '继续工作' : '开始工作'}</Text>
+            <Text style={styles.workSubtitle}>{status?.autoEnabled ? '点击暂停领取' : !connected ? '恢复连接后开始工作' : '连接 · 检查 · 接收任务'}</Text>
+          </Pressable>
+          <Text style={styles.workHint}>{status?.running ? '正在处理当前任务，请保持屏幕解锁' : executionReady ? '等待网页已确认的任务，收到后自动执行' : status?.autoEnabled ? '工作暂不可用，请处理下方运行检查' : '开始后持续接收网页已确认的任务'}</Text>
+        </View>
+        <View style={styles.card}>
+          <Pressable accessibilityRole="button" accessibilityState={{expanded: checksExpanded || !executionReady}} onPress={() => setChecksExpanded(v => !v)} style={styles.sectionRow}>
+            <Text style={styles.heading}>就绪检查</Text><Text style={styles.link}>{executionReady ? (checksExpanded ? '收起检查' : '运行检查通过 · 展开') : '请完成下方检查'}</Text>
+          </Pressable>
+          {(checksExpanded || !executionReady) && <>
+            {row('平台连接', platformLabel + (connected ? ' · 查看' : ' · 去连接'), () => { if (paired) void action('check-connect', reconnect); else { setTab('设备'); router.setParams({tab:'设备',panel:'connection'}); } })}
+            {row('无障碍服务 · 必需', status?.accessibility ? '已连接' : status?.accessibilityEnabled ? '等待系统连接 · 检查' : '未开启 · 去开启', () => Executor.permissions())}
+            {status?.accessibilityEnabled && !status.accessibility && <Text style={styles.caption}>权限已开启，正在等待系统连接；无需重复授权。仍未恢复时可在系统设置关闭再开启。</Text>}
+            {row('客户回复通知 · 可选', replyPermission ? '已授权 · 渠道设置' : '未开启 · 去开启', () => { setTab('设备'); router.setParams({tab:'设备',panel:'notifications'}); })}
+            {row('后台运行 · 建议', status?.batteryUnrestricted ? '省电无限制 · 查看' : '去设置', () => Executor.backgroundSettings())}
+            <Text style={styles.caption}>{status?.unlocked ? '屏幕已解锁' : '请解锁屏幕后执行'} · 已安装：{status?.installed?.map(channelLabel).join('、') || '尚未检测到社媒应用'}。回复通知未开启不影响发送。</Text>
+          </>}
+        </View>
+        <View style={styles.summary}>{[[String(pending + (job ? 1 : 0)), '待处理'], [String(completed), '本机完成'], [String(needsAction), '需处理']].map(([count, title]) => <View key={title} style={styles.stat}><Text style={styles.statNumber}>{count}</Text><Text style={styles.caption}>{title}</Text></View>)}</View>
         <View style={styles.sectionRow}><Text style={styles.sectionLabel}>当前任务</Text><Text style={styles.caption}>{stateLabel}</Text></View>
-        {!executionReady && !status?.running && <View style={styles.card}><Text style={styles.heading}>{!paired ? '先绑定你的手机' : !connected ? '正在连接 Beacon' : '完成运行检查即可领取'}</Text><Text style={styles.small}>{!paired ? '在设备页扫描网页配对码，绑定后即可查看任务。' : !connected ? '配对已保留，恢复连接后可继续。点击顶部状态查看详情。' : '检查手机解锁、社媒应用和无障碍服务。'}</Text>{paired && connected ? button('开启自动执行', 'start', start) : button('查看设备连接', 'go-device', () => { setTab('设备'); router.setParams({tab:'设备',panel:'connection'}); }, true)}</View>}
         <View style={styles.card}>
           {job ? <><View style={styles.sectionRow}><Text style={styles.sectionLabel}>{channelLabel(job.snapshot.channel)} · {ACTIONS[job.snapshot.action || "direct_message"]}</Text><Text style={styles.badge}>待确认</Text></View><Text style={styles.deviceName}>{job.snapshot.lead_name}</Text><Text>本方：{job.snapshot.sender}</Text><Text>发送至：{job.snapshot.target}</Text><Text style={styles.message}>{job.snapshot.body}</Text>
             {button('确认执行这条消息', 'execute', () => {
@@ -200,7 +236,7 @@ export default function App() {
           {status?.journal && !JSON.parse(status.journal).reported && <>{button('恢复并回填中断记录', 'recover', () => { Executor.recover(); setNotice('正在恢复记录；不会重新执行发送动作。'); }, true)}</>}
 
         </View>
-        {executionReady && row(status?.autoEnabled ? '自动执行已开启' : '执行已就绪', '暂停执行', () => void action('pause', async () => { Executor.pause(); setReady(false); await heartbeat(false); }))}
+        {!!entries.length && <View style={styles.card}><View style={styles.sectionRow}><Text style={styles.heading}>最近结果</Text><Pressable accessibilityRole="button" onPress={() => setTab('记录')}><Text style={styles.link}>全部记录</Text></Pressable></View>{entries.slice(0, 3).map(({j}, index) => <View key={j.id + index} style={styles.resultRow}><View style={{flex:1}}><Text style={styles.accountLabel}>{j.snapshot.lead_name}</Text><Text style={styles.caption}>{channelLabel(j.snapshot.channel)} · {j.detail || outcomeLabels[j.outcome || j.phase] || '处理中'}</Text></View><Text style={[styles.badge, j.outcome === 'sent' && styles.successBadge]}>{outcomeLabels[j.outcome || j.phase] || '处理中'}</Text></View>)}</View>}
       </>}
       {tab === '设备' && !panel && <>
         <View style={styles.card}><View style={styles.sectionRow}><View style={{flex:1}}><Text style={styles.deviceName}>{savedLabel}</Text><Text style={styles.small}>{paired ? '已绑定 Beacon' : '尚未配对'}</Text></View><Pressable accessibilityRole="button" onPress={() => setPanel('connection')}><Text style={styles.link}>编辑</Text></Pressable></View>{row('平台连接', platformLabel, () => setPanel('connection'))}{row('执行状态', stateLabel, () => setPanel('permissions'))}{row('连接详情', connectedAt || '尚未通信', () => setPanel('connection'))}</View>
@@ -291,5 +327,6 @@ export default function App() {
   </SafeAreaView>;
 }
 const styles = StyleSheet.create({
+  workCard:{alignItems:'center',paddingVertical:22,gap:16,backgroundColor:'#fff',borderRadius:22,borderWidth:1,borderColor:'#edeae5'},workCircle:{width:176,height:176,borderRadius:88,backgroundColor:RED,alignItems:'center',justifyContent:'center',gap:8,elevation:3},workGreen:{backgroundColor:'#278451'},workPaused:{backgroundColor:'#777e79'},workTitle:{fontSize:25,fontWeight:'700',color:'#fff'},workSubtitle:{fontSize:11,color:'#fff'},workHint:{fontSize:13,lineHeight:21,color:'#77736b',textAlign:'center',paddingHorizontal:18},resultRow:{flexDirection:'row',alignItems:'center',gap:12,paddingVertical:9,borderBottomWidth:1,borderBottomColor:'#f1eeea'},
   root: {flex:1,backgroundColor:'#fff'}, topBar: {height:60,paddingHorizontal:20,flexDirection:'row',justifyContent:'space-between',alignItems:'center',backgroundColor:'#fff'}, brandRow:{flexDirection:'row',alignItems:'center',gap:9},logo:{width:38,height:29},title:{fontSize:20,fontWeight:'700',color:'#232321'},statusChip:{flexDirection:'row',alignItems:'center',gap:6,minHeight:44},statusDot:{width:6,height:6,borderRadius:3},statusText:{fontSize:12},content:{padding:18,gap:14,paddingBottom:30},bottomNav:{flexDirection:'row',borderTopWidth:1,borderTopColor:'#eae7e1',backgroundColor:'#fff',paddingTop:7,paddingBottom:5},navItem:{flex:1,minHeight:54,alignItems:'center',justifyContent:'center',gap:4},navIcon:{fontSize:25,lineHeight:27,color:'#8a857e'},navLabel:{fontSize:11,color:'#8a857e'},card:{backgroundColor:'#fff',padding:17,borderRadius:17,gap:13,borderWidth:1,borderColor:'#edeae5'},heading:{fontSize:17,fontWeight:'600',color:'#272724'},pageHeading:{fontSize:23,fontWeight:'700',color:'#272724'},deviceName:{fontSize:21,fontWeight:'700',color:'#272724'},small:{fontSize:13,color:'#7e7971',lineHeight:21},caption:{fontSize:11,color:'#918a81',lineHeight:17},summary:{flexDirection:'row',paddingVertical:17,borderRadius:15,backgroundColor:'#fff',borderWidth:1,borderColor:'#edeae5'},stat:{flex:1,alignItems:'center',gap:6},statNumber:{fontSize:25,fontWeight:'600',color:'#272724'},sectionRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12},sectionLabel:{fontSize:12,color:'#8a857d',fontWeight:'600'},settingRow:{minHeight:47,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,borderBottomWidth:1,borderBottomColor:'#f1eeea'},rowTitle:{fontSize:13,color:'#35332f'},rowDetail:{fontSize:12,color:'#8a857d',flexShrink:1,textAlign:'right'},back:{minHeight:34,justifyContent:'center'},link:{fontSize:13,color:'#b62b35',paddingVertical:6},accountRow:{flexDirection:'row',alignItems:'center',gap:10,paddingVertical:10,borderBottomWidth:1,borderBottomColor:'#f0ece7'},accountLabel:{fontSize:14,fontWeight:'600',color:'#2b2926',marginBottom:4},platformIcon:{width:34,height:34,borderRadius:10,alignItems:'center',justifyContent:'center'},platformLetter:{fontSize:18,fontWeight:'700'},recordHeader:{flexDirection:'row',alignItems:'center',gap:11,minHeight:44},badge:{fontSize:11,color:'#8f692d',backgroundColor:'#fff3e1',borderRadius:6,padding:6,overflow:'hidden'},successBadge:{color:'#38724d',backgroundColor:'#edf5ef'},filters:{flexDirection:'row',gap:8},filter:{paddingVertical:9,paddingHorizontal:14,borderRadius:9,borderWidth:1,borderColor:'#e9e5df',backgroundColor:'#fff'},selectedFilter:{backgroundColor:'#fff0f0',borderColor:'#f3d5d5'},filterText:{fontSize:12,color:'#848078'},empty:{alignItems:'center',paddingVertical:35,gap:10},emptySymbol:{fontSize:38,color:'#bbb4aa'},input:{padding:12,borderWidth:1,borderColor:'#e2ded7',borderRadius:10,fontSize:15,color:'#2b2926'},button:{minHeight:46,padding:13,borderRadius:11,backgroundColor:RED,alignItems:'center',justifyContent:'center'},secondary:{backgroundColor:'#f5f4f1',borderWidth:1,borderColor:'#e9e5df'},buttonText:{color:'#fff',fontWeight:'600',fontSize:14},notice:{backgroundColor:'#fff4df',color:'#856127',padding:14,borderRadius:11,fontSize:13,lineHeight:21},message:{backgroundColor:'#f7f6f3',color:'#5d5b57',padding:14,borderRadius:10,fontSize:14,lineHeight:23},copyright:{color:'#9a948a',fontSize:11,textAlign:'center',lineHeight:19}
 });

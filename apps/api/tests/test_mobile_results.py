@@ -7,6 +7,7 @@ from PIL import Image
 from sqlalchemy import select
 
 from app.modules.mobile.models import Execution
+from app.modules.sales.models import ManualTask, TaskStatus
 from tests.test_assignment import person
 from tests.test_mobile import enqueue, setup
 from tests.test_users import session
@@ -33,6 +34,13 @@ def test_unregistered_result_and_private_screenshot_roundtrip(client, db):
     result = client.get(f"/api/mobile/tasks/{tid}").json()
     assert result["reason_code"] == "not_registered"
     assert "screenshot" not in result and result["status"] == "unavailable"
+    db.expire_all()
+    task = db.get(ManualTask, tid)
+    assert task.status == TaskStatus.completed
+    assert task.sent_at is None and task.sent_recorded_at is None
+    assert "已完成" in task.status_reason
+    overview = client.get("/api/communication/overview").json()["items"]
+    assert next(row for row in overview if row["id"] == str(task.lead_id))["progress"]["status"] == "completed"
     image = client.get(result["screenshot_url"])
     assert image.status_code == 200 and image.headers["content-type"] == "image/jpeg"
     assert {v.strip() for v in image.headers["cache-control"].split(",")} == {"private", "no-store"}
@@ -55,3 +63,5 @@ def test_bad_screenshot_does_not_commit_a_result(client, db):
     args.pop("screenshot")
     assert client.post(f"/api/mobile/device/jobs/{job['id']}/result", headers=headers, json=args).status_code == 200
     assert client.get(f"/api/mobile/tasks/{tid}/screenshot").status_code == 404
+    db.expire_all()
+    assert db.get(ManualTask, tid).status != TaskStatus.completed

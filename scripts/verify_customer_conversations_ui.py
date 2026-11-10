@@ -14,7 +14,12 @@ async def main():
     contacts = [
         {**f.CONTACT, "id": "email1"},
         {**f.CONTACT, "id": "email2", "contact_ref": "manager@cafe.example"},
-        {**f.CONTACT, "id": "facebook1", "channel": "facebook", "contact_ref": "https://facebook.com/testcafe"},
+        {
+            **f.CONTACT,
+            "id": "facebook1",
+            "channel": "facebook",
+            "contact_ref": "https://facebook.com/testcafe",
+        },
     ]
     drafts = {}
     active = {}
@@ -45,6 +50,7 @@ async def main():
     ]
     errors = []
     writes = []
+    overview_requests = []
 
     def context():
         c = f.context()
@@ -68,6 +74,7 @@ async def main():
         if path == "/api/batches":
             value = []
         elif path == "/api/communication/overview":
+            overview_requests.append(path)
             value = {
                 "total": 18,
                 "items": [
@@ -90,7 +97,10 @@ async def main():
                         "name": ("LONG RESTAURANT AND COMMUNITY CENTRE " * 4) + str(n),
                         "postcode": "AB1 1AA",
                         "progress": {"status": "waiting_reply"},
-                        "last_message": ("A very long customer message without convenient truncation. " * 70)
+                        "last_message": (
+                            "A very long customer message without convenient truncation. "
+                            * 70
+                        )
                         + ("X" * 800),
                         "last_at": "2026-11-10T08:05:00Z",
                         "unread": n % 3,
@@ -99,6 +109,18 @@ async def main():
                     for n in range(17)
                 ]
             )
+        elif path.startswith("/api/communication/leads/customer-"):
+            await asyncio.sleep(0.5)
+            value = context()
+            value["lead"] = {
+                **value["lead"],
+                "id": path.rsplit("/", 1)[1],
+                "name": "Second Customer",
+            }
+            value["contacts"] = []
+        elif path.startswith("/api/communication/conversations/customer-"):
+            await asyncio.sleep(0.5)
+            value = {"items": []}
         elif path == f"/api/communication/leads/{f.ID}":
             value = context()
         elif path == f"/api/communication/conversations/{f.ID}":
@@ -133,7 +155,9 @@ async def main():
                 }
                 drafts[key] = d
                 active[contact] = key
-            value = {"items": [{"lead_id": f.ID, "draft": public(drafts[active[contact]])}]}
+            value = {
+                "items": [{"lead_id": f.ID, "draft": public(drafts[active[contact]])}]
+            }
         elif path.startswith("/api/communication/drafts/"):
             key = path.split("/")[4]
             d = drafts[key]
@@ -178,7 +202,11 @@ async def main():
                         "deliveries": [],
                     }
                 )
-                value = {"task_id": "task-new", "status": "ready", "message": "已提交发送"}
+                value = {
+                    "task_id": "task-new",
+                    "status": "ready",
+                    "message": "已提交发送",
+                }
             else:
                 if method == "PATCH":
                     d.update(body)
@@ -199,7 +227,9 @@ async def main():
                 }
             )
             value = {"id": "manual-reply"}
-        elif path == "/api/mobile/devices" or path.startswith("/api/mobile/notifications"):
+        elif path == "/api/mobile/devices" or path.startswith(
+            "/api/mobile/notifications"
+        ):
             value = []
         else:
             await f.handle(route)
@@ -211,41 +241,105 @@ async def main():
         page = await browser.new_page(viewport={"width": 1600, "height": 1150})
         page.on("pageerror", lambda e: (errors.append(str(e)), print("PAGE ERROR", e)))
         await page.route("**/api/**", handle)
-        await page.goto(os.environ.get("BEACON_UI_BASE", "http://localhost:3001") + f"/tasks?lead={f.ID}")
-        await expect(page.get_by_text("Previous menu enquiry", exact=True)).to_be_visible()
-        await expect(page.get_by_text("Please contact our manager.", exact=True).last).to_be_visible()
+        await page.goto(
+            os.environ.get("BEACON_UI_BASE", "http://localhost:3001")
+            + f"/tasks?lead={f.ID}"
+        )
+        await expect(
+            page.get_by_text("Previous menu enquiry", exact=True)
+        ).to_be_visible()
+        await expect(
+            page.get_by_text("Please contact our manager.", exact=True).last
+        ).to_be_visible()
+        # Switching only loads the conversation: list DOM, count and scroll stay intact.
+        await expect(page.locator(".customer-list .ant-card-head-title")).to_have_text(
+            "客户 · 18"
+        )
+        count_before = len(overview_requests)
+        await page.locator(".customer-list").evaluate("""el => {
+            window.customerListNode = el;
+            window.customerCounts = [];
+            window.customerObserver = new MutationObserver(() => window.customerCounts.push(el.querySelector('.ant-card-head-title').textContent));
+            window.customerObserver.observe(el, {subtree:true,childList:true,characterData:true});
+            el.querySelector('.ant-table-content').scrollTop = 60;
+        }""")
+        await page.locator(".customer-row").nth(1).click()
+        await expect(page.locator(".customer-chat .ant-card-head-title")).to_have_text(
+            "Second Customer"
+        )
+        assert await page.locator(".customer-list").evaluate(
+            "el => el === window.customerListNode"
+        )
+        assert await page.locator(".customer-list .ant-table-content").evaluate(
+            "el => el.scrollTop > 0"
+        )
+        assert len(overview_requests) == count_before, "切换客户不应重新请求客户列表"
+        assert await page.evaluate(
+            "window.customerCounts.every(text => text === '客户 · 18')"
+        ), "客户数量发生闪烁"
+        await page.locator(".customer-row").first.click()
+        await expect(
+            page.get_by_text("Previous menu enquiry", exact=True)
+        ).to_be_visible()
+        # A slower previous customer response must not overwrite the current customer.
+        await page.locator(".customer-row").nth(1).click()
+        await page.wait_for_url("**lead=customer-0")
+        await page.locator(".customer-row").first.click()
+        await expect(
+            page.get_by_text("Previous menu enquiry", exact=True)
+        ).to_be_visible()
+        await page.wait_for_timeout(650)
+        await expect(page.locator(".customer-chat .ant-card-head-title")).to_have_text(
+            "Test Cafe"
+        )
+        await page.evaluate("window.customerObserver.disconnect()")
         await page.get_by_role("button", name="写消息／继续草稿").click()
-        await page.get_by_role("textbox", name="文案内容", exact=True).fill("Hello, following up on my earlier note.")
+        await page.get_by_role("textbox", name="文案内容", exact=True).fill(
+            "Hello, following up on my earlier note."
+        )
         await page.get_by_role("textbox", name="邮件主题").fill("Menu follow-up")
         await expect(page.get_by_text("草稿已保存", exact=True)).to_be_visible()
         # Two addresses on the same channel retain independent drafts.
         await page.locator(".conversation-toolbar .ant-select-selector").click()
         await page.get_by_text("邮件 · manager@cafe.example", exact=True).click()
         await page.get_by_role("button", name="写消息／继续草稿").click()
-        await expect(page.get_by_role("textbox", name="文案内容", exact=True).last).to_have_value("")
+        await expect(
+            page.get_by_role("textbox", name="文案内容", exact=True).last
+        ).to_have_value("")
         await page.locator(".conversation-toolbar .ant-select-selector").click()
         await page.get_by_text("邮件 · hello@cafe.example", exact=True).click()
-        await expect(page.get_by_role("textbox", name="文案内容", exact=True).first).to_have_value(
-            "Hello, following up on my earlier note."
-        )
+        await expect(
+            page.get_by_role("textbox", name="文案内容", exact=True).first
+        ).to_have_value("Hello, following up on my earlier note.")
         await page.get_by_role("button", name="预览邮件", exact=True).first.click()
         await page.get_by_role("checkbox").check()
         await page.get_by_role("button", name="确认发送", exact=True).click()
         await expect(page.get_by_text("排队中", exact=True)).to_be_visible()
         # Confirmation automatically starts a fresh composer while preserving the previous send.
-        await expect(page.get_by_role("textbox", name="文案内容", exact=True).first).to_have_value("")
+        await expect(
+            page.get_by_role("textbox", name="文案内容", exact=True).first
+        ).to_have_value("")
         await page.get_by_role("button", name="记录回复", exact=True).click()
-        await page.get_by_label("回复原文／备注").fill("Thanks, our manager will get back to you.")
+        await page.get_by_label("回复原文／备注").fill(
+            "Thanks, our manager will get back to you."
+        )
         await page.get_by_role("button", name="保存回复", exact=True).click()
-        await expect(page.get_by_text("Thanks, our manager will get back to you.", exact=True)).to_be_visible()
+        await expect(
+            page.get_by_text("Thanks, our manager will get back to you.", exact=True)
+        ).to_be_visible()
         await page.locator(".conversation-toolbar .ant-select-selector").click()
-        await page.get_by_text("Facebook · https://facebook.com/testcafe", exact=True).click()
+        await page.get_by_text(
+            "Facebook · https://facebook.com/testcafe", exact=True
+        ).click()
         await page.get_by_role("button", name="写消息／继续草稿").click()
         await expect(page.get_by_role("radio", name="手机触达")).to_be_checked()
         await page.get_by_role("radio", name="人工触达").click()
         await expect(page.get_by_role("radio", name="人工触达")).to_be_checked()
         await expect(
-            page.get_by_text("复制消息，打开对方主页后自行粘贴发送。不需要连接手机或配置社媒 API。", exact=True)
+            page.get_by_text(
+                "复制消息，打开对方主页后自行粘贴发送。不需要连接手机或配置社媒 API。",
+                exact=True,
+            )
         ).to_be_visible()
         await page.get_by_role("textbox", name="文案内容", exact=True).last.fill(
             "Hello from our Facebook conversation."
@@ -253,27 +347,35 @@ async def main():
         await expect(page.get_by_text("草稿已保存", exact=True).last).to_be_visible()
         await page.locator(".conversation-toolbar .ant-select-selector").click()
         await page.get_by_text("邮件 · hello@cafe.example", exact=True).click()
-        await expect(page.get_by_role("textbox", name="文案内容", exact=True).first).to_have_value("")
+        await expect(
+            page.get_by_role("textbox", name="文案内容", exact=True).first
+        ).to_have_value("")
         await page.get_by_role("button", name="客户资料", exact=True).click()
         out = Path("data/devchecks/customer-conversations")
         out.mkdir(parents=True, exist_ok=True)
         for width in [1440, 1920]:
             await page.set_viewport_size({"width": width, "height": 1100})
             await page.wait_for_timeout(200)
-            assert await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "页面被长消息撑宽"
-            assert await page.locator(".customer-list").evaluate("el => el.getBoundingClientRect().height < 900"), (
-                "客户列表必须内部滚动"
-            )
+            assert await page.evaluate(
+                "document.documentElement.scrollWidth <= window.innerWidth"
+            ), "页面被长消息撑宽"
+            assert await page.locator(".customer-list").evaluate(
+                "el => el.getBoundingClientRect().height < 900"
+            ), "客户列表必须内部滚动"
         await page.screenshot(path=str(out / "desktop.png"), full_page=True)
         await page.set_viewport_size({"width": 850, "height": 1100})
         await page.wait_for_timeout(200)
-        assert await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "窄屏横向溢出"
+        assert await page.evaluate(
+            "document.documentElement.scrollWidth <= window.innerWidth"
+        ), "窄屏横向溢出"
         await page.screenshot(path=str(out / "narrow.png"), full_page=True)
         assert not errors, errors
         assert len([x for x in writes if x[0].endswith("/confirm")]) == 1
         assert all(not path.endswith("/send") for path, _ in writes)
         await browser.close()
-    print("PASS: per-contact drafts, history, preview-confirm-next message, reply, responsive layout; APIs mocked")
+    print(
+        "PASS: per-contact drafts, history, preview-confirm-next message, reply, responsive layout; APIs mocked"
+    )
 
 
 if __name__ == "__main__":

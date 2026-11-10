@@ -595,6 +595,10 @@ def result(identity: uuid.UUID, body: ResultIn, d: Device = Depends(device_auth)
                 "request_submitted": "联系请求已提交，等待对方接受",
             }[body.status]
         )
+    if body.status == "unavailable":
+        t = task_for(db, j.task_id)
+        t.status = TaskStatus.completed
+        t.status_reason = "已完成 · " + (body.detail or "目标无法联系")
     if body.status == "sent":
         t = task_for(db, j.task_id)
         t.status, t.sent_at, t.sent_recorded_at, t.sent_by = (

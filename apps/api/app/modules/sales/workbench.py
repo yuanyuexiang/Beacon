@@ -231,7 +231,7 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
                     "unknown": "send_unknown",
                     "failed": "send_failed",
                     "needs_action": "phone_action",
-                    "unavailable": "phone_action",
+                    "unavailable": "completed",
                     "request_submitted": "waiting_acceptance",
                 }.get(phone_job.status if phone_job else "", "awaiting_send")
             if active.execution_mode == "gmail" and active.status != TaskStatus.paused:
@@ -247,6 +247,8 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
                 }.get(delivery.status if delivery else "", "awaiting_send")
         elif sent:
             state = "waiting_reply"
+        elif any(t.status == TaskStatus.completed for t in ts):
+            state = "completed"
         elif ds:
             state = "preparing"
         elif ts or identity in conversation_ids or any(e.lead_id == identity for e in events):

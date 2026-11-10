@@ -108,6 +108,9 @@ class PhoneService : AccessibilityService() {
   override fun onUnbind(intent: Intent?): Boolean { detach(); return super.onUnbind(intent) }
   override fun onDestroy() { detach(); super.onDestroy() }
 
+  @Synchronized fun pauseReceiving() {
+    autoEnabled = false; autoGeneration++
+  }
   @Synchronized fun pauseAutomatic() {
     autoEnabled = false; autoGeneration++; stopRequested = true
   }

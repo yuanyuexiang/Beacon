@@ -45,6 +45,7 @@ class TaskStatus(enum.StrEnum):
     sent_social = "sent_social"
     paused = "paused"
     cancelled = "cancelled"
+    completed = "completed"
 
 
 class EventKind(enum.StrEnum):

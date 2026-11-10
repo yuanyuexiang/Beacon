@@ -25,7 +25,7 @@ export default function ConversationTimeline({ conversation, contacts, actions, 
   }}>
     {!conversation.messages.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚无沟通记录，可在下方写第一条消息" />}
     {conversation.messages.map(m => <article className={`conversation-message ${m.direction}`} key={m.id}>
-      <div className="conversation-message-meta">{m.direction === "outbound" ? "我们发出" : m.direction === "note" ? "备注" : "客户回复"} · {new Date(m.at).toLocaleString("zh-CN")}</div>
+      <div className="conversation-message-meta">{m.direction === "outbound" ? (["sent", "sent_manual", "sent_email", "sent_social"].includes(m.status) ? "我们发出" : "本次触达") : m.direction === "note" ? "备注" : "客户回复"} · {new Date(m.at).toLocaleString("zh-CN")}</div>
       <div className="conversation-bubble">
         {m.subject && <Typography.Paragraph strong style={{marginBottom:8}}>{m.subject}</Typography.Paragraph>}
         <div style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{m.body}</div>

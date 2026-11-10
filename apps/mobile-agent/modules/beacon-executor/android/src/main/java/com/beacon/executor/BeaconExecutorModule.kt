@@ -91,6 +91,7 @@ class BeaconExecutorModule : Module() {
       clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Beacon 消息", body))
     }
     Function("startAutomatic") { (PhoneService.instance ?: error("请先开启 Beacon 无障碍服务")).startAutomatic() }
+    Function("pauseReceiving") { PhoneService.instance?.pauseReceiving() }
     Function("pause") { PhoneService.instance?.pauseAutomatic() }
     Function("recover") { (PhoneService.instance ?: error("请先开启无障碍服务")).recover() }
   }

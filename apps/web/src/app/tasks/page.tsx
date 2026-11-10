@@ -29,6 +29,7 @@ function TasksInner() {
   const canWrite = ["admin","director","member"].includes(me?.role || "");
   const identity = useOutreachIdentity();
   const router = useRouter(), sp = useSearchParams();
+  const focusedTaskId = sp.get("task");
   const leadId = sp.get("lead") || "", channel = sp.get("channel") || undefined;
   const batch = sp.get("batch") || undefined, assigned = sp.get("owner") || undefined;
   const query = sp.get("q") || "", page = Math.max(1,Number(sp.get("page")) || 1);
@@ -36,7 +37,10 @@ function TasksInner() {
   const back = safeReturnTo(sp.get("returnTo") || (batch ? `/leads?batch=${encodeURIComponent(batch)}` : "/leads"));
   const [rows,setRows] = useState<Customer[]>([]), [total,setTotal] = useState(0);
   const [batches,setBatches] = useState<{batch_key:string}[]>([]), [owners,setOwners] = useState<Assignee[]>([]);
-  const [context,setContext] = useState<LeadContext>(), [conversations,setConversations] = useState<ContactConversation[]>([]);
+  const [loadedContext,setContext] = useState<LeadContext>(), [loadedConversations,setConversations] = useState<ContactConversation[]>([]);
+  // Keep the list mounted while a different customer loads. Never render or act on the previous customer.
+  const context = loadedContext?.lead.id === leadId ? loadedContext : undefined;
+  const conversations = context ? loadedConversations : [];
   const [contactId,setContactId] = useState<string>(), [drafts,setDrafts] = useState<Record<string,Draft>>({});
   const [error,setError] = useState<string>(), [notice,setNotice] = useState<string>();
   const [busy,setBusy] = useState(false), [details,setDetails] = useState(false), [replyOpen,setReplyOpen] = useState(false);
@@ -65,9 +69,9 @@ function TasksInner() {
     const [c,r]=await Promise.all([api<LeadContext>(`/api/communication/leads/${leadId}`),api<{items:ContactConversation[]}>(`/api/communication/conversations/${leadId}`)]);
     if(request!==generation.current) return;
     setContext(c);setConversations(r.items);
-    const focused=c.tasks.find(t => t.id === sp.get("task"));
+    const focused=c.tasks.find(t => t.id === focusedTaskId);
     setContactId(old => r.items.some(x => x.id===old) ? old : focused?.eligibility_id || r.items.find(x => x.unread)?.id || r.items.find(x => x.messages.length)?.id || c.drafts?.find(d => d.queued)?.eligibility_id || r.items[0]?.id);
-  },[leadId,sp]);
+  },[leadId,focusedTaskId]);
   const refresh = useCallback(async () => {await Promise.all([refreshList(),refreshContext()]);},[refreshList,refreshContext]);
   useEffect(() => { api<{batch_key:string}[]>("/api/batches").then(setBatches).catch(e => setError(e.message)); api<Assignee[]>("/api/communication/assignees").then(setOwners).catch(e => setError(e.message)); },[]);
   useEffect(() => { refreshList().catch(e => setError(e.message)); },[refreshList]);
@@ -129,7 +133,7 @@ function TasksInner() {
           {r.assigned_to && <small>负责人：{r.assigned_to}</small>}
         </button>}]} />
       </Card>
-      <Card size="small" className="customer-chat" title={context?.lead.name || "选择客户"} extra={<Button readOnlySafe size="small" onClick={() => setDetails(v => !v)}>{details ? "收起资料" : "客户资料"}</Button>}>
+      <Card key={leadId} size="small" loading={!!leadId && !context} className="customer-chat" title={context?.lead.name || rows.find(r => r.id === leadId)?.name || "选择客户"} extra={<Button readOnlySafe size="small" onClick={() => setDetails(v => !v)}>{details ? "收起资料" : "客户资料"}</Button>}>
         {!context ? <Empty description="从左侧选择客户，或在名单中发起沟通" /> : <>
           <div className="conversation-toolbar"><Select aria-label="客户联系方式" placeholder="选择联系方式" value={contactId} disabled={editing || busy} style={{width:"100%"}} options={conversations.map(c => ({value:c.id,label:`${c.id==="unlinked" ? "未关联记录" : `${channelLabel(c.channel || "",c.contact_ref)} · ${c.contact_ref || "未填写"}`}${c.unread ? ` · ${c.unread} 条未读` : ""}`}))} onChange={id => {setContactId(id);setNotice(undefined);}} />
           {selected && <Button readOnlySafe onClick={() => {replyForm.resetFields();eventKey.current=undefined;setReplyOpen(true);}}>记录回复</Button>}</div>
@@ -137,7 +141,7 @@ function TasksInner() {
           {selected && <div className="conversation-compose">
             <div className="conversation-compose-heading"><b>写新消息</b><Typography.Text type="secondary">无需等待客户回复，可以继续联系</Typography.Text></div>
             {!activeDraft && <Button type="primary" loading={busy} disabled={!canWrite} onClick={() => act(startDraft)}>写消息／继续草稿</Button>}
-            {Object.entries(drafts).map(([id,d]) => <div key={d.id} style={{display:id===contactId ? "block" : "none"}}>
+            {Object.entries(drafts).filter(([,d]) => d.lead_id === leadId).map(([id,d]) => <div key={d.id} style={{display:id===contactId ? "block" : "none"}}>
               <MessageComposer draft={d} assignees={owners} returnTo={back} sender={identity.sender} optOut={identity.optOut} lockedRecipient conversation onChange={value => setDrafts(old => ({...old,[id]:value}))} onWorkingChange={(key,active) => {if(active) working.current.add(key);else working.current.delete(key);setEditing(working.current.size>0);}} onResultChange={async result => {await refresh();if(result && result.status!=="manual") {setNotice(result.message);await startDraft();}}} />
             </div>)}
           </div>}
@@ -208,5 +212,5 @@ function TasksInner() {
     `}</style>
   </>;
 }
-function TasksRoute() {const params=useSearchParams();return <TasksInner key={params.get("lead") || "none"} />;}
+function TasksRoute() {return <TasksInner />;}
 export default function TasksPage() {return <Suspense fallback={<p>读取客户沟通…</p>}><TasksRoute /></Suspense>;}

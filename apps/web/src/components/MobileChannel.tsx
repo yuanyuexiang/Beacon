@@ -11,7 +11,7 @@ type Device = { id: string; label: string; account: string | null; status: strin
 type Job = { reason_code?: string; screenshot_url?: string | null; navigation_history?: string[]; id: string; status: string; error: string | null; finished_at: string | null; snapshot: { channel?: string; action?: string; target: string; sender: string; body: string; lead_name: string } };
 const resultHelp: Record<string, string> = {
   not_registered: '对方未注册，请选择其他联系方式；普通电话仍可保留。',
-  messaging_unavailable: '对方未开放此联系入口，可换渠道或人工处理。',
+  messaging_unavailable: '对方未开放此联系入口，本次处理已完成，可按需换用其他渠道。',
   connection_required: '需要先建立连接，请在手机处理。',
   network_error: '检查手机网络后，可重新准备本次触达。',
   account_action_required: '请在手机处理登录或账号状态，再重新准备。',
@@ -19,7 +19,7 @@ const resultHelp: Record<string, string> = {
   entry_not_found: '暂未找到发送入口，可人工接管。',
   send_unconfirmed: '先核对实际聊天，确认结果前不要重复发送。',
 };
-const labels: Record<string, string> = { paired: "待运行检查", ready: "已就绪", revoked: "已解除", queued: "等待手机领取", claimed: "手机正在准备", sending: "发送中", sent: "已发送", unknown: "结果待核对", failed: "执行失败", cancelled: "已取消", needs_action: "需要手机处理", unavailable: "暂不可联系", request_submitted: "请求已提交，等待接受" };
+const labels: Record<string, string> = { paired: "待运行检查", ready: "已就绪", revoked: "已解除", queued: "等待手机领取", claimed: "手机正在准备", sending: "发送中", sent: "已发送", unknown: "结果待核对", failed: "执行失败", cancelled: "已取消", needs_action: "需要手机处理", unavailable: "已完成 · 不可联系", request_submitted: "请求已提交，等待接受" };
 
 export default function MobileSettings() {
   const { me } = useOperator();
@@ -101,7 +101,8 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
         {job.reason_code && resultHelp[job.reason_code] && <Alert style={{ marginBottom: 12 }} type={job.status === "unknown" ? "warning" : "info"} showIcon message={resultHelp[job.reason_code]} />}
         {job.finished_at && <details style={{ margin: "12px 0" }}><summary>查看执行截图{!job.screenshot_url && "（未获取）"}</summary>{job.screenshot_url ? <><p>任务结束时的手机页面，点击可放大。</p><Image src={job.screenshot_url} alt="手机执行结果截图" width={240} style={{ maxWidth: "100%" }} /></> : <p>本次未获取截图：可能是旧版记录、系统禁止截屏或已离开目标应用。文字结果仍保留。</p>}</details>}
         {writable && ["queued", "claimed", "sending"].includes(job.status) && <Button danger loading={busy.cancel} onClick={() => act("cancel", async () => { setJob(await api(`/api/mobile/tasks/${taskId}/cancel`, json({}))); onChanged(); })}>停止本次执行</Button>}
-        {["needs_action", "unavailable", "request_submitted"].includes(job.status) && <Alert type="info" showIcon message={labels[job.status]} description="在手机执行记录中打开目标应用、复制消息或记录客户回复；完成手动操作后在沟通页回填实际结果。请求提交不会计为私信已发送。" />}
+        {["needs_action", "request_submitted"].includes(job.status) && <Alert type="info" showIcon message={labels[job.status]} description="在手机执行记录中打开目标应用、复制消息或记录客户回复；完成手动操作后在沟通页回填实际结果。请求提交不会计为私信已发送。" />}
+        {job.status === "unavailable" && <Alert type="info" showIcon message="本次任务已完成" description="已确认此目标无法通过本次渠道联系，原因及截图已保留，无需继续处理。未计为发送成功，手机可继续下一条任务。" />}
         {["failed", "cancelled"].includes(job.status) && <Alert type="info" message="本次没有确认发送成功，记录已保留。请核对手机聊天及上述原因；可返回任务切换为人工执行。" />}
         {writable && job.status === "unknown" && <><Alert type="warning" message="先在手机暂停并核对实际消息，确认后记录结果。系统不会自动重发。" /><Input.TextArea placeholder="填写核对情况" value={reason} onChange={e => setReason(e.target.value)} style={{ marginTop: 12 }} /><Space style={{ marginTop: 12 }}>{[true, false].map(sent => <Button key={String(sent)} disabled={reason.trim().length < 4} loading={busy[String(sent)]} onClick={() => act(String(sent), async () => { setJob(await api(`/api/mobile/tasks/${taskId}/resolve`, json({ sent, reason }))); onChanged(); })}>{sent ? "确认已发出" : "确认未发出"}</Button>)}</Space></>}
       </> : <>

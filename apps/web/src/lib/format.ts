@@ -8,8 +8,9 @@ export function formatRatio(r: Ratio): string {
 
 export const STATUS_LABEL: Record<string, string> = {
   pending: "待处理",
+  completed: "已完成",
   needs_action: "需要手机处理",
-  unavailable: "暂不可联系",
+  unavailable: "已完成 · 不可联系",
   request_submitted: "请求已提交",
   sent: "已发送",
   running: "运行中",

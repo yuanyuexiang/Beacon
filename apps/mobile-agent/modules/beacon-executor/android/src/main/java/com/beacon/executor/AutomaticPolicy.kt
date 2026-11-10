@@ -5,5 +5,5 @@ internal object AutomaticPolicy {
     enabled && unlocked && !running && !unfinished
 
   fun canContinue(outcome: String, reported: Boolean): Boolean =
-    reported && outcome in setOf("sent", "request_submitted")
+    reported && outcome in setOf("sent", "request_submitted", "unavailable")
 }

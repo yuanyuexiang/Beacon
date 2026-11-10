@@ -25,6 +25,7 @@ export default requireNativeModule<{
   openTarget(raw: string): void;
   copyMessage(body: string): void;
   startAutomatic(): void;
+  pauseReceiving(): void;
   pause(): void;
   recover(): void;
 }>('BeaconExecutor');

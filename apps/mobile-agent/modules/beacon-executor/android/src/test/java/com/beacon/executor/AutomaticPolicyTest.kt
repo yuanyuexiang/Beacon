@@ -14,8 +14,10 @@ class AutomaticPolicyTest {
   @Test fun onlyContinueAfterSuccessfulPersistedAndReportedResult() {
     assertTrue(AutomaticPolicy.canContinue("sent", true))
     assertTrue(AutomaticPolicy.canContinue("request_submitted", true))
+    assertTrue(AutomaticPolicy.canContinue("unavailable", true))
+    assertFalse(AutomaticPolicy.canContinue("unavailable", false))
     assertFalse(AutomaticPolicy.canContinue("sent", false))
-    for (outcome in listOf("unknown", "failed", "needs_action", "unavailable", "claimed", "")) {
+    for (outcome in listOf("unknown", "failed", "needs_action", "claimed", "")) {
       assertFalse(AutomaticPolicy.canContinue(outcome, true))
     }
   }

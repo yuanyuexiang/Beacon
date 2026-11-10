@@ -9,6 +9,7 @@ export type ContactConversation = {
   read_through: string | null; messages: ConversationMessage[];
 };
 export const MESSAGE_STATES: Record<string,string> = {
+  completed: "已完成", unavailable: "已完成 · 不可联系", needs_action: "需要手机处理",
   pending: "待确认", opened: "已打开联系入口", paused: "已暂停", cancelled: "已结束",
   preview: "待确认", expired: "预览已过期", ready: "排队中", queued: "排队中", queued_paused: "队列暂停",
   sending: "发送中", claimed: "手机已领取", executing: "手机执行中", sent: "已发送",
