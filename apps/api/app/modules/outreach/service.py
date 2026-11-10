@@ -344,6 +344,7 @@ def ingest(db: Session, events: list[dict]) -> int:
                 conversation_id=c.id,
                 message_id=ev["message_id"],
                 occurred_at=occurred,
+                body_text=ev["text"],
                 processed=False,
             )
         )
@@ -384,7 +385,8 @@ def process_events(db: Session):
                         "source": "meta",
                         "platform_message_id": event.message_id,
                         "conversation_id": str(c.id),
-                        "summary": "社媒会话收到回复，等待负责人处理",
+                        "eligibility_id": str(c.eligibility_id) if c.eligibility_id else None,
+                        "summary": event.body_text or "社媒会话收到回复（历史记录未保存正文）",
                     },
                 },
                 "social-webhook",

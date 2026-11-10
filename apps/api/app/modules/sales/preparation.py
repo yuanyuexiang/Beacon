@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -14,7 +14,21 @@ class Preparation(UUIDPk, Timestamped, Base):
     __tablename__ = "communication_draft"
     __table_args__ = (
         CheckConstraint("status IN ('draft', 'converted', 'cancelled')", name="ck_communication_draft_status"),
-        Index("uq_communication_active", "lead_id", "channel", unique=True, postgresql_where=text("status = 'draft'")),
+        Index(
+            "uq_communication_active",
+            "lead_id",
+            "channel",
+            "eligibility_id",
+            unique=True,
+            postgresql_where=text("status = 'draft' AND eligibility_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_communication_unselected",
+            "lead_id",
+            "channel",
+            unique=True,
+            postgresql_where=text("status = 'draft' AND eligibility_id IS NULL"),
+        ),
     )
     lead_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("lead.id", ondelete="CASCADE"), index=True
@@ -40,3 +54,14 @@ class Preparation(UUIDPk, Timestamped, Base):
     queued: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
     created_by: Mapped[str] = mapped_column(String(64))
+
+
+class ConversationRead(UUIDPk, Base):
+    """Per operator watermarks refer to arrival time, not the customer's clock."""
+
+    __tablename__ = "communication_read"
+    __table_args__ = (UniqueConstraint("operator", "lead_id", "contact_key", name="uq_communication_read"),)
+    operator: Mapped[str] = mapped_column(String(64), ForeignKey("operator.username", ondelete="CASCADE"))
+    lead_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("lead.id", ondelete="CASCADE"))
+    contact_key: Mapped[str] = mapped_column(String(64))
+    read_through: Mapped[datetime] = mapped_column(DateTime(timezone=True))

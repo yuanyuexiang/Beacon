@@ -286,6 +286,8 @@ def sync_replies(db: Session) -> dict:
                         "source": "gmail",
                         "gmail_message_id": reply["id"],
                         "gmail_thread_id": thread["threadId"],
+                        "task_id": str(task.id),
+                        "eligibility_id": str(task.eligibility_id),
                         "from": reply.get("from"),
                         "subject": reply.get("subject"),
                         "date": reply.get("date"),

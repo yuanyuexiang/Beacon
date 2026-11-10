@@ -16,13 +16,13 @@ const NAV_GROUPS = [
       { key: "/", label: "仪表盘", icon: <DashboardOutlined /> },
       { key: "/directory", label: "门店池", icon: <ShopOutlined /> },
       { key: "/leads", label: "批次与线索", icon: <ShopOutlined /> },
-      { key: "/tasks", label: "触达任务与回复", icon: <MessageOutlined /> },
+      { key: "/tasks", label: "客户沟通", icon: <MessageOutlined /> },
     ],
   },
   { key: "system", label: "系统", items: [{ key: "/settings", label: "设置", icon: <SettingOutlined /> }, { key: "/users", label: "用户管理", icon: <SafetyCertificateOutlined /> }] },
 ];
 
-const TITLES: Record<string, string> = { "/": "仪表盘", "/leads": "批次与线索", "/directory": "门店池", "/tasks": "触达任务与回复", "/settings": "设置", "/users": "用户管理", "/account": "个人账号" };
+const TITLES: Record<string, string> = { "/": "仪表盘", "/leads": "批次与线索", "/directory": "门店池", "/tasks": "客户沟通", "/settings": "设置", "/users": "用户管理", "/account": "个人账号" };
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();

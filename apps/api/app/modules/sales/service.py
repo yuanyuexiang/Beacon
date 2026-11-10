@@ -333,7 +333,20 @@ def record_event(db: Session, lead_id: uuid.UUID, data: dict, by: str) -> tuple[
         select(ManualTask).where(ManualTask.lead_id == lead_id, ManualTask.status.in_(OPEN_STATUSES))
     ).all()
     if kind == EventKind.reply:
+        payload = ev.payload or {}
+        bound = payload.get("eligibility_id")
+        if not bound and payload.get("task_id"):
+            linked = db.scalar(
+                select(ManualTask).where(ManualTask.id == payload["task_id"], ManualTask.lead_id == lead_id)
+            )
+            bound = str(linked.eligibility_id) if linked else None
         for t in open_tasks:
+            if bound and str(t.eligibility_id) != bound:
+                continue
+            if not bound and payload.get("contact_ref"):
+                contact = db.get(ChannelEligibility, t.eligibility_id)
+                if not contact or contact.channel != channel or contact.contact_ref != payload["contact_ref"]:
+                    continue
             if t.status != TaskStatus.paused:
                 t.status, t.status_reason = TaskStatus.paused, f"收到人工回复（事件 {ev.event_key}），等待负责人决定"
                 actions.append({"action": "pause_task", "task_id": str(t.id)})

@@ -434,14 +434,17 @@ def approval_valid(db: Session, piece: ContentPiece) -> tuple[bool, str | None]:
     )
     if last is None or last.decision != ApprovalDecision.approved or last.content_hash != piece.content_hash:
         return False, "审批记录与当前内容不一致"
-    newer = db.scalar(
-        select(ContentPiece.id)
-        .where(
-            ContentPiece.lead_id == piece.lead_id, ContentPiece.kind == piece.kind, ContentPiece.version > piece.version
+    newer = list(
+        db.scalars(
+            select(ContentPiece).where(
+                ContentPiece.lead_id == piece.lead_id,
+                ContentPiece.kind == piece.kind,
+                ContentPiece.version > piece.version,
+            )
         )
-        .limit(1)
     )
-    if newer is not None:
+    draft_key = (piece.spec or {}).get("conversation_draft_id")
+    if any((p.spec or {}).get("conversation_draft_id") == draft_key for p in newer):
         return False, "已有更新版本的内容"
     return source_still_valid(db, piece)
 

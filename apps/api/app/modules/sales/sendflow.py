@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core import audit
@@ -15,7 +15,7 @@ from app.core.auth import current_operator, may_send
 from app.core.db import get_db
 from app.core.models import Operator
 from app.modules.content import service as content
-from app.modules.content.models import ApprovalDecision, ContentPiece
+from app.modules.content.models import ApprovalDecision, ContentKind, ContentPiece, ContentStatus
 from app.modules.gmail import client as gmail_client
 from app.modules.gmail import service as gmail
 from app.modules.mobile import routes as mobile
@@ -41,7 +41,7 @@ def load(db: Session, identity: uuid.UUID, lock: bool = False) -> Preparation:
 
 class MessageIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    content_id: uuid.UUID
+    content_id: uuid.UUID | None = None
     body_text: str = Field(min_length=1, max_length=20000)
     subject: str = Field(default="", max_length=200)
 
@@ -53,8 +53,50 @@ def save_message(
     d = load(db, identity, True)
     if d.status != "draft" or d.content_id != body.content_id:
         raise HTTPException(409, "消息版本已变化，请刷新后核对；你的编辑尚未覆盖新版本")
-    piece = db.get(ContentPiece, d.content_id)
-    assert piece is not None
+    piece = db.get(ContentPiece, d.content_id) if d.content_id else None
+    if piece is None:
+        lead = workbench.lead_or_404(db, d.lead_id)
+        spec = {
+            "mode": "menu_inquiry",
+            "channel": d.channel,
+            "recipient_id": str(d.eligibility_id),
+            "subject": body.subject,
+            "cited_issue_indexes": [],
+            "conversation_draft_id": str(d.id),
+        }
+        if "\n" in body.subject or "\r" in body.subject:
+            raise HTTPException(422, "邮件主题必须为单行")
+        try:
+            content.check_inquiry(body.body_text)
+        except content.ContentError as exc:
+            raise HTTPException(409, str(exc)) from None
+        version = (
+            db.scalar(
+                select(func.max(ContentPiece.version)).where(
+                    ContentPiece.lead_id == d.lead_id, ContentPiece.kind == ContentKind.message_short
+                )
+            )
+            or 0
+        ) + 1
+        piece = ContentPiece(
+            lead_id=d.lead_id,
+            kind=ContentKind.message_short,
+            version=version,
+            engine="human",
+            template_name=content.INQUIRY_TEMPLATE,
+            spec=spec,
+            body_text=body.body_text,
+            content_hash=hashlib.sha256(
+                json.dumps({"body": body.body_text, "spec": spec}, sort_keys=True).encode()
+            ).hexdigest(),
+            source_hash=content.inquiry_source(lead),
+            status=ContentStatus.draft,
+            created_by=op.username,
+        )
+        db.add(piece)
+        db.flush()
+        d.content_id = piece.id
+        db.commit()
     if piece.body_text != body.body_text or (piece.spec or {}).get("subject", "") != body.subject:
         try:
             revised = content.revise_message(db, piece, body.body_text, op.username, body.subject, commit=False)
@@ -76,9 +118,17 @@ def snapshot(db: Session, d: Preparation, choice: MobileChoice | None = None, op
     gaps = workbench.assess(db, d, require_approval=False, confirm_recipient=True)
     piece = db.get(ContentPiece, d.content_id) if d.content_id else None
     contact = db.get(ChannelEligibility, d.eligibility_id) if d.eligibility_id else None
-    latest = content.latest_content(db, d.lead_id, piece.kind) if piece else None
-    if piece and latest and latest.id != piece.id:
-        gaps.append("已有更新的消息，请选择最新版本")
+    if piece:
+        draft_key = (piece.spec or {}).get("conversation_draft_id")
+        newer = db.scalars(
+            select(ContentPiece).where(
+                ContentPiece.lead_id == piece.lead_id,
+                ContentPiece.kind == piece.kind,
+                ContentPiece.version > piece.version,
+            )
+        )
+        if any((p.spec or {}).get("conversation_draft_id") == draft_key for p in newer):
+            gaps.append("已有更新的消息，请选择最新版本")
     if piece and not (piece.body_text or "").strip():
         gaps.append("请先起草消息")
     social_context = None
@@ -206,7 +256,7 @@ def confirm(
         }
     if d.status != "draft":
         raise HTTPException(409, "草稿已结束")
-    if any(
+    if d.purpose != "message" and any(
         t.channel.value == d.channel
         and workbench.same_recipient(db, t, d.eligibility_id)
         and (t.status in service.OPEN_STATUSES or (d.purpose == "initial" and t.status in workbench.SENT))

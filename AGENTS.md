@@ -163,3 +163,6 @@ D73（2026-10-22）：Gmail 网页授权为主入口，分开发送与回复 met
 2026-11-06 实机 FB 验收：用户随后明确允许测试，指定 https://www.facebook.com/aberdeenairport 和原文“你好”。社媒改用官方 App 当前登录账号，不再强制手工填写；WhatsApp 本方号码保留。FB 实际无稳定 resource-id，按语义标题／私信输入描述适配；首次“开始”可能真实发出消息，执行器不自动点击。当前验收结果见 plan/mobile-multichannel.md，不能把前文“延期测试”理解为本次仍禁止测试。
 
 2026-11-06 手机通知回复：原生 NotificationListenerService，默认关闭、按渠道开启、用户授予 Beacon 通知使用权；持久化待关联收件箱，首次人工关联、稳定会话后续明确入站自动回填，交接／幂等／撤销检查，不自动发送。迁移 d181a0010001，compatibility.json 同步，回滚兼容范围为空。专项 tests/test_mobile_notifications.py；模拟 UI scripts/verify_mobile_notifications_ui.py；原生 NotificationPolicyTest。当前仅本地及手机安装，真实通知验收见 plan/mobile-notifications.md。
+
+
+2026-11-10 客户沟通：`/tasks` 改为客户／具体联系方式连续会话，联系人草稿隔离、下一条消息独立确认、执行详情截图、人工回复、未关联历史与按用户已读。AI 可用当前联系人历史起草跟进／回复或缩短草稿。迁移 `d182a0010001`，compatibility 已同步；历史内容保留，降级额外草稿取消保留。专项 `tests/test_conversations.py tests/test_sendflow.py tests/test_communication.py`，全模拟 UI `scripts/verify_customer_conversations_ui.py`（默认 localhost:3001）；旧 verify_communication_ui.py 转调该回归。详见 plan/customer-conversations.md。本地验收后用户自行提交推送，不自动真实发送或云发布。

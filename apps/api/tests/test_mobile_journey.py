@@ -62,7 +62,7 @@ def test_one_confirmation_queues_correct_phone_and_recipient(client, db, channel
     assert db.query(Execution).count() == 1
 
 
-def test_switch_recipient_reuses_active_draft_and_invalidates_preview(client, db):
+def test_switch_recipient_keeps_independent_active_drafts(client, db):
     tid, device, _, _ = setup(client, db)
     task = db.get(ManualTask, tid)
     a = _elig(client, str(task.lead_id), channel="facebook", contact_ref="https://facebook.com/one").json()
@@ -73,7 +73,8 @@ def test_switch_recipient_reuses_active_draft_and_invalidates_preview(client, db
     second = prepare(client, str(task.lead_id), channel="facebook", execution_mode="mobile", eligibility_id=b["id"])[
         "draft"
     ]
-    assert second["id"] == first["id"] and second["eligibility_id"] == b["id"]
+    assert second["id"] != first["id"] and second["eligibility_id"] == b["id"]
+    assert client.get(f"/api/communication/drafts/{first['id']}").json()["eligibility_id"] == a["id"]
 
 
 def test_phone_changed_after_preview_creates_no_task_or_job(client, db):

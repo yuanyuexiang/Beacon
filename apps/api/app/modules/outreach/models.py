@@ -50,6 +50,7 @@ class ConversationEvent(UUIDPk, Base):
     )
     message_id: Mapped[str] = mapped_column(String(256))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    body_text: Mapped[str | None] = mapped_column(Text)
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 

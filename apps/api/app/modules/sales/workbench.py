@@ -55,7 +55,7 @@ class PrepareIn(BaseModel):
     execution_mode: Mode = "manual"
     batch_key: str | None = Field(default=None, max_length=64)
     assigned_to: str | None = Field(default=None, max_length=64)
-    purpose: Literal["initial", "followup"] = "initial"
+    purpose: Literal["initial", "followup", "message"] = "initial"
     eligibility_id: uuid.UUID | None = None
 
 
@@ -262,7 +262,7 @@ def progress(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
     return result
 
 
-def context(db: Session, lead: Lead) -> dict:
+def context(db: Session, lead: Lead, selected_content: uuid.UUID | None = None) -> dict:
     from app.modules.sales import admission, contact_ranking
 
     contacts = list(
@@ -280,6 +280,10 @@ def context(db: Session, lead: Lead) -> dict:
             .limit(10)
         )
     )
+    if selected_content and all(p.id != selected_content for p in pieces):
+        selected_piece = db.get(ContentPiece, selected_content)
+        if selected_piece and selected_piece.lead_id == lead.id:
+            pieces.insert(0, selected_piece)
     analyses = list(
         db.scalars(
             select(MenuAnalysis)
@@ -462,7 +466,7 @@ def draft_public(db: Session, d: Preparation) -> dict:
         "queued": d.queued,
         "task_id": str(d.task_id) if d.task_id else None,
         "blockers": assess(db, d) if d.status == "draft" else [],
-        "context": context(db, lead),
+        "context": context(db, lead, d.content_id),
     }
 
 
@@ -504,6 +508,7 @@ def overview(
     page: int = 1,
     page_size: int = 20,
     db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
 ):
     page, page_size = max(page, 1), min(max(page_size, 1), 100)
     draft_leads = select(Preparation.lead_id).where(Preparation.queued.is_(True), Preparation.status == "draft")
@@ -536,12 +541,27 @@ def overview(
             Lead.id.in_(select(ManualTask.lead_id).where(ManualTask.preparation_group_id == preparation_group))
         )
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
-    rows = list(db.scalars(query.order_by(Lead.name, Lead.id).offset((page - 1) * page_size).limit(page_size)))
+    # Latest activity is computed before pagination, rather than sorting just the visible page.
+    last_task = (
+        select(func.max(ManualTask.updated_at)).where(ManualTask.lead_id == Lead.id).correlate(Lead).scalar_subquery()
+    )
+    last_event = select(func.max(Event.recorded_at)).where(Event.lead_id == Lead.id).correlate(Lead).scalar_subquery()
+    last_draft = (
+        select(func.max(Preparation.updated_at)).where(Preparation.lead_id == Lead.id).correlate(Lead).scalar_subquery()
+    )
+    latest = func.greatest(Lead.created_at, last_task, last_event, last_draft)
+    rows = list(db.scalars(query.order_by(latest.desc(), Lead.id).offset((page - 1) * page_size).limit(page_size)))
     states = progress(db, [lead.id for lead in rows])
     return {
         "total": total,
         "items": [
-            {"id": str(lead.id), "name": lead.name, "postcode": lead.postcode, "progress": states[lead.id]}
+            {
+                "id": str(lead.id),
+                "name": lead.name,
+                "postcode": lead.postcode,
+                "progress": states[lead.id],
+                **conversation_summary(db, lead.id, op.username),
+            }
             for lead in rows
         ],
     }
@@ -586,7 +606,8 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                     (
                         t
                         for t in tasks_for(db, identity)
-                        if t.channel == body.channel
+                        if body.purpose != "message"
+                        and t.channel == body.channel
                         and same_recipient(db, t, body.eligibility_id)
                         and (t.status in service.OPEN_STATUSES or (body.purpose == "initial" and t.status in SENT))
                     ),
@@ -607,6 +628,7 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                         Preparation.lead_id == identity,
                         Preparation.channel == body.channel.value,
                         Preparation.status == "draft",
+                        Preparation.eligibility_id == body.eligibility_id,
                     )
                 )
                 if d is not None and body.eligibility_id:
@@ -646,7 +668,7 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                         channel=body.channel.value,
                         execution_mode=body.execution_mode,
                         eligibility_id=body.eligibility_id or (suitable[0].id if len(suitable) == 1 else None),
-                        content_id=content.id if content else None,
+                        content_id=content.id if content and body.purpose != "message" else None,
                         assigned_to=body.assigned_to or lead.assigned_to or op.username,
                         purpose=body.purpose,
                         status="draft",
@@ -707,6 +729,18 @@ def patch_draft(
         eligibility = db.get(ChannelEligibility, changes["eligibility_id"])
         if eligibility is None or eligibility.lead_id != d.lead_id or eligibility.channel.value != d.channel:
             raise HTTPException(422, "联系方式不属于该客户或渠道")
+    if "eligibility_id" in changes and changes["eligibility_id"] != d.eligibility_id:
+        duplicate = db.scalar(
+            select(Preparation.id).where(
+                Preparation.lead_id == d.lead_id,
+                Preparation.channel == d.channel,
+                Preparation.status == "draft",
+                Preparation.id != d.id,
+                Preparation.eligibility_id == changes["eligibility_id"],
+            )
+        )
+        if duplicate:
+            raise HTTPException(409, "这个联系方式已有独立草稿，请切换到对应会话继续；当前草稿已保留")
     if changes.get("content_id"):
         content = db.get(ContentPiece, changes["content_id"])
         if content is None or content.lead_id != d.lead_id or content.kind != ContentKind.message_short:
@@ -954,3 +988,18 @@ def activity(lead_id: uuid.UUID, db: Session = Depends(get_db)):
         )
     ]
     return {"timeline": sorted(items, key=lambda x: x["at"]), "deliveries": deliveries, "conversations": conversations}
+
+
+def conversation_summary(db: Session, lead_id: uuid.UUID, operator: str) -> dict:
+    from app.modules.sales.conversations import project
+
+    rows = project(db, lead_id, operator)
+    messages = [m for row in rows for m in row["messages"]]
+    last = max(messages, key=lambda m: (m["arrived_at"], m["id"])) if messages else None
+    lead = db.get(Lead, lead_id)
+    return {
+        "last_message": last["body"] if last else "尚未发送消息",
+        "last_at": last["at"] if last else None,
+        "unread": sum(r["unread"] for r in rows),
+        "assigned_to": lead.assigned_to if lead else None,
+    }

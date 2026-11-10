@@ -1,169 +1,212 @@
 "use client";
-import { UserIdentity } from "@/components/UserAvatar";
-import ChannelConditions from "@/components/ChannelConditions";
-import Button from "@/components/AccessButton";
-import { Alert, Card, Checkbox, Col, DatePicker, Drawer, Empty, Form, Input, Modal, Row, Select, Space, Table, Tabs, Tag, Timeline, Typography } from "antd";
+import { Alert, Badge, Card, Checkbox, Collapse, DatePicker, Drawer, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import dayjs from "dayjs";
 import { api, json } from "@/lib/api";
 import { useOperator } from "@/lib/auth";
-import { Assignee, CHANNELS, CommunicationTask, LeadContext, MODES, PROGRESS, Progress, safeReturnTo } from "@/lib/communication";
-import { channelLabel, label } from "@/lib/format";
+import { useOutreachIdentity } from "@/lib/useOutreachIdentity";
+import { Assignee, CHANNELS, CommunicationTask, Draft, LeadContext, Prepared, PROGRESS, Progress, safeReturnTo } from "@/lib/communication";
+import { ContactConversation, ConversationMessage } from "@/lib/conversations";
+import { channelLabel } from "@/lib/format";
+import { defaultExecutionMode, mobilePlatform } from "@/lib/mobile-channels";
 import { HeroBand } from "@/components/ui";
-import PrepareOutreach from "@/components/PrepareOutreach";
-import GmailOutreach from "@/components/GmailOutreach";
-import { mobilePlatform } from "@/lib/mobile-channels";
+import Button from "@/components/AccessButton";
+import { UserIdentity } from "@/components/UserAvatar";
+import MessageComposer from "@/components/MessageComposer";
+import ConversationTimeline from "@/components/ConversationTimeline";
 import MobileReplies from "@/components/MobileReplies";
 import { MobileTask } from "@/components/MobileChannel";
+import GmailOutreach from "@/components/GmailOutreach";
 import SocialOutreach from "@/components/SocialOutreach";
+import ChannelConditions from "@/components/ChannelConditions";
 
-type Customer = { id: string; name: string; postcode: string | null; progress: Progress };
-type Activity = { timeline: { id: string; channel: string | null; direction: string; at: string; summary: string; source: string; status: string }[]; deliveries: { id: string; task_id: string; channel: string; status: string; source: string; at: string; error?: string | null; message_id?: string | null }[]; conversations: { id: string; channel: string; at: string; summary: string; source: string }[] };
-type ManualPreview = { task_id: string; channel: string; url: string | null; address?: string; text: string };
-const EMPTY_ACTIVITY: Activity = { timeline: [], deliveries: [], conversations: [] };
-const SOURCE: Record<string, string> = { manual: "人工记录", gmail: "Gmail 同步（回复仅邮件头）", meta: "平台同步", mobile: "手机执行" };
-const ACTIVE = ["pending", "opened", "paused"];
+type Customer = { id:string; name:string; postcode:string|null; progress:Progress; last_message?:string; last_at?:string; unread?:number; assigned_to?:string };
+type ManualPreview = { task_id:string; channel:string; url:string|null; text:string };
 
 function TasksInner() {
   const { me } = useOperator();
-  const canWrite = me?.role === "admin" || me?.role === "director" || me?.role === "member";
-  const router = useRouter();
-  const sp = useSearchParams();
-  const leadId = sp.get("lead") || undefined;
-  const batch = sp.get("batch") || undefined;
-  const channel = sp.get("channel") || undefined;
-  const assigned = sp.get("owner") || undefined;
+  const canWrite = ["admin","director","member"].includes(me?.role || "");
+  const identity = useOutreachIdentity();
+  const router = useRouter(), sp = useSearchParams();
+  const leadId = sp.get("lead") || "", channel = sp.get("channel") || undefined;
+  const batch = sp.get("batch") || undefined, assigned = sp.get("owner") || undefined;
+  const query = sp.get("q") || "", page = Math.max(1,Number(sp.get("page")) || 1);
   const group = sp.get("preparation") || undefined;
-  const query = sp.get("q") || "";
-  const page = Math.max(1, Number(sp.get("page")) || 1);
-  const tab = ["tasks", "conversation", "records"].includes(sp.get("tab") || "") ? sp.get("tab")! : "tasks";
   const back = safeReturnTo(sp.get("returnTo") || (batch ? `/leads?batch=${encodeURIComponent(batch)}` : "/leads"));
-  const [rows, setRows] = useState<Customer[]>([]);
-  const [total, setTotal] = useState(0);
-  const [batches, setBatches] = useState<{ batch_key: string }[]>([]);
-  const [owners, setOwners] = useState<Assignee[]>([]);
-  const [context, setContext] = useState<LeadContext | null>(null);
-  const [activity, setActivity] = useState<Activity>(EMPTY_ACTIVITY);
-  const [error, setError] = useState<string>();
-  const [success, setSuccess] = useState<string>();
-  const [busy, setBusy] = useState(false);
-  const [prepare, setPrepare] = useState(false);
-  const [unstarted, setUnstarted] = useState(false);
-  const [manual, setManual] = useState<ManualPreview>();
-  const [confirmed, setConfirmed] = useState(false);
-  const [apiTask, setApiTask] = useState<CommunicationTask>();
-  const [suppression, setSuppression] = useState<Record<string, string>[] | null>(null);
-  const [eventForm] = Form.useForm();
-  const [sentForm] = Form.useForm();
-  const eventKey = useRef<string | null>(null);
-  const contextRequest = useRef(0);
-  const listRequest = useRef(0);
-  const navigate = useCallback((patch: Record<string, string | undefined>) => { const params = new URLSearchParams(sp.toString()); Object.entries(patch).forEach(([key, value]) => value ? params.set(key, value) : params.delete(key)); router.replace(`/tasks?${params}`, { scroll: false }); }, [router, sp]);
-  const refreshList = useCallback(async () => { const request = ++listRequest.current; const params = new URLSearchParams({ page: String(page) }); if (batch) params.set("batch_key", batch); if (channel) params.set("channel", channel); if (assigned) params.set("assigned_to", assigned); if (query) params.set("q", query); if (group) params.set("preparation_group", group); const result = await api<{ items: Customer[]; total: number }>(`/api/communication/overview?${params}`); if (request === listRequest.current) { setRows(result.items); setTotal(result.total); } }, [page, batch, channel, assigned, query, group]);
-  const refreshContext = useCallback(async () => { const request = ++contextRequest.current; if (!leadId) { setContext(null); setUnstarted(false); setActivity(EMPTY_ACTIVITY); return; } const [data, history] = await Promise.all([api<LeadContext>(`/api/communication/leads/${leadId}`), api<Activity>(`/api/communication/activity/${leadId}`)]); if (request === contextRequest.current) { const started = data.drafts?.some(d => d.queued) || data.tasks.length > 0 || history.timeline.length > 0 || history.conversations.length > 0; setContext(started ? data : null); setUnstarted(!started); setActivity(started ? history : EMPTY_ACTIVITY); } }, [leadId]);
-  const refresh = useCallback(async () => { await Promise.all([refreshList(), refreshContext()]); }, [refreshList, refreshContext]);
-  useEffect(() => { api<{ batch_key: string }[]>("/api/batches").then(setBatches).catch((e) => setError(e.message)); api<Assignee[]>("/api/communication/assignees").then(setOwners).catch((e) => setError(e.message)); }, []);
-  useEffect(() => { refreshList().catch((e) => setError(e.message)); }, [refreshList]);
-  useEffect(() => { setContext(null); setActivity(EMPTY_ACTIVITY); setManual(undefined); setApiTask(undefined); setError(undefined); eventForm.resetFields(); eventKey.current = null; refreshContext().catch((e) => setError(e.message)); }, [refreshContext, eventForm]);
-  useEffect(() => { if (!leadId && rows[0]) navigate({ lead: rows[0].id }); }, [leadId, rows, navigate]);
-  useEffect(() => { const tick = () => { if (!document.hidden && !busy) refresh().catch(() => {}); }; const timer = setInterval(tick, 15000); window.addEventListener("focus", tick); return () => { clearInterval(timer); window.removeEventListener("focus", tick); }; }, [refresh, busy]);
-
-  const act = async (work: () => Promise<void>) => { setBusy(true); setError(undefined); setSuccess(undefined); try { await work(); await refresh(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
-  const tasks = (context?.tasks || []).filter((t) => (!channel || t.channel === channel) && (!assigned || t.assigned_to === assigned) && (!group || t.preparation_group_id === group));
-  const selectedTask = tasks.find((t) => t.id === sp.get("task")) || tasks.find((t) => ACTIVE.includes(t.status)) || tasks[0];
-  const inflight = (task: CommunicationTask) => activity.deliveries.some((d) => d.task_id === task.id && ["ready", "queued", "queued_paused", "sending", "unknown", "sent"].includes(d.status));
-  const openManual = async (task: CommunicationTask) => { const value = await api<ManualPreview>(`/api/communication/tasks/${task.id}/manual-open`, { method: "POST" }); setManual(value); sentForm.resetFields(); setConfirmed(false); navigate({ task: task.id }); };
-  const rename = (id: string) => context?.lead.id === id ? context.lead.name : rows.find((r) => r.id === id)?.name || id;
+  const [rows,setRows] = useState<Customer[]>([]), [total,setTotal] = useState(0);
+  const [batches,setBatches] = useState<{batch_key:string}[]>([]), [owners,setOwners] = useState<Assignee[]>([]);
+  const [context,setContext] = useState<LeadContext>(), [conversations,setConversations] = useState<ContactConversation[]>([]);
+  const [contactId,setContactId] = useState<string>(), [drafts,setDrafts] = useState<Record<string,Draft>>({});
+  const [error,setError] = useState<string>(), [notice,setNotice] = useState<string>();
+  const [busy,setBusy] = useState(false), [details,setDetails] = useState(false), [replyOpen,setReplyOpen] = useState(false);
+  const [manual,setManual] = useState<ManualPreview>(), [confirmed,setConfirmed] = useState(false);
+  const [apiTask,setApiTask] = useState<CommunicationTask>();
+  const [suppression,setSuppression] = useState<Record<string,string>[]|null>(null);
+  const [replyForm] = Form.useForm(), [sentForm] = Form.useForm();
+  const working = useRef(new Set<string>()), generation = useRef(0), listGeneration = useRef(0);
+  const readWatermarks = useRef(new Set<string>()), eventKey = useRef<string | undefined>(undefined);
+  const [editing,setEditing] = useState(false);
+  const navigate = useCallback((patch:Record<string,string|undefined>) => {
+    const p=new URLSearchParams(sp.toString()); Object.entries(patch).forEach(([k,v]) => v ? p.set(k,v) : p.delete(k));
+    router.replace(`/tasks?${p}`,{scroll:false});
+  },[sp,router]);
+  const refreshList = useCallback(async () => {
+    const request=++listGeneration.current;
+    const p=new URLSearchParams({page:String(page)});
+    if(batch) p.set("batch_key",batch); if(channel) p.set("channel",channel); if(assigned) p.set("assigned_to",assigned);
+    if(query) p.set("q",query); if(group) p.set("preparation_group",group);
+    const r=await api<{items:Customer[];total:number}>(`/api/communication/overview?${p}`);
+    if(request===listGeneration.current) {setRows(r.items);setTotal(r.total);}
+  },[page,batch,channel,assigned,query,group]);
+  const refreshContext = useCallback(async () => {
+    const request=++generation.current;
+    if(!leadId) return;
+    const [c,r]=await Promise.all([api<LeadContext>(`/api/communication/leads/${leadId}`),api<{items:ContactConversation[]}>(`/api/communication/conversations/${leadId}`)]);
+    if(request!==generation.current) return;
+    setContext(c);setConversations(r.items);
+    const focused=c.tasks.find(t => t.id === sp.get("task"));
+    setContactId(old => r.items.some(x => x.id===old) ? old : focused?.eligibility_id || r.items.find(x => x.unread)?.id || r.items.find(x => x.messages.length)?.id || c.drafts?.find(d => d.queued)?.eligibility_id || r.items[0]?.id);
+  },[leadId,sp]);
+  const refresh = useCallback(async () => {await Promise.all([refreshList(),refreshContext()]);},[refreshList,refreshContext]);
+  useEffect(() => { api<{batch_key:string}[]>("/api/batches").then(setBatches).catch(e => setError(e.message)); api<Assignee[]>("/api/communication/assignees").then(setOwners).catch(e => setError(e.message)); },[]);
+  useEffect(() => { refreshList().catch(e => setError(e.message)); },[refreshList]);
+  useEffect(() => { refreshContext().catch(e => setError(e.message)); },[refreshContext]);
+  useEffect(() => {if(!leadId && rows[0]) navigate({lead:rows[0].id});},[rows,leadId,navigate]);
+  useEffect(() => {
+    const tick=() => {if(!document.hidden && !working.current.size && !busy) refresh().catch(() => {});};
+    const timer=setInterval(tick,15000);window.addEventListener("focus",tick);
+    return () => {clearInterval(timer);window.removeEventListener("focus",tick);};
+  },[refresh,busy]);
+  const conversation=conversations.find(c => c.id===contactId);
+  const selected=context?.contacts.find(c => c.id===contactId);
+  useEffect(() => {
+    if(!canWrite || document.hidden || !conversation?.read_through || !leadId) return;
+    const token=`${leadId}:${conversation.id}:${conversation.read_through}`;
+    if(readWatermarks.current.has(token)) return;
+    readWatermarks.current.add(token);
+    api(`/api/communication/conversations/${leadId}/${conversation.id}/read`,json({through:conversation.read_through},"PUT"))
+      .then(() => {setConversations(old => old.map(c => c.id===conversation.id ? {...c,unread:0} : c));void refreshList();})
+      .catch(() => readWatermarks.current.delete(token));
+  },[conversation,leadId,canWrite,refreshList]);
+  const act=async (work:()=>Promise<void>) => {setBusy(true);setError(undefined);try {await work();await refresh();} catch(e) {setError((e as Error).message);} finally {setBusy(false);}};
+  const startDraft=async () => {
+    if(!context || !selected) return;
+    const request=generation.current, target=selected.id;
+    const r=await api<{items:Prepared[]}>("/api/communication/prepare",json({lead_ids:[context.lead.id],channel:selected.channel,eligibility_id:target,execution_mode:defaultExecutionMode(selected.channel),purpose:"message"}));
+    const item=r.items[0];if(item.error) throw new Error(item.error);
+    if(item.draft && request===generation.current) setDrafts(old => ({...old,[target]:item.draft!}));
+  };
+  const taskActions=(m:ConversationMessage) => {
+    const task=context?.tasks.find(t => t.id===m.task_id);if(!task || !context) return null;
+    const contact=context.contacts.find(c => c.id===task.eligibility_id);
+    return <Space wrap>
+      {task.execution_mode==="mobile" ? <MobileTask taskId={task.id} platform={mobilePlatform(task.channel,contact?.contact_ref)} onChanged={refresh} /> : task.execution_mode!=="manual" ? <Button readOnlySafe size="small" onClick={() => setApiTask(task)}>查看发送进度</Button> : ["pending","opened"].includes(task.status) ? <Button size="small" disabled={busy} onClick={() => act(async () => {setManual(await api<ManualPreview>(`/api/communication/tasks/${task.id}/manual-open`,{method:"POST"}));setConfirmed(false);sentForm.resetFields();})}>复制消息／记录发送</Button> : null}
+      {task.status==="paused" && <Button size="small" disabled={busy} onClick={() => act(async () => {await api(`/api/tasks/${task.id}/resume`,json({reason:"负责人明确恢复这条消息"}));})}>恢复此消息</Button>}
+      {["pending","opened","paused"].includes(task.status) && <Button danger size="small" disabled={busy} onClick={() => act(async () => {await api(`/api/tasks/${task.id}/cancel`,json({reason:"负责人结束此消息"}));})}>结束此消息</Button>}
+      {m.deliveries.map(d => <Typography.Text type="secondary" key={d.id}>{d.error}</Typography.Text>)}
+    </Space>;
+  };
+  const activeDraft=contactId ? drafts[contactId] : undefined;
   return <>
-    <HeroBand kicker="COMMUNICATION" title="触达任务与回复" subtitle="从名单加入准备待办或创建触达任务，在这里继续准备、执行与跟进。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回来源页面</Button></Link><Button readOnlySafe onClick={() => refresh().catch((e) => setError(e.message))}>刷新进展</Button><Button readOnlySafe onClick={() => api<Record<string, string>[]>("/api/suppressions").then(setSuppression).catch((e) => setError(e.message))}>抑制名单</Button></Space>} />
-    {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 12 }} />}
-    {success && <Alert type="success" showIcon message={success} style={{ marginBottom: 12 }} />}
+    <HeroBand kicker="COMMUNICATION" title="客户沟通" subtitle="按客户和联系方式查看消息，继续发送与跟进。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回名单</Button></Link><Button readOnlySafe onClick={() => refresh().catch(e => setError(e.message))}>刷新消息</Button><Button readOnlySafe onClick={() => api<Record<string,string>[]>("/api/suppressions").then(setSuppression).catch(e => setError(e.message))}>抑制名单</Button></Space>} />
+    {error && <Alert type="error" showIcon message={error} closable onClose={() => setError(undefined)} style={{marginBottom:12}} />}
+    {notice && <Alert type="success" showIcon message={notice} closable onClose={() => setNotice(undefined)} style={{marginBottom:12}} />}
     <MobileReplies onChanged={refresh} />
-    <Space wrap style={{ marginBottom: 16 }}>
-      <Select aria-label="来源名单" allowClear placeholder="全部名单" value={batch} style={{ width: 200 }} options={batches.map((b) => ({ value: b.batch_key, label: b.batch_key }))} onChange={(v) => navigate({ batch: v, lead: undefined, task: undefined, draft: undefined, preparation: undefined, page: "1", returnTo: v ? `/leads?batch=${encodeURIComponent(v)}` : "/leads" })} />
-      <Select aria-label="沟通渠道筛选" allowClear placeholder="全部渠道" value={channel} options={CHANNELS} style={{ width: 170 }} onChange={(v) => navigate({ channel: v, page: "1" })} />
-      <Select aria-label="沟通负责人筛选" allowClear placeholder="全部负责人" value={assigned} style={{ width: 170 }} options={owners.map((o) => ({ value: o.username, label: o.display_name || o.username }))} onChange={(v) => navigate({ owner: v, page: "1" })} />
-      <Input.Search key={query} defaultValue={query} placeholder="搜索客户／邮编" allowClear style={{ width: 230 }} onSearch={(q) => navigate({ q: q || undefined, page: "1" })} />
-      {group && <Tag closable onClose={() => navigate({ preparation: undefined, page: "1" })}>本次新建任务</Tag>}
+    <Space wrap style={{marginBottom:16}}>
+      <Select aria-label="来源名单" allowClear placeholder="全部名单" value={batch} style={{width:200}} options={batches.map(b => ({value:b.batch_key,label:b.batch_key}))} disabled={editing} onChange={v => navigate({batch:v,lead:undefined,page:"1"})} />
+      <Select aria-label="沟通渠道筛选" allowClear placeholder="全部渠道" value={channel} options={CHANNELS} style={{width:160}} onChange={v => navigate({channel:v,page:"1"})} />
+      <Select aria-label="沟通负责人筛选" allowClear placeholder="全部负责人" value={assigned} options={owners.map(o => ({value:o.username,label:o.display_name || o.username}))} style={{width:160}} onChange={v => navigate({owner:v,page:"1"})} />
+      <Input.Search key={query} defaultValue={query} placeholder="搜索客户／邮编" allowClear style={{width:220}} onSearch={q => navigate({q:q || undefined,page:"1"})} />
+      {group && <Tag closable onClose={() => navigate({preparation:undefined,page:"1"})}>本次任务</Tag>}
     </Space>
-    <Row gutter={[16, 16]}>
-      <Col xs={24} xl={6}><Card size="small" title={`客户 · ${total}`}>
-        <Table<Customer> rowKey="id" size="small" dataSource={rows} pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: (value) => navigate({ page: String(value) }) }} rowClassName={(r) => r.id === leadId ? "communication-selected" : ""} onRow={(r) => ({ onClick: () => navigate({ lead: r.id, task: undefined, draft: undefined }) })} columns={[{ title: "客户与进展", render: (_, r) => <a onClick={() => navigate({ lead: r.id, task: r.progress.task_id || undefined, draft: r.progress.draft_id || undefined })}><b>{r.name}</b><br /><Tag color={r.progress.status === "suppressed" ? "red" : r.progress.status === "replied" ? "green" : "default"}>{PROGRESS[r.progress.status] || r.progress.status}</Tag><Typography.Text type="secondary">{r.postcode}</Typography.Text></a> }]} />
-      </Card></Col>
-      <Col xs={24} xl={12}><Card size="small" title={context?.lead.name || "选择客户"}>
-        {!context ? <Empty description={unstarted ? "这家门店尚未发起触达，准备草稿请在名单中继续处理。" : "暂无可执行的触达任务。请先在批次与线索中准备并创建任务，或调整当前筛选。"}><Link href={back}>前往批次与线索</Link></Empty> : <>
-          <Tag color={context.progress.status === "suppressed" ? "red" : "blue"}>{PROGRESS[context.progress.status]}</Tag>
-          <Tabs activeKey={tab} onChange={(value) => navigate({ tab: value })} items={[
-            { key: "tasks", label: "待办任务", children: <>
-              {(context.drafts || []).filter(d => d.queued && (!channel || d.channel === channel) && (!assigned || d.assigned_to === assigned) && !group).map(d => <Card size="small" key={d.id} title={`${channelLabel(d.channel)} · 准备待办`} style={{marginBottom:12}}>
-                <Typography.Paragraph>负责人：{d.assigned_to || "未分配"}{d.follow_up_at ? ` · 提醒：${new Date(d.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
-                <Typography.Paragraph>{d.blockers.length ? d.blockers.join("；") : "条件已齐备，可确认并创建执行任务"}</Typography.Paragraph>
-                <Space><Link href={`/leads/${d.lead_id}?returnTo=${encodeURIComponent(back)}`}>继续准备</Link><Button disabled={busy} onClick={() => act(async () => { await api(`/api/communication/drafts/${d.id}`, json({queued:false}, "PATCH")); })}>移出待办</Button></Space>
-              </Card>)}
-              {!tasks.length && !context.drafts?.some(d => d.queued) ? <Empty description="当前筛选下没有任务，可查看客户会话和发送记录。" /> : tasks.map((t) => <Card key={t.id} size="small" style={{ marginBottom: 12, borderColor: selectedTask?.id === t.id ? "#cf010e" : undefined }} title={<Space wrap><span>{channelLabel(t.channel, context.contacts.find(c => c.id === t.eligibility_id)?.contact_ref)}</span><Tag>{t.status === "sent_manual" && t.execution_mode === "mobile" ? "已通过手机发送" : label(t.status)}</Tag><Typography.Text type="secondary">{t.execution_mode === "mobile" ? "手机执行" : t.execution_mode === "manual" ? "人工执行" : t.execution_mode === "gmail" ? "Gmail 接口" : "已授权社媒会话"}</Typography.Text></Space>}>
-                <Typography.Paragraph type="secondary">负责人：{<UserIdentity username={t.assigned_to} />}{t.follow_up_at ? ` · 跟进提醒：${new Date(t.follow_up_at).toLocaleString("zh-CN")}` : ""}</Typography.Paragraph>
-                {t.status_reason && <Alert type="warning" message={t.status_reason} style={{ marginBottom: 12 }} />}
-                {inflight(t) && <Alert type="info" message="已有接口发送记录，请先核对排队、发送或未知结果，避免人工重复发送。" style={{ marginBottom: 12 }} />}
-                {t.execution_mode === "gmail" && (() => {
-                  const d = activity.deliveries.find(d => d.task_id === t.id && d.source === "gmail");
-                  const states: Record<string,string> = {preview:"待确认发送",expired:"需要重新预览确认",ready:"排队中",queued:"排队中",queued_paused:"已暂停",sending:"发送中",sent:"已发送",failed:"发送失败",blocked:"发送未完成",unknown:"发送结果待查询"};
-                  return <Alert style={{marginBottom:12}} type={d?.error ? "warning" : "info"} showIcon message={d ? states[d.status] || d.status : "待确认发送"} description={d?.error || (!d || ["preview","expired"].includes(d.status) ? "点击下方“预览发送／查看进度”，确认后发送。" : undefined)} />;
-                })()}
-                <Space wrap>
-                  <Select aria-label={`任务执行方式-${t.id}`} style={{ width: 185 }} value={t.execution_mode} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={MODES.filter((m) => m.value === "mobile" && !!mobilePlatform(t.channel, context.contacts.find(c => c.id === t.eligibility_id)?.contact_ref) || m.value === "manual" || (m.value === "gmail" && t.channel === "email") || (m.value === "social" && ["facebook", "instagram"].includes(t.channel)))} onChange={(execution_mode) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ execution_mode }, "PATCH")); })} />
-                  <Select aria-label={`任务负责人-${t.id}`} allowClear placeholder="负责人" value={t.assigned_to || undefined} style={{ width: 145 }} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} options={owners.map((o) => ({ value: o.username, label: o.display_name || o.username }))} onChange={(assigned_to) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ assigned_to: assigned_to || null }, "PATCH")); })} />
-                  <DatePicker showTime aria-label={`任务跟进提醒-${t.id}`} placeholder="提醒时间" value={t.follow_up_at ? dayjs(t.follow_up_at) : null} disabled={!canWrite || busy || !ACTIVE.includes(t.status) || inflight(t)} onChange={(v) => act(async () => { await api(`/api/communication/tasks/${t.id}`, json({ follow_up_at: v?.toISOString() || null }, "PATCH")); })} />
-                  {["pending", "opened"].includes(t.status) && t.execution_mode === "manual" && <Button disabled={busy || inflight(t)} onClick={() => act(() => openManual(t))}>开始人工执行</Button>}
-                  {mobilePlatform(t.channel, context.contacts.find(c => c.id === t.eligibility_id)?.contact_ref) && <MobileTask taskId={t.id} platform={mobilePlatform(t.channel, context.contacts.find(c => c.id === t.eligibility_id)?.contact_ref)} onChanged={refresh} />}
-                  {!["manual", "mobile"].includes(t.execution_mode) && <Button disabled={busy} onClick={() => { setApiTask(t); navigate({ task: t.id }); }}>预览发送／查看进度</Button>}
-                  {t.status === "paused" && <Button disabled={busy || inflight(t)} onClick={() => act(async () => { await api(`/api/tasks/${t.id}/resume`, json({ reason: "负责人查看回复后明确继续" })); setSuccess("已重新复核并恢复任务，尚未发送"); })}>核对后恢复</Button>}
-                  {ACTIVE.includes(t.status) && <Button danger disabled={busy || inflight(t)} onClick={() => act(async () => { await api(`/api/tasks/${t.id}/cancel`, json({ reason: "负责人结束本次触达" })); })}>结束任务</Button>}
-                </Space>
-              </Card>)}
-            </> },
-            { key: "conversation", label: "客户会话", children: <>
-              <Alert type="info" showIcon message="人工渠道通过下方回填；Gmail 当前同步回复邮件头，不展示未获取的邮件正文。平台会话仅展示已同步内容。" style={{ marginBottom: 12 }} />
-              {activity.conversations.map((c) => <Card key={c.id} size="small" title={`${channelLabel(c.channel)} · 平台最近消息`}><p>{c.summary}</p><Typography.Text type="secondary">{new Date(c.at).toLocaleString("zh-CN")} · 平台同步</Typography.Text></Card>)}
-              <Timeline items={activity.timeline.map((e) => ({ key: e.id, color: e.direction === "inbound" ? "green" : "blue", children: <><b>{e.direction === "outbound" ? "发出" : e.direction === "note" ? "备注" : "收到／回填"} · {channelLabel(e.channel || "")} · {label(e.status)}</b><p style={{ whiteSpace: "pre-wrap" }}>{e.summary}</p><Typography.Text type="secondary">{new Date(e.at).toLocaleString("zh-CN")} · {SOURCE[e.source] || e.source}</Typography.Text></> }))} />
-              <Card size="small" title="记录回复、拒收或下一步">
-                <Form form={eventForm} layout="vertical" disabled={!canWrite || busy} onFinish={(v) => act(async () => { eventKey.current ||= `manual:${crypto.randomUUID()}`; await api(`/api/leads/${leadId}/events`, json({ event_key: eventKey.current, kind: v.kind, channel: v.channel || null, occurred_at: v.occurred_at?.toISOString() || null, payload: { intent: v.intent || "unknown", summary: v.summary || "", contact_ref: v.contact_ref || null } })); eventKey.current = null; eventForm.resetFields(); setSuccess("结果已记录；回复会暂停待发任务，拒收会进入抑制。"); })}>
-                  <Space wrap align="start"><Form.Item name="kind" label="结果" rules={[{ required: true }]}><Select style={{ width: 150 }} options={[{ value: "reply", label: "客户已回复" }, { value: "reject", label: "拒绝联系" }, { value: "unsubscribe", label: "退订" }, { value: "bounce", label: "退信／无效" }, { value: "note", label: "沟通备注" }]} /></Form.Item><Form.Item name="channel" label="渠道"><Select allowClear style={{ width: 160 }} options={CHANNELS} /></Form.Item><Form.Item name="intent" label="客户意向"><Select allowClear style={{ width: 150 }} options={[{ value: "positive", label: "有兴趣" }, { value: "quote", label: "希望报价" }, { value: "later", label: "稍后联系" }, { value: "no", label: "无意向" }, { value: "unknown", label: "待明确" }]} /></Form.Item></Space>
-                  <Form.Item name="occurred_at" label="实际回复时间（可选）"><DatePicker showTime /></Form.Item><Form.Item name="contact_ref" label="对应联系值（退信或联系值抑制时填写）"><Input /></Form.Item><Form.Item name="summary" label="摘要／约定的下一步"><Input.TextArea rows={2} maxLength={1500} /></Form.Item><Button type="primary" htmlType="submit" loading={busy}>记录沟通结果</Button>
-                </Form>
-                <Button onClick={() => { setPrepare(true); }}>人工准备下一次跟进</Button><Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>已有未完成任务会复用；跟进时间只作提醒，不会自动发送。</Typography.Paragraph>
-              </Card>
-            </> },
-            { key: "records", label: "发送记录", children: <>
-              <Table<Activity["deliveries"][number]> size="small" rowKey="id" pagination={{ pageSize: 10 }} dataSource={[...activity.deliveries, ...activity.timeline.filter((e) => e.direction === "outbound" && e.source === "manual").map((e) => ({ id: e.id, task_id: e.id.replace("task:", ""), channel: e.channel || "", status: e.status, source: "manual", at: e.at, error: undefined, message_id: undefined }))]} columns={[{ title: "渠道", dataIndex: "channel", render: (v) => channelLabel(v) }, { title: "状态", dataIndex: "status", render: (v) => <Tag>{label(v)}</Tag> }, { title: "来源", dataIndex: "source", render: (v) => v === "manual" ? "人工回填" : v }, { title: "发生时间", dataIndex: "at", render: (v) => new Date(v).toLocaleString("zh-CN") }, { title: "详情", render: (_, r) => <>{r.error || r.message_id || "—"}{r.source === "mobile" && <MobileTask taskId={r.task_id} platform={mobilePlatform(r.channel, context.contacts.find(c => c.id === context.tasks.find(t => t.id === r.task_id)?.eligibility_id)?.contact_ref)} onChanged={refresh} />}
-                {!["manual", "mobile"].includes(r.source) && <Button readOnlySafe size="small" onClick={() => setApiTask(context.tasks.find((t) => t.id === r.task_id))}>查询／处理</Button>}</> }]} />
-            </> },
-          ]} />
+    <div className={`customer-workspace ${details ? "with-details" : ""}`}>
+      <Card size="small" title={`客户 · ${total}`} className="customer-list">
+        <Table<Customer> tableLayout="fixed" rowKey="id" showHeader={false} size="small" dataSource={rows} pagination={{current:page,pageSize:20,total,showSizeChanger:false,onChange:p => navigate({page:String(p)})}} rowClassName={r => r.id===leadId ? "communication-selected" : ""} columns={[{render:(_,r) => <button className="customer-row" disabled={editing || busy} onClick={() => navigate({lead:r.id,contact:undefined,task:undefined,draft:undefined})}>
+          <div className="customer-row-top"><b className="customer-name">{r.name}</b><Badge count={r.unread || 0} size="small" /></div>
+          <div className="customer-preview" title={r.last_message}>{r.last_message || "尚未发送消息"}</div>
+          <div className="customer-row-top"><Tag>{PROGRESS[r.progress.status]}</Tag><small>{r.last_at ? new Date(r.last_at).toLocaleString("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}) : r.postcode}</small></div>
+          {r.assigned_to && <small>负责人：{r.assigned_to}</small>}
+        </button>}]} />
+      </Card>
+      <Card size="small" className="customer-chat" title={context?.lead.name || "选择客户"} extra={<Button readOnlySafe size="small" onClick={() => setDetails(v => !v)}>{details ? "收起资料" : "客户资料"}</Button>}>
+        {!context ? <Empty description="从左侧选择客户，或在名单中发起沟通" /> : <>
+          <div className="conversation-toolbar"><Select aria-label="客户联系方式" placeholder="选择联系方式" value={contactId} disabled={editing || busy} style={{width:"100%"}} options={conversations.map(c => ({value:c.id,label:`${c.id==="unlinked" ? "未关联记录" : `${channelLabel(c.channel || "",c.contact_ref)} · ${c.contact_ref || "未填写"}`}${c.unread ? ` · ${c.unread} 条未读` : ""}`}))} onChange={id => {setContactId(id);setNotice(undefined);}} />
+          {selected && <Button readOnlySafe onClick={() => {replyForm.resetFields();eventKey.current=undefined;setReplyOpen(true);}}>记录回复</Button>}</div>
+          {conversation ? <ConversationTimeline readOnly={!canWrite} conversation={conversation} contacts={context.contacts} actions={taskActions} onLink={(eventId,contactId) => act(async () => {await api(`/api/communication/conversations/${leadId}/events/${eventId}/link`,json({contact_id:contactId}));})} /> : <Empty description="请在线索详情添加联系方式" />}
+          {selected && <div className="conversation-compose">
+            <div className="conversation-compose-heading"><b>写新消息</b><Typography.Text type="secondary">无需等待客户回复，可以继续联系</Typography.Text></div>
+            {!activeDraft && <Button type="primary" loading={busy} disabled={!canWrite} onClick={() => act(startDraft)}>写消息／继续草稿</Button>}
+            {Object.entries(drafts).map(([id,d]) => <div key={d.id} style={{display:id===contactId ? "block" : "none"}}>
+              <MessageComposer draft={d} assignees={owners} returnTo={back} sender={identity.sender} optOut={identity.optOut} lockedRecipient conversation onChange={value => setDrafts(old => ({...old,[id]:value}))} onWorkingChange={(key,active) => {if(active) working.current.add(key);else working.current.delete(key);setEditing(working.current.size>0);}} onResultChange={async result => {await refresh();if(result && result.status!=="manual") {setNotice(result.message);await startDraft();}}} />
+            </div>)}
+          </div>}
         </>}
-      </Card></Col>
-      <Col xs={24} xl={6}><Card size="small" title="客户资料与准备依据">
-        {!context ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中客户后展示" /> : <>
-          <Typography.Paragraph>{context.lead.address} {context.lead.postcode}</Typography.Paragraph>{context.lead.website && <p><a href={context.lead.website} target="_blank" rel="noreferrer">查看官网</a></p>}
-          <Space wrap><Link href={`/leads/${context.lead.id}?returnTo=${encodeURIComponent(back)}`}>完整线索详情</Link><Link href={`/leads/${context.lead.id}?returnTo=${encodeURIComponent(back)}#menu-files`}>补充／核对菜单</Link></Space>
-          <Typography.Title level={5}>已发现的联系方式</Typography.Title>
-          {context.contacts.length ? context.contacts.map((e) => <div key={e.id} style={{ padding: "8px 0", borderBottom: "1px solid #eee" }}><b>{channelLabel(e.channel, e.contact_ref)}</b><p style={{ overflowWrap: "anywhere", margin: "4px 0" }}>{e.contact_ref || "未填写"}</p><Tag color={e.suppressed ? "red" : (e.contact_conditions?.status || e.eligibility) === "allowed" ? "green" : "default"}>{e.suppressed ? "已抑制" : (e.contact_conditions?.status || e.eligibility) === "allowed" ? "联系依据已核对" : (e.contact_conditions?.status || e.eligibility) === "blocked" ? "不应联系" : "待补联系依据"}</Tag><ChannelConditions leadId={context.lead.id} contactId={e.id} contact={e.contact_ref} busy={busy || !canWrite} onChanged={refresh} /></div>) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无联系方式，请在线索详情补充" />}
-          <Typography.Title level={5}>菜单问题依据</Typography.Title>{context.analyses.length ? context.analyses.map((a) => <Typography.Paragraph key={a.id}>已审核 v{a.version}：{a.facts.join("；")}</Typography.Paragraph>) : <Typography.Paragraph type="secondary">还没有已审核、已确认的问题，准备抽屉会提示补齐，不能虚构营销理由。</Typography.Paragraph>}
-          <Typography.Title level={5}>文案与审批</Typography.Title>{context.contents.map((c) => <p key={c.id}>文案 v{c.version} · <Tag color={c.approved ? "green" : "default"}>{c.approved ? "审批有效" : "需核对／审批"}</Tag></p>)}
+      </Card>
+      {details && <Card size="small" title="客户资料" className="customer-details">
+        {!context ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> : <>
+          <p>{context.lead.address} {context.lead.postcode}</p>
+          {context.lead.website && <p><a href={context.lead.website} target="_blank" rel="noreferrer">查看官网</a></p>}
+          <p>负责人：<UserIdentity username={rows.find(r => r.id===leadId)?.assigned_to} /></p>
+          <Space wrap><Link href={`/leads/${leadId}?returnTo=${encodeURIComponent(back)}`}>完整门店资料</Link><Link href={`/leads/${leadId}?returnTo=${encodeURIComponent(back)}#menu-files`}>菜单资料</Link></Space>
+          <Collapse ghost style={{marginTop:16}} items={[{key:"contacts",label:`联系方式 · ${context.contacts.length}`,children:context.contacts.map(c => <div key={c.id} style={{marginBottom:16,overflowWrap:"anywhere"}}><b>{channelLabel(c.channel,c.contact_ref)}</b><p>{c.contact_ref}</p><ChannelConditions leadId={leadId} contactId={c.id} contact={c.contact_ref} busy={busy || !canWrite} onChanged={refresh} /></div>)},{key:"menu",label:"菜单分析",children:context.analyses.length ? context.analyses.map(a => <p key={a.id}>v{a.version} · {a.facts.join("；")}</p>) : "尚无已核对菜单，可先询问菜单或负责人"}]} />
         </>}
-      </Card></Col>
-    </Row>
-    <PrepareOutreach open={prepare} leadIds={leadId ? [leadId] : []} batchKey={batch} returnTo={back} initialChannel={channel || context?.drafts?.[0]?.channel || "email"} purpose="followup" onClose={() => { setPrepare(false); refresh().catch((e) => setError(e.message)); }} onChanged={() => refresh().catch((e) => setError(e.message))} />
+      </Card>}
+    </div>
+    <Modal title={`记录 ${channelLabel(selected?.channel || "",selected?.contact_ref)} 回复`} open={replyOpen} onCancel={() => setReplyOpen(false)} footer={null} destroyOnHidden>
+      <p style={{overflowWrap:"anywhere"}}>{selected?.contact_ref}</p><Form form={replyForm} layout="vertical" onFinish={v => act(async () => {eventKey.current ||= `manual:${crypto.randomUUID()}`;await api(`/api/communication/conversations/${leadId}/${contactId}/reply`,json({event_key:eventKey.current,kind:v.kind,summary:v.summary,occurred_at:v.occurred_at?.toISOString() || null}));setReplyOpen(false);setNotice("已记录到当前联系方式会话");})}>
+        <Form.Item name="kind" label="沟通结果" initialValue="reply"><Select options={[{value:"reply",label:"客户回复"},{value:"note",label:"沟通备注"},{value:"reject",label:"拒绝联系"},{value:"unsubscribe",label:"退订"},{value:"bounce",label:"退信／无效"}]} /></Form.Item>
+        <Form.Item name="summary" label="回复原文／备注" rules={[{required:true}]}><Input.TextArea rows={5} maxLength={10000} /></Form.Item><Form.Item name="occurred_at" label="实际回复时间（可选）"><DatePicker showTime /></Form.Item><Button type="primary" htmlType="submit" loading={busy}>保存回复</Button>
+      </Form>
+    </Modal>
     <Modal title="人工执行 · 打开平台不等于已发送" open={!!manual} onCancel={() => setManual(undefined)} footer={null} width={720}>
       {error && <Alert type="error" message={error} style={{ marginBottom: 12 }} />}
-      {manual && <><Alert type="info" showIcon message="复制已审批文案，到平台人工发送；实际发送后再回填时间。" /><Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginTop: 16 }}>{manual.text}</Typography.Paragraph><Space><Button disabled={busy} onClick={() => act(async () => { const fresh = await api<ManualPreview>(`/api/communication/tasks/${manual.task_id}/manual-open`, { method: "POST" }); setManual(fresh); await navigator.clipboard.writeText(fresh.text); setSuccess("已复制已审批文案，尚未记录为发送"); })}>复制已审批文案</Button>{manual.url && <a href={manual.url} target="_blank" rel="noreferrer">打开 {channelLabel(manual.channel)} 联系入口 ↗</a>}{manual.address && <Typography.Paragraph>人工邮寄地址：{manual.address}</Typography.Paragraph>}</Space>
-        <Form form={sentForm} layout="vertical" disabled={!canWrite || busy} style={{ marginTop: 20 }} onFinish={(v) => act(async () => { if (!confirmed) throw new Error("请先确认已经在平台实际发送"); await api(`/api/tasks/${manual.task_id}/sent`, json({ sent_at: v.sent_at.toISOString(), notes: v.notes })); setManual(undefined); setSuccess("已记录人工发送，客户进展已更新"); })}><Form.Item name="sent_at" label="实际发送时间" rules={[{ required: true }]}><DatePicker showTime /></Form.Item><Form.Item name="notes" label="发送备注"><Input.TextArea maxLength={1500} /></Form.Item><Checkbox checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)}>我已在平台实际发送，并核对收件人和内容</Checkbox><Button type="primary" htmlType="submit" disabled={!confirmed} loading={busy} style={{ marginLeft: 12 }}>记录已人工发送</Button></Form></>}
+      {manual && <><Alert type="info" showIcon message="复制已审批文案，到平台人工发送；实际发送后再回填时间。" /><Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginTop: 16 }}>{manual.text}</Typography.Paragraph><Space><Button disabled={busy} onClick={() => act(async () => { const fresh = await api<ManualPreview>(`/api/communication/tasks/${manual.task_id}/manual-open`, { method: "POST" }); setManual(fresh); await navigator.clipboard.writeText(fresh.text); setNotice("已复制已审批文案，尚未记录为发送"); })}>复制已审批文案</Button>{manual.url && <a href={manual.url} target="_blank" rel="noreferrer">打开 {channelLabel(manual.channel)} 联系入口 ↗</a>}</Space>
+        <Form form={sentForm} layout="vertical" disabled={!canWrite || busy} style={{ marginTop: 20 }} onFinish={(v) => act(async () => { if (!confirmed) throw new Error("请先确认已经在平台实际发送"); await api(`/api/tasks/${manual.task_id}/sent`, json({ sent_at: v.sent_at.toISOString(), notes: v.notes })); setManual(undefined); setNotice("已记录人工发送，客户进展已更新"); })}><Form.Item name="sent_at" label="实际发送时间" rules={[{ required: true }]}><DatePicker showTime /></Form.Item><Form.Item name="notes" label="发送备注"><Input.TextArea maxLength={1500} /></Form.Item><Checkbox checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)}>我已在平台实际发送，并核对收件人和内容</Checkbox><Button type="primary" htmlType="submit" disabled={!confirmed} loading={busy} style={{ marginLeft: 12 }}>记录已人工发送</Button></Form></>}
     </Modal>
     <Drawer title="接口预览与发送记录" width={1000} open={!!apiTask} onClose={() => setApiTask(undefined)} destroyOnHidden>
-      {apiTask?.channel === "email" ? <GmailOutreach tasks={[apiTask]} name={rename} onChanged={refresh} focusTaskId={apiTask.id} /> : apiTask && <SocialOutreach tasks={[apiTask]} name={rename} onChanged={refresh} focusTaskId={apiTask.id} />}
+      {apiTask?.channel === "email" ? <GmailOutreach tasks={[apiTask]} name={((id:string) => context?.lead.id===id ? context.lead.name : id)} onChanged={refresh} focusTaskId={apiTask.id} /> : apiTask && <SocialOutreach tasks={[apiTask]} name={((id:string) => context?.lead.id===id ? context.lead.name : id)} onChanged={refresh} focusTaskId={apiTask.id} />}
     </Drawer>
     <Modal title="抑制名单" open={!!suppression} onCancel={() => setSuppression(null)} footer={null} width={850}><Table rowKey="id" dataSource={suppression || []} columns={[{ title: "客户", dataIndex: "lead_id" }, { title: "联系值", dataIndex: "contact_ref" }, { title: "原因", dataIndex: "reason" }, { title: "时间", dataIndex: "created_at" }]} /></Modal>
-    <style>{`.communication-selected td { background: #fff4f0 !important; }`}</style>
+    <style>{`
+      .customer-workspace {display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px;align-items:start}
+      .customer-workspace.with-details {grid-template-columns:260px minmax(0,1fr) 280px}
+      .customer-workspace > * {min-width:0;max-width:100%}
+      .customer-list {overflow:hidden}
+      .customer-list .ant-table-wrapper,.customer-list .ant-table-container {min-width:0;max-width:100%}
+      .customer-list .ant-table-content {max-height:650px;overflow-y:auto!important;overflow-x:hidden!important}
+      .customer-list table {width:100%!important;table-layout:fixed}
+      .customer-name {min-width:0;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+      .customer-preview {width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#888;margin:6px 0}
+      .customer-row-top > .ant-badge {flex-shrink:0}
+      .customer-row {box-sizing:border-box;min-width:0;max-width:100%;display:block;text-align:left;border:0;background:transparent;width:100%;padding:12px 4px;cursor:pointer;color:inherit}
+      .customer-row:disabled {cursor:wait;opacity:.7}
+      .customer-row-top {min-width:0;display:flex;justify-content:space-between;gap:8px;align-items:start}
+      .communication-selected td {background:#fff4f0!important;border-left:3px solid #cf010e}
+      .customer-list .ant-card-body {padding:0 8px}
+      .customer-list .ant-table-cell {padding:0 8px!important}
+      .conversation-toolbar {display:flex;gap:8px;padding-bottom:14px;border-bottom:1px solid #eee}
+      .conversation-history {height:420px;overflow:auto;padding:16px 8px;background:#faf9f7;border-radius:8px;margin-top:12px}
+      .conversation-message {display:flex;flex-direction:column;align-items:flex-start;margin:0 0 18px}
+      .conversation-message.outbound {align-items:flex-end}
+      .conversation-message-meta {font-size:12px;color:#888;margin-bottom:6px}
+      .conversation-bubble {max-width:90%;padding:12px 16px;background:white;border:1px solid #eee;border-radius:12px;min-width:180px}
+      .outbound .conversation-bubble {background:#fff3ef;border-color:#f4ddd6}
+      .note .conversation-bubble {background:#f6f6f6}
+      .conversation-compose {border-top:1px solid #eee;margin-top:16px;padding-top:16px}
+      .conversation-compose-heading {display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+      .customer-chat {overflow:hidden}
+      .customer-chat .ant-card-head-title {white-space:normal;overflow-wrap:anywhere}
+      .conversation-toolbar > .ant-select {min-width:0;flex:1}
+      .conversation-toolbar > button {flex-shrink:0}
+      .conversation-bubble {box-sizing:border-box;min-width:0;overflow-wrap:anywhere}
+      .customer-chat .outreach-editor > .ant-card-body {padding:0}
+      .customer-chat .ant-space {max-width:100%}
+      .customer-chat .ant-space-item {min-width:0;max-width:100%}
+      @media(max-width:1400px){.customer-workspace.with-details {grid-template-columns:240px minmax(0,1fr)}.customer-details {grid-column:2}}
+      @media(max-width:900px){.customer-workspace,.customer-workspace.with-details {grid-template-columns:minmax(0,1fr)}.customer-details {grid-column:auto}.customer-list {max-height:300px;overflow:auto}.conversation-bubble {max-width:96%}}
+    `}</style>
   </>;
 }
-export default function TasksPage() { return <Suspense fallback={<p>读取沟通工作台…</p>}><TasksInner /></Suspense>; }
+function TasksRoute() {const params=useSearchParams();return <TasksInner key={params.get("lead") || "none"} />;}
+export default function TasksPage() {return <Suspense fallback={<p>读取客户沟通…</p>}><TasksRoute /></Suspense>;}
