@@ -267,7 +267,7 @@ def confirm(
                 "task_id": str(task.id),
                 "job_id": str(job.id),
                 "status": "mobile_queued",
-                "message": "已交给手机。请在手机领取并核对执行，结果将回到本门店；尚未发送",
+                "message": "已交给手机。开启自动执行后，手机会领取并执行；结果将回到本门店，当前尚未确认发送",
             }
         db.commit()
         if d.execution_mode == "mobile":

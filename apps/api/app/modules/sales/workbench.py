@@ -41,6 +41,13 @@ Mode = Literal["manual", "gmail", "social", "mobile"]
 SENT = (TaskStatus.sent_manual, TaskStatus.sent_email, TaskStatus.sent_social)
 
 
+def message_matches(piece: ContentPiece, channel: str, recipient: uuid.UUID | None) -> bool:
+    spec = piece.spec or {}
+    return (not spec.get("channel") or spec["channel"] == channel) and (
+        not spec.get("recipient_id") or spec["recipient_id"] == str(recipient)
+    )
+
+
 class PrepareIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lead_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
@@ -397,6 +404,8 @@ def assess(
     elif piece.lead_id != draft.lead_id or piece.kind != ContentKind.message_short:
         blockers.append("文案与客户不一致或不是短文案")
     else:
+        if not message_matches(piece, draft.channel, draft.eligibility_id):
+            blockers.append("消息面向其他渠道或联系人，请为当前收件人重新起草")
         valid, why = (
             content_service.approval_valid(db, piece)
             if require_approval
@@ -603,6 +612,9 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                 if d is not None and body.eligibility_id:
                     d.eligibility_id = body.eligibility_id
                     d.purpose = body.purpose
+                    previous = db.get(ContentPiece, d.content_id) if d.content_id else None
+                    if previous and not message_matches(previous, d.channel, d.eligibility_id):
+                        d.content_id = None
                 if d is None:
                     contacts = list(
                         db.scalars(
@@ -640,6 +652,8 @@ def prepare(body: PrepareIn, db: Session = Depends(get_db), op: Operator = Depen
                         status="draft",
                         created_by=op.username,
                     )
+                    if content and not message_matches(content, d.channel, d.eligibility_id):
+                        d.content_id = None
                     db.add(d)
                     db.flush()
                     audit.record(
@@ -697,6 +711,10 @@ def patch_draft(
         content = db.get(ContentPiece, changes["content_id"])
         if content is None or content.lead_id != d.lead_id or content.kind != ContentKind.message_short:
             raise HTTPException(422, "所选短文案不属于该客户")
+    if "eligibility_id" in changes and "content_id" not in changes and d.content_id:
+        previous = db.get(ContentPiece, d.content_id)
+        if previous and not message_matches(previous, d.channel, changes["eligibility_id"]):
+            changes["content_id"] = None
     for key, value in changes.items():
         setattr(d, key, value)
     audit.record(

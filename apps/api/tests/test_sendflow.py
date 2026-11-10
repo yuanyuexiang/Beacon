@@ -224,3 +224,23 @@ def test_social_manual_unknown_source_uses_explicit_recipient_confirmation(clien
     service.check_can_contact(db, contact, db.get(ContentPiece, task.content_id))
     assert contact.eligibility == Eligibility.unknown
     assert calls == []
+
+
+def test_prepare_does_not_reuse_message_for_another_channel(client, db, monkeypatch):
+    draft, _ = setup(client, db, monkeypatch)
+    piece = db.get(ContentPiece, draft["content_id"])
+    piece.spec = {**(piece.spec or {}), "channel": "email", "recipient_id": draft["eligibility_id"]}
+    db.commit()
+    social = prepare(client, draft["lead_id"], channel="facebook", execution_mode="mobile")["draft"]
+    assert social["content_id"] is None
+    assert db.get(ContentPiece, draft["content_id"]) is not None
+
+
+def test_preview_explains_mismatched_message_before_final_confirm(client, db, monkeypatch):
+    draft, _ = setup(client, db, monkeypatch)
+    piece = db.get(ContentPiece, draft["content_id"])
+    piece.spec = {**(piece.spec or {}), "channel": "facebook"}
+    db.commit()
+    preview = client.post(f"/api/communication/drafts/{draft['id']}/preview").json()
+    assert any("其他渠道或联系人" in issue for issue in preview["issues"])
+    assert not db.scalar(select(ManualTask.id))
