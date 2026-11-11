@@ -103,7 +103,7 @@ object PlatformAdapters {
       if (n.isEditable || afterOutgoing && bounds.top < (anchor ?: Int.MAX_VALUE)) null
       else if (r.packageName?.toString() in packages["facebook"].orEmpty()) {
         ReplyCapturePolicy.facebook(n.contentDescription?.toString().orEmpty(), title, body,
-          bounds.left - screen.left + screen.width() * .04 < screen.right - bounds.right)
+          ReplyCapturePolicy.incomingAligned(bounds.left - screen.left, screen.right - bounds.right))
       } else if (id(n).contains(Regex("incoming_message|received_text|message_in_text"))) {
         n.text?.toString()?.trim()?.takeIf { it.isNotBlank() && it != body && it.length <= 4000 }
       } else null

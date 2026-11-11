@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ReplyCapturePolicyTest {
+  @Test fun wideFacebookReplyStillHasIncomingDirection() {
+    assertTrue(ReplyCapturePolicy.incomingAligned(159, 177))
+    assertFalse(ReplyCapturePolicy.incomingAligned(320, 68))
+    assertFalse(ReplyCapturePolicy.incomingAligned(159, 159))
+    assertEquals("Hi, thanks", ReplyCapturePolicy.facebook(", Hi, thanks", "Old Masons Arms", "Hello", ReplyCapturePolicy.incomingAligned(159, 177)))
+  }
+  @Test fun immediateReplyRequiresStableNewText() {
+    assertEquals(emptyList<String>(), ReplyCapturePolicy.stableIncoming(emptySet(), listOf("Thanks"), emptySet()) { it })
+    assertEquals(listOf("Thanks"), ReplyCapturePolicy.stableIncoming(setOf("Thanks"), listOf("Thanks", "Thanks"), emptySet()) { it })
+    assertEquals(emptyList<String>(), ReplyCapturePolicy.stableIncoming(setOf("Thanks"), listOf("Thanks"), setOf("Thanks")) { it })
+    assertEquals(emptyList<String>(), ReplyCapturePolicy.stableIncoming(setOf("Old"), listOf("Changed"), emptySet()) { it })
+  }
+
   @Test fun facebookIncomingRequiresConversationSender() {
     assertEquals("Thank you\nPlease call us", ReplyCapturePolicy.facebook("The Dutch Mill Hotel, Thank you\nPlease call us，双击可查看收发日期和时间", "The Dutch Mill Hotel", "Hello"))
     assertNull(ReplyCapturePolicy.facebook("You, Hello", "The Dutch Mill Hotel", "Hello"))

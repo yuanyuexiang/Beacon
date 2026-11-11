@@ -346,10 +346,42 @@ class PhoneService : AccessibilityService() {
           try { settle(j, if (uncertain) "unknown" else if (e is ExecutionFailure) e.outcome else if (e is ContactUnavailable) "unavailable" else if (e is NeedsPhoneAction) "needs_action" else "failed", e.message?.take(500) ?: "执行中断") } catch (_: Exception) { }
         }
       } finally {
+        try { captureImmediateReplies(j) } catch (_: Exception) { /* Reply queue retries independently of sending. */ }
         try { returnToBeacon(j) } catch (_: Exception) { /* Saved result remains authoritative. */ }
         running = false
       }
     }
+  }
+  // Foreground chats often suppress notifications. Read the confirmed conversation
+  // before leaving it, independently of the already persisted send result.
+  private fun captureImmediateReplies(j: JSONObject) {
+    if (j.optString("outcome") != "sent") return
+    val snapshot = j.optJSONObject("snapshot") ?: return
+    val channel = snapshot.optString("channel", "whatsapp")
+    val enabled = org.json.JSONArray(NotificationMonitor.channels(this))
+    if (!(0 until enabled.length()).any { enabled.optString(it) == channel }) return
+    val seen = j.optJSONArray("_reply_seen") ?: org.json.JSONArray()
+    val known = (0 until seen.length()).map { seen.optString(it) }.toMutableSet()
+    var previous = emptySet<String>()
+    repeat(4) {
+      if (!ConnectionService.unlocked(this) || Vault(this).disconnected()) return
+      val texts = ui {
+        val r = rootInActiveWindow ?: return@ui emptyList<String>()
+        if (r.packageName?.toString() !in PlatformAdapters.packages[channel].orEmpty() ||
+            PlatformAdapters.flatten(r).any { it.isPassword }) return@ui emptyList<String>()
+        PlatformAdapters.incoming(r, snapshot, true)
+      }
+      val stable = ReplyCapturePolicy.stableIncoming(previous, texts, known, ::replyHash)
+      for (body in stable) {
+        NotificationMonitor.foreground(this, j, body)
+        known.add(replyHash(body))
+      }
+      previous = texts.toSet()
+      Thread.sleep(1000)
+    }
+    j.put("_reply_policy", 2).put("_reply_seen", org.json.JSONArray(known.toList().takeLast(100)))
+    Journal(this).use { it.save(j) }
+    NotificationMonitor.flush(this)
   }
   // Returning is presentation only: never change or repeat the saved execution result.
   private fun returnToBeacon(j: JSONObject) {
