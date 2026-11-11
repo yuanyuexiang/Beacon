@@ -316,11 +316,11 @@ export default function LeadDetail() {
           <Descriptions size="small" column={2} items={[
             { key: "created", label: "首次加入系统", children: displayTime(lead.created_at) },
             { key: "updated", label: "最近记录更新", children: displayTime(lead.list_summary?.updated_at || lead.updated_at) },
-            ...([["website", "最近官网核验"], ["contacts", "最近查找联系方式"], ["menus", "最近菜单获取"], ["analysis", "当前菜单分析创建"]] as const).map(([key, label]) => ({ key, label, children: displayTime(lead.list_summary?.activity_times?.[key]) })),
+            ...([["website", "最近网站同步"], ["contacts", "最近查找联系方式"], ["menus", "最近菜单获取"], ["analysis", "当前菜单分析创建"]] as const).map(([key, label]) => ({ key, label, children: displayTime(lead.list_summary?.activity_times?.[key]) })),
           ]} />
-          <Typography.Text type="secondary">核验与查找时间包含失败尝试，请结合资料状态查看。历史未记录的时间不推算；时间按当前设备时区显示。</Typography.Text>
+          <Typography.Text type="secondary">同步与查找时间包含失败尝试，请结合资料状态查看。历史未记录的时间不推算；时间按当前设备时区显示。</Typography.Text>
         </Card>      <Card size="small" title="门店资料" style={{ marginBottom: 16 }}>
-        {websiteConflict && <Alert type="warning" message="官网已有更新，当前输入尚未保存" description="请选择采用已更新的官网，或明确保留你的输入，避免覆盖新资料。" action={<Space><Button onClick={() => { form.setFields([{ name: "website", value: lead.website, touched: false }]); setWebsiteConflict(false); }}>采用最新官网</Button><Button onClick={() => setWebsiteConflict(false)}>保留我的输入</Button></Space>} style={{ marginBottom: 12 }} />}
+        {websiteConflict && <Alert type="warning" message="网站已有更新，当前输入尚未保存" description="请选择采用已更新的网站，或明确保留你的输入，避免覆盖新资料。" action={<Space><Button onClick={() => { form.setFields([{ name: "website", value: lead.website, touched: false }]); setWebsiteConflict(false); }}>采用最新网站</Button><Button onClick={() => setWebsiteConflict(false)}>保留我的输入</Button></Space>} style={{ marginBottom: 12 }} />}
         <Form
           form={form}
           disabled={me?.role === "viewer"}
@@ -330,7 +330,7 @@ export default function LeadDetail() {
           onFinish={(v) => { if (websiteConflict) return; const changes = Object.fromEntries(Object.entries(v).filter(([k, value]) => value !== lead[k as keyof Lead])); if ("website" in changes) changes.expected_website = lead.website; api(`/api/leads/${id}`, json(changes, "PATCH")).then(() => { form.resetFields(); message.success("已保存"); void reload(); }).catch(err); }}
         >
           <Row gutter={16}>
-            <Col xs={24} md={9}><Form.Item name="website" label="官网" extra={lead.website_source ? `来源：${lead.website_source}` : undefined}><Input placeholder="https://" /></Form.Item></Col>
+            <Col xs={24} md={9}><Form.Item name="website" label="网站" extra={lead.website_source ? `来源：${lead.website_source}` : undefined}><Input placeholder="https://" /></Form.Item></Col>
             <Col xs={24} md={5}><Form.Item name="screening_class" label="筛选分类"><Select options={SCREENING.map((s) => ({ value: s, label: SCREEN_ZH[s] ?? s }))} /></Form.Item></Col>
             <Col xs={24} md={10}><Form.Item name="screening_reason" label="筛选原因"><Input /></Form.Item></Col>
           </Row>
@@ -340,10 +340,9 @@ export default function LeadDetail() {
           </div>
         </Form>
       </Card>
-<Collapse items={[{ key: "source", label: "数据来源", children: <><p>{lead.manual_entry ? "用户手动录入" : lead.source_key}</p>{lead.manual_entry && <Descriptions column={1} items={[{key:"region",label:"录入地区",children:lead.manual_entry.region || "—"},{key:"contact",label:"联系人",children:lead.manual_entry.contact_name || "—"},{key:"notes",label:"备注",children:<span style={{whiteSpace:"pre-wrap"}}>{lead.manual_entry.notes || "—"}</span>},{key:"by",label:"录入人",children:lead.manual_entry.created_by}]} />}</> }]} style={{ marginBottom: 16 }} />      <Card title="官网与经营类型" style={{ marginBottom: 16 }}>
+<Collapse items={[{ key: "source", label: "数据来源", children: <><p>{lead.manual_entry ? "用户手动录入" : lead.source_key}</p>{lead.manual_entry && <Descriptions column={1} items={[{key:"region",label:"录入地区",children:lead.manual_entry.region || "—"},{key:"contact",label:"联系人",children:lead.manual_entry.contact_name || "—"},{key:"notes",label:"备注",children:<span style={{whiteSpace:"pre-wrap"}}>{lead.manual_entry.notes || "—"}</span>},{key:"by",label:"录入人",children:lead.manual_entry.created_by}]} />}</> }]} style={{ marginBottom: 16 }} />      <Card title="网站与经营类型" style={{ marginBottom: 16 }}>
         <WebsiteReview lead={lead} onChanged={() => reload().catch(err)} />
-        {lead.verified_websites?.map((w) => <p key={w.url}>经官网原文验证：<a href={w.url} target="_blank" rel="noreferrer">{w.url}</a></p>)}
-        {lead.website_history?.map((w) => <p key={w.url}>历史官网（{w.source ?? "原记录"}）：<a href={w.url} target="_blank" rel="noreferrer">{w.url}</a></p>)}
+        {lead.website_history?.map((w) => <p key={w.url}>历史网站（{w.source ?? "原记录"}）：<a href={w.url} target="_blank" rel="noreferrer">{w.url}</a></p>)}
       </Card>
       <Collapse style={{ marginBottom: 16 }} items={[{ key: "research-tools", label: "补充来源与查询工具", children: <>      <AutoResearch key={`auto-${id}`} id={id} onFinished={async () => { setContactLookup(null); setContactPicked([]); await reload(); }} />
       <GooglePlaces key={`${id}:${JSON.stringify(lead.google_enrichment)}`} id={id} name={lead.name} address={lead.address} postcode={lead.postcode} website={lead.website} onWebsiteChanged={async () => { setContactLookup(null); setContactPicked([]); await reload(); }} /></> }]} />

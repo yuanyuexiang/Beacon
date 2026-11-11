@@ -100,7 +100,7 @@ def test_list_completeness_tracks_actual_results_and_current_menu(client, db):
     lead.website = "https://new.example"
     db.commit()
     assert summary()["analysis"] == "pending"
-    assert summary()["website"] == "pending"
+    assert summary()["website"] == "done"
 
 
 def test_list_completeness_does_not_call_failed_scan_complete(client, db):

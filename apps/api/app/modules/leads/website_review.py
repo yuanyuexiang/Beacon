@@ -38,7 +38,7 @@ def manual(lead: Lead) -> bool:
 
 def automatic(lead: Lead) -> bool:
     return not manual(lead) and (lead.website_source or "").startswith(
-        ("overture:", "Overture", "官网原文 AI 核验", "AI 证据核对 + 程序校验")
+        ("overture:", "Overture", "Google Places 来源同步", "官网原文 AI 核验", "AI 证据核对 + 程序校验")
     )
 
 

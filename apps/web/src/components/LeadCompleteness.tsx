@@ -6,7 +6,7 @@ import type { ListSummary } from "@/lib/lead-list";
 import { channelLabel } from "@/lib/format";
 
 const items = [
-  ["website", "门店与官网", "官网核验结果；有网址不代表已核验"],
+  ["website", "门店与网站", "已保存来源网站，可直接使用"],
   ["contacts", "联系方式", "已记录联系方式，不代表已允许发送"],
   ["menus", "菜单获取", "已获取或上传菜单；没有菜单也可准备触达"],
   ["analysis", "菜单分析", "当前菜单文件的分析结果；人工核对另行进行"],
@@ -23,7 +23,7 @@ export default function LeadCompleteness({ id, summary, returnTo }: { id: string
     {items.map(([key, title, help]) => {
       const state = states[summary?.completeness?.[key] || "pending"] || states.pending;
       const detail = key === "contacts" ? summary?.channels.map((c) => channelLabel(c)).join("／") : "";
-      return <Tooltip key={key} title={`${title}：${state.text}。${help}；${({ website: "最近核验", contacts: "最近查找", menus: "最近获取", analysis: "分析创建" })[key]}：${displayTime(summary?.activity_times?.[key])}${detail ? `；${detail}` : ""}`}>
+      return <Tooltip key={key} title={`${title}：${state.text}。${help}；${({ website: "最近同步", contacts: "最近查找", menus: "最近获取", analysis: "分析创建" })[key]}：${displayTime(summary?.activity_times?.[key])}${detail ? `；${detail}` : ""}`}>
         <Link href={`/leads/${id}?returnTo=${encodeURIComponent(returnTo)}&section=${key}`} aria-label={`${title}：${state.text}`} style={{ color: state.color, whiteSpace: "nowrap" }}>
           <span aria-hidden style={{ marginRight: 5 }}>{state.icon}</span>{title}
         </Link>

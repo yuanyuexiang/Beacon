@@ -31,7 +31,7 @@ export default function LeadPolicySettings({ section = "screen" }: { section?: "
         <Form.Item name="google_mode" label="当前官网查询策略"><Select style={{ width: 260 }} options={[{ value: "off", label: "关闭" }, { value: "needed", label: "Google 优先：首次、过期或异常时查询" }, { value: "all", label: "本次名单全部查询" }]} /></Form.Item>
         <Form.Item name="stale_days" label="来源数据复用天数" rules={[{ required: true }]}><InputNumber min={1} max={365} /></Form.Item>
       </Space>
-      <Alert type="info" message="同步阶段先保存 Overture 和 Google 官网候选；AI 核验与完善可稍后对整批或所选门店执行。近期结果复用，失败保留旧成果，人工官网不覆盖。关闭 Google 仍可核验已有官网。Google 项目级每分钟与每日调用保护仍生效。" style={{ marginBottom: 16 }} />
+      <Alert type="info" message="同步 Overture 和 Google 网站资料后直接使用，不再单独核验网站身份。Google 来源优先，人工及导入网站保留；近期结果复用，失败保留已有成果。" style={{ marginBottom: 16 }} />
       </div><div hidden={section !== "screen"}><Space align="start" wrap><Form.Item name="auto_admission_enabled" label="AI 自动准入" valuePropName="checked"><Switch /></Form.Item><Form.Item name="corporate_email_auto" label="英国公司通用业务邮箱自动准入" valuePropName="checked"><Switch /></Form.Item><Form.Item name="admission_valid_days" label="自动准入复核天数"><InputNumber min={1} max={90} /></Form.Item></Space>
       <Alert type="info" message="AI 核实公司运营主体与联系方式，规则引擎决定是否允许；电话缺 TPS／CTPS、个人邮箱缺适用依据及平台缺会话授权时列出缺项，不推测放行。人工审核结果保留，自动允许仍需文案审批、发送身份与退出说明，发送前再次复查。" style={{ marginBottom: 16 }} />
       </div><Button type="primary" htmlType="submit" loading={busy}>保存策略</Button>

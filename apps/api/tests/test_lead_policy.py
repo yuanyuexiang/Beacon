@@ -60,7 +60,8 @@ def test_workflow_freezes_policy_and_google_skips_when_unconfigured(client, db):
     original = task.params["policy"]
     policy.save_policy(saved.model_copy(update={"cafe_action": "exclude"}), db, db.scalar(select(Operator)))
     assert task.params["policy"] == original
-    task.step = task.steps.index("google")
+    task.steps = ["google"]  # 显式覆盖旧核验器兼容测试；新流程只做来源同步。
+    task.step = 0
     task.results = [{}, {}]
     db.commit()
     result = places_enrichment.advance(db, batch, task)
@@ -103,7 +104,8 @@ def test_google_chunk_saves_only_ids_and_budget_does_not_block(client, db, monke
     batch, lead = setup_lead(client, db)
     monkeypatch.setattr(get_settings(), "google_places_api_key", "test")
     task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
-    task.step = task.steps.index("google")
+    task.steps = ["google"]  # 显式覆盖旧核验器兼容测试；新流程只做来源同步。
+    task.step = 0
     task.results = [{}]
     db.commit()
 
@@ -206,7 +208,8 @@ def test_google_chunk_resume_does_not_repeat_completed_leads(client, db, monkeyp
     upload(client, "policy", "fhrsid,name\n2,Other Cafe\n3,Third Cafe\n")
     monkeypatch.setattr(get_settings(), "google_places_api_key", "test")
     task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
-    task.step = task.steps.index("google")
+    task.steps = ["google"]  # 显式覆盖旧核验器兼容测试；新流程只做来源同步。
+    task.step = 0
     task.results = [{}]
     db.commit()
     calls = []
@@ -248,7 +251,8 @@ def test_old_exhausted_workflow_can_continue_without_new_task(client, db, monkey
     batch, lead = setup_lead(client, db)
     monkeypatch.setattr(get_settings(), "google_places_api_key", "test")
     task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
-    task.step = task.steps.index("google")
+    task.steps = ["google"]  # 显式覆盖旧核验器兼容测试；新流程只做来源同步。
+    task.step = 0
     lead.raw = {
         "places_enrichment": {
             "strategy_version": places_enrichment.STRATEGY_VERSION,

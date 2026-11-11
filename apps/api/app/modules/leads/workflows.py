@@ -169,7 +169,7 @@ def start(db: Session, batch: Batch, body: WorkflowIn, by: str) -> Workflow:
         batch_id=batch.id,
         kind=body.kind,
         steps=(
-            ["google", "screen", "contacts"]
+            ["google_sync", "screen", "contacts"]
             if params["phase"] == "review"
             else (["pool"] if body.kind != "enrich" else []) + ["overture", "google_sync"]
         ),
@@ -252,19 +252,10 @@ def advance(db: Session, batch: Batch, task: Workflow) -> Workflow:
                     raise
                 db.rollback()
                 result = {"note": "Overture 补充未完成，已有资料保留；继续 Google 补充，可稍后再次同步"}
-        elif stage == "google_sync":
+        elif stage == "google_sync" or stage == "google":
             from app.modules.leads import source_sync
 
             result = source_sync.advance(db, batch, task)
-            if not result["done"]:
-                task.results = task.results[: task.step] + [result]
-                task.status = "pending"
-                save_progress(db, task)
-                return task
-        elif stage == "google":
-            from app.modules.leads import places_enrichment
-
-            result = places_enrichment.advance(db, batch, task)
             if not result["done"]:
                 task.results = task.results[: task.step] + [result]
                 task.status = "pending"

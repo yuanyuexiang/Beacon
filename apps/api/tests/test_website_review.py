@@ -50,7 +50,8 @@ def test_existing_website_works_without_google_and_keeps_mixed_operation(client,
     batch, lead = setup_lead(client, db)
     monkeypatch.setattr(get_settings(), "google_places_api_key", None)
     task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
-    task.step = task.steps.index("google")
+    task.steps = ["google"]
+    task.step = 0
     task.results = [{} for _ in range(task.step)]
     result = places_enrichment.advance(db, batch, task)
     assert result["verified"] == 1 and result["done"]
@@ -220,7 +221,8 @@ def test_google_budget_does_not_stop_existing_website_ai(client, db, monkeypatch
     monkeypatch.setattr(google_places, "_client", lambda *a, **k: Capped())
     task = workflows.start(db, batch, workflows.WorkflowIn(phase="review"), "tester")
     task.params = {**task.params, "policy": {**task.params["policy"], "google_mode": "all"}}
-    task.step = task.steps.index("google")
+    task.steps = ["google"]
+    task.step = 0
     task.results = [{} for _ in range(task.step)]
     first = places_enrichment.advance(db, batch, task)
     assert first["google_exhausted"] and first["verified"] == 1 and not first["done"]

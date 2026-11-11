@@ -64,7 +64,7 @@ def fresh(value: str | None, days: int) -> bool:
 def items(db: Session, lead: Lead) -> list[dict]:
     raw = lead.raw or {}
     days = policy.current(db).stale_days
-    review = raw.get("website_research") or {}
+    source = raw.get("source_sync") or {}
     scan = raw.get("contacts_scan") or {}
     assets = list(db.scalars(select(MenuAsset).where(MenuAsset.lead_id == lead.id)))
     fetched = [a for a in assets if a.fetch_status == "fetched"]
@@ -76,10 +76,10 @@ def items(db: Session, lead: Lead) -> list[dict]:
     checks = [
         (
             "website",
-            "门店与官网",
-            not lead.website or website_review.needed(lead, days) or review.get("status") != "verified",
-            review.get("checked_at"),
-            review.get("reason") or ("已有官网，可继续核验最新资料" if lead.website else "尚未取得官网"),
+            "门店与网站",
+            not lead.website,
+            source.get("fetched_at"),
+            "已保存网站，可直接使用；刷新可更新来源资料" if lead.website else "尚未取得网站",
         ),
         (
             "contacts",
@@ -117,7 +117,7 @@ def items(db: Session, lead: Lead) -> list[dict]:
         record = (raw.get("single_enrichment") or {}).get(item["key"]) or {}
         if record and record.get("snapshot") == website_review.snapshot(lead):
             item["updated_at"] = record.get("at") or item["updated_at"]
-            if record.get("status") == "failed":
+            if record.get("status") == "failed" and item["key"] != "website":
                 item["needed"] = True
                 item["description"] = record.get("message") or item["description"]
             elif item["key"] == "menus" and fetched and fresh(record.get("at"), days):
@@ -230,7 +230,7 @@ def cancel(
 
 
 def execute_item(db: Session, batch: Batch, task: workflows.Workflow, lead: Lead, op: Operator, key: str) -> str:
-    from app.modules.leads import auto_research, places_enrichment, source_sync
+    from app.modules.leads import auto_research, source_sync
     from app.modules.sales import contacts
 
     refresh = task.params.get("mode") == "refresh"
@@ -239,21 +239,20 @@ def execute_item(db: Session, batch: Batch, task: workflows.Workflow, lead: Lead
         try:
             service.enrich_overture(db, batch, lead_ids=[str(lead.id)])
         except Exception:
-            db.rollback()  # 来源故障不阻断 Google／既有官网核验。
+            db.rollback()  # 来源故障不阻断 Google／既有网站使用。
             db.refresh(lead)
         selected = policy.Policy.model_validate(task.params["policy"])
-        if refresh and selected.google_mode != "off":
-            from app.core.config import get_settings
+        source_sync.apply_saved(lead)
+        from app.core.config import get_settings
 
-            if get_settings().google_places_api_key:
-                source_sync.sync_one(db, lead, op, str(task.id))
-        outcome = places_enrichment.review_one(db, lead, op, selected, str(task.id), force=refresh)
+        if (
+            selected.google_mode != "off"
+            and get_settings().google_places_api_key
+            and (refresh or not source_sync.fresh(lead, selected.stale_days))
+        ):
+            source_sync.sync_one(db, lead, op, str(task.id))
         db.commit()
-        if outcome != "verified":
-            raise ValueError(
-                ((lead.raw or {}).get("website_research") or {}).get("reason") or "官网核验未完成，可查看来源与历史"
-            )
-        return "已更新门店与官网；人工确认资料保留"
+        return "已更新门店与网站；人工及导入资料保留" if lead.website else "来源未提供网站，可手动补充"
     if key == "contacts":
         result = contacts.collect(db, lead)
         db.commit()
@@ -261,7 +260,7 @@ def execute_item(db: Session, batch: Batch, task: workflows.Workflow, lead: Lead
             raise ValueError(result.get("ai_reason") or "部分官网页面未读取，已取得的候选保留")
         return f"已查找 {result['found']} 项候选，新增记录 {result['recorded']} 项"
     if key == "menus":
-        run = auto_research.start(lead.id, BackgroundTasks(), db, op)
+        run = auto_research.start(lead.id, BackgroundTasks(), db, op, use_saved_website=True)
         auto_research.execute(lead.id, run["id"], op.id)
         db.expire_all()
         result = auto_research.run_of(get_lead(db, lead.id)) or {}

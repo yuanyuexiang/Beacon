@@ -69,7 +69,7 @@ def test_quota_completes_sync_without_locking_list(client, db, monkeypatch):
     assert task.status == "completed" and task.results[-1]["remaining"] == 1
     workflows.ensure_idle(db, batch)
     new = workflows.start(db, batch, workflows.WorkflowIn(phase="review", lead_ids=[lead.id]), "tester")
-    assert new.steps == ["google", "screen", "contacts"]
+    assert new.steps == ["google_sync", "screen", "contacts"]
     assert new.params["lead_ids"] == [str(lead.id)]
 
 
@@ -124,3 +124,45 @@ def test_selected_review_filters_screening_and_jobs(client, db):
     runs.plan_jobs(db, run, batch, lead_ids=[str(first.id)])
     db.flush()
     assert {j.lead_id for j in db.scalars(select(runs.BatchJob).where(runs.BatchJob.run_id == run.id))} <= {first.id}
+
+
+def test_google_website_is_directly_usable_without_ai_and_preserves_history(client, db, monkeypatch):
+    _, lead = setup_lead(client, db)
+    lead.website_source = "overture:old"
+    db.commit()
+    monkeypatch.setattr(website_review, "review", lambda *a: pytest.fail("website AI must not run"))
+
+    class Fake:
+        def search(self, query):
+            return [Place(id="source-result")]
+
+        def enrichment_details(self, pid):
+            return Place(id=pid, websiteUri="https://current.example.org")
+
+    monkeypatch.setattr(google_places, "_client", lambda *a, **kw: Fake())
+    source_sync.sync_one(db, lead, db.scalar(select(Operator)), "source-test")
+    assert lead.website == "https://current.example.org"
+    assert lead.website_source == "Google Places 来源同步"
+    assert lead.raw["website_history"][0]["url"] == "https://old.example.org"
+    assert "website_research" not in lead.raw
+    assert lead.raw["website_refresh_required"]["contacts"]
+    result = client.get(f"/api/leads/{lead.id}").json()
+    assert result["list_summary"]["completeness"]["website"] == "done"
+    items = client.get(f"/api/leads/{lead.id}/enrichment").json()["items"]
+    assert not next(i for i in items if i["key"] == "website")["needed"]
+
+
+def test_saved_source_website_reused_and_old_failure_does_not_hide_it(client, db):
+    _, lead = setup_lead(client, db)
+    lead.website = None
+    lead.raw = {
+        "source_sync": {
+            "fingerprint": google_places._fingerprint(lead),
+            "candidates": [{"website": "https://saved.example.org"}],
+        },
+        "website_research": {"status": "retry", "reason": "old failure"},
+    }
+    assert source_sync.apply_saved(lead)
+    db.commit()
+    assert client.get(f"/api/leads/{lead.id}").json()["list_summary"]["completeness"]["website"] == "done"
+    assert lead.raw["website_research"]["status"] == "retry"  # history preserved, not a live gate

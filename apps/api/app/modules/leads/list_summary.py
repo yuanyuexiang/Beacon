@@ -82,13 +82,7 @@ def summarize(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]
         own = [a for a in assets if a.lead_id == lead.id]
         fetched = [a for a in own if a.fetch_status == FetchStatus.fetched]
         current = [latest[a.id] for a in fetched if a.id in latest and latest[a.id].input_sha256 == a.sha256]
-        website = (
-            "done"
-            if lead.website and review.get("website") == lead.website and review.get("status") == "verified"
-            else "pending"
-        )
-        if website != "done" and review.get("status") in {"retry", "ai_unavailable"}:
-            website = "failed"
+        website = "done" if lead.website else "pending"
         contact = "done" if summary["channels"] else "failed" if scan.get("pages_failed") else "pending"
         menu = (
             "done"
@@ -121,7 +115,7 @@ def summarize(db: Session, identities: list[uuid.UUID]) -> dict[uuid.UUID, dict]
         updates.extend(latest[a.id].updated_at for a in own if a.id in latest)
         summary["updated_at"] = max(updates).isoformat()
         summary["activity_times"] = {
-            "website": review.get("checked_at"),
+            "website": (raw.get("source_sync") or {}).get("fetched_at") or review.get("checked_at"),
             "contacts": scan.get("at"),
             "menus": max((a.fetched_at for a in fetched if a.fetched_at), default=None),
             "analysis": max((a.created_at for a in current), default=None),

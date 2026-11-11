@@ -10,7 +10,7 @@ import { api, json } from "@/lib/api";
 type Item = { key: string; title: string; needed: boolean; updated_at: string | null; description: string };
 type Task = { id: string; status: string; single: boolean; step: number; steps: string[]; error: string | null; message: string; updated_at: string; results: { key: string; status: string; message: string; at: string }[] };
 type State = { items: Item[]; task: Task | null };
-const NAMES: Record<string, string> = { website: "门店与官网", contacts: "联系方式", menus: "菜单获取", analysis: "菜单 AI 分析", overture: "Overture 资料同步", google_sync: "Google 资料同步", google: "官网核验", screen: "客户筛选", pool: "同步门店池" };
+const NAMES: Record<string, string> = { website: "门店与网站", contacts: "联系方式", menus: "菜单获取", analysis: "菜单 AI 分析", overture: "Overture 资料同步", google_sync: "Google 资料同步", google: "网站资料同步", screen: "客户筛选", pool: "同步门店池" };
 const time = (value: string | null) => value ? new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "尚未处理";
 
 export default function LeadEnrichment({ leadId, onChanged, onMenus, dataRevision }: { dataRevision: string; leadId: string; onChanged: () => void; onMenus: () => void }) {

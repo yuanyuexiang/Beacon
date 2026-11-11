@@ -97,6 +97,7 @@ def start(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
     op: Operator = Depends(current_operator),
+    use_saved_website: bool = False,
 ) -> dict:
     # 初始化时检查真实模型配置，不发送模型请求，也不允许 Fake 自动通过。
     try:
@@ -122,6 +123,7 @@ def start(
         "by": op.username,
         "operator_id": str(op.id),
         "snapshot": snapshot(lead),
+        "use_saved_website": use_saved_website,
         "websites": [],
         "menus": [],
         "usage": [],
@@ -268,7 +270,7 @@ def _execute(lead_id: uuid.UUID, run_id: str, operator_id: uuid.UUID) -> None:
             link = google_places._link(lead)
             # 不持久化详情，也不把 Google 价格、照片或响应送模型。
             db.commit()
-            if link:
+            if link and not (run.get("use_saved_website") and lead.website):
                 try:
                     place = google_places._client(db, op, lead_id).details(link["place_id"])
                     if place.websiteUri and place.websiteUri not in options:
@@ -280,9 +282,13 @@ def _execute(lead_id: uuid.UUID, run_id: str, operator_id: uuid.UUID) -> None:
             selected_docs: list[dict] = []
             info = run["snapshot"]
             for url in options:
-                checkpoint(db, lead_id, run, "AI 核对官网")
+                checkpoint(db, lead_id, run, "读取网站" if run.get("use_saved_website") else "AI 核对官网")
                 report: dict = {"url": url}
                 try:
+                    if run.get("use_saved_website") and url == info.get("website"):
+                        selected = url
+                        run["websites"].append({"url": url, "status": "source", "reason": "直接使用已保存网站"})
+                        break
                     documents = pages(url)
                     # 集团页面的真实外链可作为新候选，仍须读取并校验分店地址，不能仅凭标签采用。
                     name_words = {

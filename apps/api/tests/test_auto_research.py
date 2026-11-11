@@ -335,3 +335,20 @@ def test_research_preserves_manual_website_when_different_candidate_found(client
     assert result["status"] == "needs_review"
     assert "人工官网" in result["message"]
     assert not list(db.scalars(select(MenuAsset)))
+
+
+def test_saved_website_menu_discovery_skips_identity_review(client, db, setup, monkeypatch):
+    lid, _ = setup
+    original = Judge.judge
+
+    def menu_only(self, task, documents):
+        assert task["kind"] != "website"
+        return original(self, task, documents)
+
+    monkeypatch.setattr(Judge, "judge", menu_only)
+    monkeypatch.setattr(workflow.google_places, "_client", lambda *a: pytest.fail("reuse saved website"))
+    assert client.post(f"/api/leads/{lid}/auto-research?use_saved_website=true").status_code == 202
+    result = client.get(f"/api/leads/{lid}/auto-research").json()["run"]
+    assert result["status"] == "completed", result
+    assert result["selected_website"] == "https://old.example"
+    assert result["websites"][0]["status"] == "source"

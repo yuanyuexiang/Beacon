@@ -58,3 +58,9 @@ it("区分网络、网站响应和页面内容问题", () => {
   expect(contactFailureLabel("HTTP 502（unknown）")).toContain("5xx");
   expect(contactFailureLabel("HTTP 200（pdf）")).toContain("不是可读取的网页");
 });
+
+
+it("网站同步结果不再表示身份核验", () => {
+  expect(workflowSummary("google_sync", { synced: 2 })).toContain("来源网站可直接使用");
+  expect(workflowSummary("google", { synced: 1 })).toBe("网站来源同步 1 家");
+});

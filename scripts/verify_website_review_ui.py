@@ -1,8 +1,8 @@
-"""D62 界面回归：全部 API 模拟，无真实 AI／Google 调用或名单写入。"""
+"""来源网站界面回归：全部 API 模拟，无真实 AI／Google 调用或名单写入。"""
 
 import asyncio
 import json
-import re
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -25,17 +25,18 @@ async def handle(route):
         writes.append(path)
     if path == "/api/auth/me":
         data = {"id": "ui", "username": "ui", "role": role, "must_change_password": False}
+    elif path == "/api/outreach-identity":
+        data = {"sender_identity": "UI Test", "opt_out_text": "No reply needed."}
+    elif path.endswith("/enrichment-history"):
+        data = []
+    elif path in {"/api/directory/regions", "/api/assignment/members", "/api/users", "/api/users/identities"}:
+        data = []
     elif path == "/api/batches":
         data = [{"id": "batch", "batch_key": "ai-test", "country": "UK", "region": "Aberdeen", "candidate_count": 3}]
     elif path == "/api/leads":
         data = leads
     elif path.endswith("/workflow"):
         data = None
-    elif path == "/api/leads/1/website-review":
-        evidence = {"citations": [{"document_id": "web0", "quote": "College Cafe serves lunch and coffee."}], "sources": [{"id": "web0", "url": "https://example.com/about"}]}
-        leads[0]["operating_type"] = {"status": "verified", "category": "cafe", "reason": "官网说明咖啡与餐食", "services": ["coffee", "food_service"], **evidence}
-        leads[0]["website_research"] = {"status": "verified", "reason": "官网确认门店身份", "judgment": {"citations": evidence["citations"]}, "sources": evidence["sources"]}
-        data = leads[0]
     else:
         errors.append(path)
         data = {}
@@ -49,34 +50,30 @@ async def main():
         page = await browser.new_page(viewport={"width": 1700, "height": 1100})
         page.on("pageerror", lambda e: errors.append(str(e)))
         await page.route("**/api/**", handle)
-        await page.goto("http://localhost:3000/leads?batch=ai-test")
+        await page.goto(os.environ.get("BEACON_UI_URL", "http://localhost:3000") + "/leads?batch=ai-test")
         await page.locator(".ant-table-row-expand-icon-collapsed").first.wait_for()
         while await page.locator(".ant-table-row-expand-icon-collapsed").count():
             await page.locator(".ant-table-row-expand-icon-collapsed").first.click()
-        await expect(page.get_by_text("官网：待重试", exact=True)).to_be_visible()
-        await expect(page.get_by_text("官网：身份冲突，需人工核对", exact=True)).to_be_visible()
-        await page.get_by_role("button", name="查看核验结果", exact=True).first.click()
-        await page.get_by_role("button", name="AI 核验／重试", exact=True).click()
-        await expect(page.get_by_text("官网确认门店身份", exact=True)).to_be_visible()
-        await expect(page.get_by_text("College Cafe serves lunch and coffee.", exact=True).first).to_be_visible()
-        await expect(page.get_by_text("来源：https://example.com/about", exact=True).first).to_be_visible()
-        await expect(page.get_by_role("button", name="AI 核验／重试", exact=True)).not_to_have_class(re.compile("ant-btn-loading"))
-        output = Path("data/devchecks/d62-website-review.png")
+        await expect(page.get_by_text("有网站", exact=True)).to_be_visible()
+        await expect(page.get_by_text("官网：待重试", exact=True)).to_have_count(0)
+        await page.get_by_role("button", name="查看网站与来源", exact=True).first.click()
+        dialog = page.get_by_role("dialog")
+        await expect(dialog.get_by_role("link", name="https://example.com", exact=True)).to_be_visible()
+        await expect(dialog.get_by_role("button", name="AI 核验／重试", exact=True)).to_have_count(0)
+        output = Path("data/devchecks/source-website.png")
         output.parent.mkdir(parents=True, exist_ok=True)
         await page.screenshot(path=str(output), full_page=True, animations="disabled")
-        await page.get_by_role("button", name="Close", exact=True).click()
-        await expect(page.get_by_text("供应餐食", exact=True)).to_be_visible()
+        await dialog.locator(".ant-modal-footer button").click()
         role = "viewer"
         await page.reload()
         await page.locator(".ant-table-row-expand-icon-collapsed").first.wait_for()
-        while await page.locator(".ant-table-row-expand-icon-collapsed").count():
-            await page.locator(".ant-table-row-expand-icon-collapsed").first.click()
-        await page.get_by_role("button", name="查看核验结果", exact=True).first.click()
-        await expect(page.get_by_role("button", name="AI 核验／重试", exact=True)).to_be_disabled()
-        assert writes == ["/api/leads/1/website-review"], writes
+        await page.locator(".ant-table-row-expand-icon-collapsed").first.click()
+        await page.get_by_role("button", name="查看网站与来源", exact=True).first.click()
+        await expect(page.get_by_role("dialog").get_by_role("link", name="https://example.com", exact=True)).to_be_visible()
+        assert not writes, writes
         assert not errors, errors
         await browser.close()
-    print("D62 UI passed: distinct statuses, AI retry, exact evidence, mixed services, viewer read-only")
+    print("Source website UI passed: direct website display, no verification gate, viewer read-only")
 
 
 asyncio.run(main())
