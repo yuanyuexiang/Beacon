@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AgentPolicyTest {
+  @Test fun whatsappPlaceholderIsNotAnotherDraft() {
+    assertTrue(AgentPolicy.emptyComposer("发消息", null, false, "com.whatsapp", "com.whatsapp:id/entry"))
+    assertTrue(AgentPolicy.emptyComposer("Message", null, false, "com.whatsapp.w4b", "com.whatsapp.w4b:id/entry"))
+    assertFalse(AgentPolicy.emptyComposer("客户草稿", null, false, "com.whatsapp", "com.whatsapp:id/entry"))
+    assertFalse(AgentPolicy.emptyComposer("发消息", null, false, "other.app", "other.app:id/entry"))
+    assertFalse(AgentPolicy.emptyComposer("Message", null, false, "com.whatsapp", "com.whatsapp:id/search"))
+    assertTrue(AgentPolicy.emptyComposer("提示", "提示", false, "other.app", "field"))
+  }
   @Test fun sendCannotBeReplayed() {
     for (a in listOf("tap", "input", "send", "scroll", "back", "alternate")) assertFalse(AgentPolicy.allowed(a, true))
     assertTrue(AgentPolicy.allowed("wait", true))

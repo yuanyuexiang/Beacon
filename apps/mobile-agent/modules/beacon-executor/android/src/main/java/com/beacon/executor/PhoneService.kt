@@ -161,7 +161,10 @@ class PhoneService : AccessibilityService() {
 
   private fun <T> ui(fn: () -> T): T {
     if (Looper.myLooper() == Looper.getMainLooper()) return fn()
-    val f = FutureTask(fn); main.post(f); return f.get(5, TimeUnit.SECONDS)
+    val f = FutureTask(fn); main.post(f)
+    try { return f.get(5, TimeUnit.SECONDS) } catch (e: java.util.concurrent.ExecutionException) {
+      throw (e.cause ?: e)
+    }
   }
   fun inspectAccount(channel: String): String {
     synchronized(this) { check(!running) { "请先完成当前执行，再识别账号" }; running = true }
@@ -594,7 +597,7 @@ class PhoneService : AccessibilityService() {
           val node = PlatformAdapters.flatten(root()).getOrNull(nodeId) ?: error("输入框已变化")
           check(node.isEditable && !node.isPassword && node.isEnabled) { "输入框不可用" }
           check(snapshot.optString("action") == "public_comment" || !Regex("(?i)comment|search|reply_to|评论|搜索").containsMatchIn(node.viewIdResourceName.orEmpty() + node.hintText?.toString().orEmpty() + node.contentDescription?.toString().orEmpty())) { "当前不是私信输入框" }
-          check(node.text.isNullOrBlank() || node.isShowingHintText || node.text?.toString() == body || node.text == node.hintText) { "输入框已有其他草稿，请人工处理" }
+          check(AgentPolicy.emptyComposer(node.text?.toString(), node.hintText?.toString(), node.isShowingHintText, node.packageName?.toString(), node.viewIdResourceName) || node.text?.toString() == body) { "输入框已有其他草稿，请人工处理" }
           baseline = agentCount(root(), body, publicComment)
           check(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, body) })) { "填写消息失败" }
           filled = true
@@ -621,7 +624,7 @@ class PhoneService : AccessibilityService() {
         ui {
           check(observation().getString("screen_id") == id) { "页面已变化" }
           val flat = PlatformAdapters.flatten(root())
-          val hasDraft = flat.any { it.isEditable && !it.isShowingHintText && !it.text.isNullOrBlank() && it.text != it.hintText }
+          val hasDraft = flat.any { it.isEditable && !AgentPolicy.emptyComposer(it.text?.toString(), it.hintText?.toString(), it.isShowingHintText, it.packageName?.toString(), it.viewIdResourceName) }
           val node = flat.getOrNull(nodeId)
           if (node != null) {
             check(node.isEnabled && !node.isEditable && !node.isPassword && !AgentPolicy.blocked(PageObservation.label(node), publicComment) && !AgentPolicy.draftSendControl(PageObservation.label(node), hasDraft)) { "该动作需要人工处理" }

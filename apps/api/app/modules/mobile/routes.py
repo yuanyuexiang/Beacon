@@ -11,7 +11,7 @@ from datetime import timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
@@ -779,14 +779,23 @@ def agent_step(
         }
     j.result = {**(j.result or {}), "agent_calls": calls + 1, "engine": "ai-agent-v1"}
     snapshot = dict(j.snapshot)
+    invalid_steps = (j.result or {}).get("agent_invalid_steps", 0)
     db.commit()
+    invalid_reason = None
     try:
         advice = decide(body.screen, snapshot, sending=sending)
-    except ValueError:
+    except ValueError as exc:
+        invalid_steps += 1
+        invalid_reason = "AI 返回的动作格式不正确" if isinstance(exc, ValidationError) else str(exc)[:160]
         advice = {
-            "action": "finish",
-            "outcome": "unknown" if sending else "needs_action",
-            "detail": "当前页面建议无法执行，已保留现场",
+            "action": "wait" if invalid_steps < 3 else "finish",
+            "outcome": None if invalid_steps < 3 else "unknown" if sending else "needs_action",
+            "detail": f"上一步 AI 动作未执行：{invalid_reason}；"
+            + (
+                "请根据当前页面纠正控件和收件人，重新选择动作"
+                if invalid_steps < 3
+                else "连续识别失败，已保留消息和现场"
+            ),
             "screen_id": body.screen.screen_id,
         }
     # Model calls release locks; a stop or content change during inference must win.
@@ -816,7 +825,13 @@ def agent_step(
             "source": snapshot["target"],
             "target": advice.get("alternate_target"),
         }
-    j.result = {**(j.result or {}), "agent_history": history[-24:], "progress": advice["detail"], **extra}
+    j.result = {
+        **(j.result or {}),
+        "agent_history": history[-24:],
+        "agent_invalid_steps": invalid_steps if invalid_reason else 0,
+        "progress": advice["detail"],
+        **extra,
+    }
     j.error = advice["detail"]
     j.lease_until = service.now() + timedelta(minutes=5)
     db.commit()

@@ -80,8 +80,37 @@ def test_job_agent_progress_then_send_is_read_only(client, db, monkeypatch):
     saved = client.get(f"/api/mobile/tasks/{tid}").json()
     assert saved["engine"] == "ai-agent-v1" and len(saved["agent_history"]) == 1
     assert client.post(base + "/start", headers=headers, json=args).status_code == 200
+    for _ in range(2):
+        r = client.post(base + "/agent", headers=headers, json={**args, "screen": page().model_dump()})
+        assert r.json()["action"] == "wait"
     r = client.post(base + "/agent", headers=headers, json={**args, "screen": page().model_dump()})
     assert r.json()["action"] == "finish" and r.json()["outcome"] == "unknown"
+
+
+def test_rejected_decision_is_retried_with_reason_then_recovers(client, db, monkeypatch):
+    tid, device, headers, _ = setup(client, db)
+    job, _ = enqueue(client, tid, device)
+    claimed = client.post("/api/mobile/device/claim", headers=headers).json()["job"]
+    url = f"/api/mobile/device/jobs/{job['id']}/agent"
+    body = {"lease": claimed["lease"], "attempt": claimed["attempt"], "screen": page().model_dump()}
+
+    def invalid(*args, **kwargs):
+        raise ValueError("模型引用了不存在的控件")
+
+    monkeypatch.setattr(agent, "decide", invalid)
+    for _ in range(2):
+        response = client.post(url, headers=headers, json=body)
+        assert response.status_code == 200, response.text
+        assert response.json()["action"] == "wait"
+        assert "不存在的控件" in response.json()["detail"]
+    monkeypatch.setattr(agent, "decide", lambda *a, **k: {"action": "wait", "detail": "等待页面"})
+    assert client.post(url, headers=headers, json=body).json()["action"] == "wait"
+    monkeypatch.setattr(agent, "decide", invalid)
+    assert client.post(url, headers=headers, json=body).json()["action"] == "wait"
+    assert client.post(url, headers=headers, json=body).json()["action"] == "wait"
+    stopped = client.post(url, headers=headers, json=body).json()
+    assert stopped["action"] == "finish" and stopped["outcome"] == "needs_action"
+    assert "不存在的控件" in stopped["detail"]
 
 
 def test_cancel_during_model_call_discards_action(client, db, monkeypatch):

@@ -2,6 +2,12 @@ package com.beacon.executor
 
 /** The model chooses controls; frozen text and one-send semantics remain device-owned. */
 object AgentPolicy {
+  fun emptyComposer(text: String?, hint: String?, showingHint: Boolean, pkg: String?, resource: String?): Boolean {
+    if (text.isNullOrBlank() || showingHint || (!hint.isNullOrBlank() && text == hint)) return true
+    // WhatsApp exposes its placeholder as text on some versions, without hint metadata.
+    return pkg in setOf("com.whatsapp", "com.whatsapp.w4b") && resource == "$pkg:id/entry" &&
+      text.trim() in setOf("发消息", "发送消息", "Message", "Type a message")
+  }
   fun allowed(action: String, attempted: Boolean): Boolean = if (attempted) action in setOf("wait", "finish") else
     action in setOf("tap", "input", "send", "scroll", "back", "wait", "finish", "alternate")
   fun terminal(outcome: String, attempted: Boolean, observed: Boolean): String = when {
