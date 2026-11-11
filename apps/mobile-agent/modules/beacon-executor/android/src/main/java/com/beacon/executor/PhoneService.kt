@@ -284,6 +284,10 @@ class PhoneService : AccessibilityService() {
       try {
         val snapshot = j.getJSONObject("snapshot"); val body = snapshot.getString("body")
         platform = snapshot.optString("channel", "whatsapp")
+        if (snapshot.optString("engine") == "ai-agent-v1") {
+          executeAgent(j, snapshot)
+          return@thread
+        }
         if (platform != "whatsapp") {
           executeSocial(j, snapshot)
           return@thread
@@ -519,6 +523,136 @@ class PhoneService : AccessibilityService() {
       }
     }
     throw NeedsPhoneAction("当前页面未能进入私信，消息已保留，可继续人工联系或选择其他渠道")
+  }
+  private fun agentSubmitted(r: AccessibilityNodeInfo, body: String, publicComment: Boolean = false): Boolean {
+    val all = PlatformAdapters.flatten(r)
+    val pending = all.any { Regex("(?i)^(sending[.…]*|failed to send|not sent|发送中[.…]*|发送失败|未发送)$").matches(PageObservation.label(it)) }
+    val empty = all.filter { it.isEditable }.let { fields -> fields.isNotEmpty() && fields.all { it.text.isNullOrBlank() || it.isShowingHintText || it.text == it.hintText } }
+    val screen = android.graphics.Rect().also { r.getBoundsInScreen(it) }
+    return !pending && empty && all.any {
+      val b = android.graphics.Rect().also { box -> it.getBoundsInScreen(box) }
+      !it.isEditable && it.text?.toString() == body && (publicComment || b.left - (screen.right - b.right) > screen.width() * .08)
+    }
+  }
+  // All v3 platforms use the same observe/decide/act loop; legacy rules remain for old jobs.
+  private fun agentCount(r: AccessibilityNodeInfo, body: String, publicComment: Boolean): Int {
+    if (!publicComment) return PlatformAdapters.count(r, body)
+    return PlatformAdapters.flatten(r).filter { !it.isEditable && it.text?.toString() == body }
+      .map { android.graphics.Rect().also { b -> it.getBoundsInScreen(b) }.toShortString() }.distinct().size
+  }
+  private fun executeAgent(j: JSONObject, snapshot: JSONObject) {
+    val body = snapshot.getString("body")
+    val publicComment = snapshot.optString("action") == "public_comment"
+    val history = org.json.JSONArray()
+    val feedback = org.json.JSONArray()
+    val visited = mutableSetOf<String>()
+    var attempted = false
+    var baseline = 0
+    var filled = false
+    progress(j, "opening")
+    ui { PlatformAdapters.open(this, snapshot) }
+    Thread.sleep(1200)
+    repeat(24) {
+      check(!stopRequested) { "执行已暂停" }
+      progress(j, if (attempted) "verifying_send" else "reading_page")
+      val page = awaitNavigationPage()
+      val id = page.getString("screen_id")
+      check(ui { PlatformAdapters.flatten(root()).none { it.isPassword } }) { "请先完成密码或系统授权操作" }
+      screenshot()?.let { if (observation().getString("screen_id") == id) page.put("image", it) }
+      page.put("history", history).put("feedback", feedback)
+      val advice = request("/jobs/${j.getString("id")}/agent", attempt(j).put("screen", page), 65000)
+      check(!stopRequested) { "执行已暂停" }
+      if (advice.optString("screen_id") != id || observation().getString("screen_id") != id) return@repeat
+      val action = advice.optString("action")
+      check(AgentPolicy.allowed(action, attempted)) { "发送后只能核对结果" }
+      val rows = page.getJSONArray("nodes")
+      val nodeId = advice.optInt("node_id", -1)
+      val entry = (0 until rows.length()).map { rows.getJSONObject(it) }.firstOrNull { it.getInt("id") == nodeId }
+      if (action == "finish") {
+        val observed = attempted && ui { try { agentCount(root(), body, publicComment) > baseline && (if (platform == "whatsapp") sent(root(), body) else PlatformAdapters.sent(root(), body) || agentSubmitted(root(), body, snapshot.optString("action") == "public_comment")) } catch (_: Exception) { false } }
+        val outcome = AgentPolicy.terminal(advice.optString("outcome"), attempted, observed)
+        settle(j, outcome, advice.optString("detail") + if (advice.optString("outcome") == "sent" && !observed) "；设备未能确认新增消息，需核对实际聊天" else "")
+        return
+      }
+      if (action == "alternate") {
+        val channel = advice.optString("alternate_channel")
+        val label = entry?.optString("text").orEmpty()
+        j.put("alternate_channel", channel).put("alternate_label", label)
+        settle(j, "unavailable", "发现 $channel 联系入口（$label）。本次未跨渠道发送，可在网页转用该渠道")
+        return
+      }
+      if (action in setOf("input", "send")) {
+        check(snapshot.optString("action") !in setOf("contact_discovery", "connection_request", "inmail")) { "本次任务需人工核对联系动作" }
+        val titleId = advice.optInt("title_node_id", -1)
+        val title = (0 until rows.length()).map { rows.getJSONObject(it) }.firstOrNull { it.getInt("id") == titleId }
+        check(advice.optBoolean("target_match") && title != null && !title.optBoolean("editable")) { "未识别收件人" }
+        snapshot.put("_resolved_title", title!!.getString("text"))
+      }
+      if (action == "input") {
+        ui {
+          check(observation().getString("screen_id") == id) { "页面已变化" }
+          val node = PlatformAdapters.flatten(root()).getOrNull(nodeId) ?: error("输入框已变化")
+          check(node.isEditable && !node.isPassword && node.isEnabled) { "输入框不可用" }
+          check(snapshot.optString("action") == "public_comment" || !Regex("(?i)comment|search|reply_to|评论|搜索").containsMatchIn(node.viewIdResourceName.orEmpty() + node.hintText?.toString().orEmpty() + node.contentDescription?.toString().orEmpty())) { "当前不是私信输入框" }
+          check(node.text.isNullOrBlank() || node.isShowingHintText || node.text?.toString() == body || node.text == node.hintText) { "输入框已有其他草稿，请人工处理" }
+          baseline = agentCount(root(), body, publicComment)
+          check(node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, body) })) { "填写消息失败" }
+          filled = true
+        }
+      } else if (action == "send") {
+        check(filled && !attempted) { "消息尚未填写或发送已尝试" }
+        seedReplies(j, ui { PlatformAdapters.incoming(root(), snapshot) })
+        j.put("phase", "preflight"); Journal(this).save(j)
+        request("/jobs/${j.getString("id")}/start", attempt(j))
+        ui {
+          check(!stopRequested && observation().getString("screen_id") == id) { "页面已变化或执行已暂停" }
+          val r = root()
+          check(PlatformAdapters.flatten(r).any { it.isEditable && it.text?.toString() == body }) { "待发送内容已改变" }
+          val node = PlatformAdapters.flatten(r).getOrNull(nodeId) ?: error("发送控件已变化")
+          check(node.isEnabled && !node.isEditable && !node.isPassword) { "发送控件不可用" }
+          // Persist BEFORE dispatch; never retry this action even when Android returns false.
+          j.put("phase", "click_attempted"); Journal(this).save(j); attempted = true
+          check(PlatformAdapters.click(node)) { "发送结果不确定" }
+        }
+      } else if (action == "tap") {
+        check(!filled) { "消息已填写，只能发送或结束" }
+        val key = navigationKey(page, advice)
+        check(visited.add(key)) { "页面没有进展，已停止重复操作" }
+        ui {
+          check(observation().getString("screen_id") == id) { "页面已变化" }
+          val flat = PlatformAdapters.flatten(root())
+          val hasDraft = flat.any { it.isEditable && !it.isShowingHintText && !it.text.isNullOrBlank() && it.text != it.hintText }
+          val node = flat.getOrNull(nodeId)
+          if (node != null) {
+            check(node.isEnabled && !node.isEditable && !node.isPassword && !AgentPolicy.blocked(PageObservation.label(node), publicComment) && !AgentPolicy.draftSendControl(PageObservation.label(node), hasDraft)) { "该动作需要人工处理" }
+            if (!PlatformAdapters.click(node)) {
+              val b = android.graphics.Rect().also { node.getBoundsInScreen(it) }
+              val path = Path().apply { moveTo(b.exactCenterX(), b.exactCenterY()) }
+              dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 80)).build(), null, null)
+            }
+          } else {
+            check(advice.has("x") && advice.has("y") && page.has("image")) { "动作缺少可用位置" }
+            val x = advice.getInt("x") * page.getInt("width") / 1000f
+            val y = advice.getInt("y") * page.getInt("height") / 1000f
+            check(flat.filter { n -> android.graphics.Rect().also { n.getBoundsInScreen(it) }.contains(x.toInt(), y.toInt()) }.none { it.isEditable || it.isPassword || AgentPolicy.blocked(PageObservation.label(it), publicComment) || AgentPolicy.draftSendControl(PageObservation.label(it), hasDraft) }) { "该位置需要人工处理" }
+            val path = Path().apply { moveTo(x, y) }
+            dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 80)).build(), null, null)
+          }
+        }
+      } else if (action == "back") ui { performGlobalAction(GLOBAL_ACTION_BACK) }
+      else if (action == "scroll") ui { PlatformAdapters.flatten(root()).firstOrNull { it.isScrollable }?.performAction(if (advice.optString("direction") == "up") AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }
+      Thread.sleep(if (action == "wait") 1500 else 600)
+      val after = awaitNavigationPage(page)
+      val delta = NavigationFeedback.delta(PageObservation.keys(page), PageObservation.keys(after))
+      val changed = delta.first.isNotEmpty() || delta.second.isNotEmpty()
+      history.put("$action: ${advice.optString("detail")}; 页面${if (changed) "已变化" else "无明显变化"}".take(240))
+      while (history.length() > 12) history.remove(0)
+      feedback.put(JSONObject().put("action", action).put("target", entry?.optString("text").orEmpty().take(200)).put("dispatched", true).put("changed", changed).put("appeared", org.json.JSONArray(delta.first.map { it.take(200) })).put("disappeared", org.json.JSONArray(delta.second.map { it.take(200) })))
+      while (feedback.length() > 12) feedback.remove(0)
+      j.put("navigation_history", history); Journal(this).save(j)
+      request("/jobs/${j.getString("id")}/progress", attempt(j).put("stage", if (attempted) "verifying_send" else "finding_entry").put("detail", advice.optString("detail")).put("navigation_history", history))
+    }
+    settle(j, if (attempted) "unknown" else "needs_action", "本轮执行已结束，步骤和截图保留，可人工接管")
   }
   private fun executeSocial(j: JSONObject, snapshot: JSONObject) {
     val body = snapshot.getString("body")

@@ -54,7 +54,7 @@ class ConnectionService : Service() {
       val installed = PlatformAdapters.packages.filterValues { pkgs -> pkgs.any { try { packageManager.getPackageInfo(it, 0); true } catch (_: Exception) { false } } }.keys
       val payload = JSONObject().put("account", vault.account()).put("accounts", JSONObject(vault.accounts()))
         .put("installed", JSONArray(installed.toList())).put("ready", s?.autoEnabled == true)
-        .put("accessibility", s != null).put("unlocked", unlocked).put("app_version", "0.3.0").put("protocol", 2)
+        .put("accessibility", s != null).put("unlocked", unlocked).put("app_version", "0.4.0").put("protocol", 3)
       post(this, "/heartbeat", payload)
       if (stopped || vault.disconnected() || vault.read() != session) return
       lastContact = System.currentTimeMillis(); executionReady = payload.optBoolean("ready"); connected = true; error = ""; failures = 0

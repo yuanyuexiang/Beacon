@@ -77,6 +77,17 @@ export default function LeadDetail() {
   const [content, setContent] = useState<Content[]>([]);
   const [form] = Form.useForm();
   const [eligs, setEligs] = useState<Elig[]>([]);
+  const openedContact = useRef("");
+  useEffect(() => afterCommit(() => {
+    const selected = new URLSearchParams(window.location.search).get("contact");
+    const match = eligs.find(c => c.id === selected);
+    if (match && openedContact.current !== `${id}:${match.id}`) {
+      openedContact.current = `${id}:${match.id}`;
+      setComposerContact({id:match.id,channel:match.channel,request:Date.now()});
+      setTab("sales");
+      document.getElementById("sales-composer")?.scrollIntoView({behavior:"smooth"});
+    }
+  }), [id, eligs]);
   const [contactOpen, setContactOpen] = useState(false);
   const [contactLoading, setContactLoading] = useState(false);
   const [showAllContacts, setShowAllContacts] = useState(false);

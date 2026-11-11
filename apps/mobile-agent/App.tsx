@@ -108,7 +108,7 @@ export default function App() {
   }, []);
   async function action(key: string, fn: () => Promise<void>) { if (busy) return; Keyboard.dismiss(); setBusy(key); setNotice(''); try { await fn(); inspect(); } catch (e) { const message = e instanceof Error ? e.message : String(e); setNotice(message.replace(/^[\s\S]*Caused by:\s*(?:java\.lang\.[A-Za-z]+Exception:\s*)?/, '')); if (key === 'pair') Alert.alert('未能配对', message); } finally { setBusy(''); } }
   const heartbeat = useCallback(async (active: boolean, phoneLabel = savedLabel) => {
-    const response = await call('/heartbeat', { label: phoneLabel.trim() || Executor.status().deviceName, account, accounts: Object.fromEntries(Object.entries({ ...accounts, ...(account ? { whatsapp: account } : {}) }).filter(([, value]) => value.trim())), installed: Executor.status().installed, ready: active, accessibility: Executor.status().accessibility, unlocked: Executor.status().unlocked, app_version: '0.3.0', protocol: 2 });
+    const response = await call('/heartbeat', { label: phoneLabel.trim() || Executor.status().deviceName, account, accounts: Object.fromEntries(Object.entries({ ...accounts, ...(account ? { whatsapp: account } : {}) }).filter(([, value]) => value.trim())), installed: Executor.status().installed, ready: active, accessibility: Executor.status().accessibility, unlocked: Executor.status().unlocked, app_version: '0.4.0', protocol: 3 });
     if (Executor.connectionPaused()) return response;
     setConnected(true); setConnectionError(''); setConnectedAt(new Date().toLocaleTimeString());
     setPending(response.pending_count || 0);

@@ -60,15 +60,15 @@ class Heartbeat(Input):
     accessibility: bool = False
     unlocked: bool | None = None
     app_version: str = Field(max_length=64)
-    protocol: Literal[1, 2] = 1
+    protocol: Literal[1, 2, 3] = 1
 
 
 class QueueIn(Input):
     device_id: uuid.UUID
     preview_hash: str = Field(min_length=64, max_length=64)
-    action: Literal["direct_message", "message_request", "connection_request", "inmail", "contact_discovery"] = (
-        "direct_message"
-    )
+    action: Literal[
+        "direct_message", "message_request", "connection_request", "inmail", "contact_discovery", "public_comment"
+    ] = "direct_message"
 
 
 class AttemptIn(Input):
@@ -151,6 +151,9 @@ def public_job(j: Execution) -> dict:
         "finished_at": j.finished_at,
         "error": j.error,
         "navigation_history": (j.result or {}).get("navigation_history", []),
+        "agent_history": (j.result or {}).get("agent_history", []),
+        "engine": (j.result or {}).get("engine"),
+        "alternate_contact": (j.result or {}).get("alternate_contact"),
         "reason_code": (j.result or {}).get("reason_code"),
         "screenshot_url": f"/api/mobile/tasks/{j.task_id}/screenshot" if (j.result or {}).get("screenshot") else None,
     }
@@ -247,7 +250,7 @@ def unbind_device(d: Device = Depends(device_auth), db: Session = Depends(get_db
 def heartbeat(body: Heartbeat, d: Device = Depends(device_auth), db: Session = Depends(get_db)):
     if body.protocol == 1 and not re.fullmatch(r"\+[1-9][0-9]{6,14}", body.account):
         raise HTTPException(422, "请填写本方 WhatsApp 国际号码")
-    accounts = body.accounts if body.protocol == 2 else {"whatsapp": body.account}
+    accounts = body.accounts if body.protocol >= 2 else {"whatsapp": body.account}
     if any(p not in PLATFORMS or not v.strip() or len(v) > 256 for p, v in accounts.items()):
         raise HTTPException(422, "请填写有效的平台账号")
     if "whatsapp" in accounts:
@@ -257,7 +260,7 @@ def heartbeat(body: Heartbeat, d: Device = Depends(device_auth), db: Session = D
             raise HTTPException(422, str(exc)) from None
     # Changing any sender invalidates not-yet-started confirmations.
     old_accounts = (d.capabilities or {}).get("accounts", {"whatsapp": d.account})
-    if d.account and d.account != body.account or body.protocol == 2 and old_accounts != accounts:
+    if d.account and d.account != body.account or body.protocol >= 2 and old_accounts != accounts:
         for j in db.scalars(
             select(Execution).where(Execution.device_id == d.id, Execution.status.in_(["queued", "claimed"]))
         ):
@@ -352,6 +355,8 @@ def destination_payload(
         raise HTTPException(409, "该渠道不支持此联系动作")
     capabilities = d.capabilities or {}
     modern = capabilities.get("protocol", 1) >= 2
+    if action == "public_comment" and capabilities.get("protocol", 1) < 3:
+        raise HTTPException(409, "公开留言需要更新到 AI 执行版手机助手")
     if platform != "whatsapp" and not modern:
         raise HTTPException(409, "请更新手机助手并配置此平台账号")
     sender = (capabilities.get("accounts") or {}).get(platform) if modern else d.account
@@ -385,6 +390,7 @@ def destination_payload(
         "task_owner": assigned_to,
         "channel": platform,
         "protocol": 2 if modern else 1,
+        **({"engine": "ai-agent-v1"} if capabilities.get("protocol", 1) >= 3 else {}),
         **({"action": action} if modern else {}),
         **({"sender_mode": "current_app"} if current_app else {}),
     }
@@ -748,3 +754,137 @@ def execution_progress(
         j.result = {**j.result, "navigation_history": body.navigation_history}
     db.commit()
     return {"status": j.status, "progress": j.error}
+
+
+@worker_router.post("/jobs/{identity}/agent")
+def agent_step(
+    identity: uuid.UUID, body: NavigationIn, d: Device = Depends(device_auth), db: Session = Depends(get_db)
+):
+    from app.modules.mobile.agent import decide
+
+    j = attempt(db, identity, d, body)
+    if j.status not in {"claimed", "sending"} or not j.lease_until or j.lease_until < service.now():
+        raise HTTPException(409, "任务已停止或执行租约过期")
+    payload = checked(db, task_for(db, j.task_id), d, j.confirmed_by, j.snapshot.get("action", "direct_message"))
+    if payload != j.snapshot:
+        raise HTTPException(409, "任务内容已变化，请重新确认")
+    calls = (j.result or {}).get("agent_calls", 0)
+    sending = j.status == "sending"
+    if calls >= 24:
+        return {
+            "action": "finish",
+            "outcome": "unknown" if sending else "needs_action",
+            "detail": "本轮执行未取得进展，已保留步骤，可人工接管",
+            "screen_id": body.screen.screen_id,
+        }
+    j.result = {**(j.result or {}), "agent_calls": calls + 1, "engine": "ai-agent-v1"}
+    snapshot = dict(j.snapshot)
+    db.commit()
+    try:
+        advice = decide(body.screen, snapshot, sending=sending)
+    except ValueError:
+        advice = {
+            "action": "finish",
+            "outcome": "unknown" if sending else "needs_action",
+            "detail": "当前页面建议无法执行，已保留现场",
+            "screen_id": body.screen.screen_id,
+        }
+    # Model calls release locks; a stop or content change during inference must win.
+    db.expire_all()
+    j = attempt(db, identity, d, body)
+    if j.status not in {"claimed", "sending"} or not j.lease_until or j.lease_until < service.now():
+        raise HTTPException(409, "任务已停止")
+    fresh = checked(db, task_for(db, j.task_id), d, j.confirmed_by, j.snapshot.get("action", "direct_message"))
+    if fresh != snapshot or (j.status == "sending") != sending or (j.result or {}).get("agent_calls") != calls + 1:
+        raise HTTPException(409, "任务或执行阶段已改变")
+    history = list((j.result or {}).get("agent_history", []))
+    history.append(
+        {
+            "step": calls + 1,
+            "action": advice["action"],
+            "detail": advice["detail"],
+            "model": advice.get("model"),
+            "screen_id": body.screen.screen_id,
+        }
+    )
+    extra = {}
+    if advice["action"] == "alternate":
+        node = next((n for n in body.screen.nodes if n.id == advice.get("node_id")), None)
+        extra["alternate_contact"] = {
+            "channel": advice.get("alternate_channel"),
+            "label": node.text if node else "",
+            "source": snapshot["target"],
+            "target": advice.get("alternate_target"),
+        }
+    j.result = {**(j.result or {}), "agent_history": history[-24:], "progress": advice["detail"], **extra}
+    j.error = advice["detail"]
+    j.lease_until = service.now() + timedelta(minutes=5)
+    db.commit()
+    return advice
+
+
+class TransferIn(Input):
+    contact_ref: str = Field(min_length=1, max_length=256)
+
+
+@router.post("/tasks/{identity}/alternate")
+def adopt_alternate(
+    identity: uuid.UUID,
+    body: TransferIn,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
+    """Explicitly adopt a discovered contact; preparing another channel never sends it."""
+    from app.core import audit
+    from app.modules.sales import contacts
+    from app.modules.sales.models import Channel
+
+    task = task_for(db, identity)
+    service.check_member_owner(db, task.lead_id, op.username)
+    if not may_send(db, op.username):
+        raise HTTPException(403, "当前账号不能准备联系")
+    job = db.scalar(select(Execution).where(Execution.task_id == identity).with_for_update())
+    suggestion = (job.result or {}).get("alternate_contact") if job else None
+    if not suggestion:
+        raise HTTPException(409, "本次任务没有其他渠道入口")
+    platform = suggestion.get("channel")
+    ref = body.contact_ref.strip()
+    try:
+        if platform == "email":
+            if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", ref):
+                raise ValueError("请填写有效邮箱")
+            ref = ref.lower()
+        else:
+            _, ref = destination(platform, ref)
+        channel = Channel.other_social if platform in {"x", "youtube"} else Channel(platform)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    contacts.record_contacts(
+        db,
+        task.lead_id,
+        [
+            {
+                "channel": channel,
+                "contact_ref": ref,
+                "contact_source": suggestion["source"],
+            }
+        ],
+    )
+    contact = db.scalar(
+        select(ChannelEligibility).where(
+            ChannelEligibility.lead_id == task.lead_id,
+            ChannelEligibility.channel == channel,
+            ChannelEligibility.contact_ref == ref,
+        )
+    )
+    assert contact is not None
+    audit.record(
+        db,
+        op,
+        "adopt_mobile_contact",
+        "lead",
+        task.lead_id,
+        after={"task_id": str(identity), "contact_id": str(contact.id), "channel": channel},
+    )
+    db.commit()
+    return {"lead_id": str(task.lead_id), "contact_id": str(contact.id), "channel": channel}

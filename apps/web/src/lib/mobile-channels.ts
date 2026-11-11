@@ -7,6 +7,10 @@ export const MOBILE_ACTIONS: Record<string, { value: string; label: string }[]> 
   youtube: [{ value: 'contact_discovery', label: '查看频道联系入口' }, { value: 'direct_message', label: '已有消息会话' }],
   x: [{ value: 'direct_message', label: '发送私信' }, { value: 'message_request', label: '提交消息请求' }],
 };
+// Public posting is an explicit task action, never a private-message fallback.
+for (const channel of ['facebook', 'instagram', 'linkedin', 'tiktok', 'youtube', 'x']) {
+  MOBILE_ACTIONS[channel].push({value:'public_comment',label:'作品公开留言'});
+}
 export const MOBILE_LABELS: Record<string, string> = { whatsapp: 'WhatsApp', facebook: 'Facebook', instagram: 'Instagram', linkedin: 'LinkedIn', tiktok: 'TikTok', youtube: 'YouTube', x: 'X' };
 export function pairingAddress(current: string, saved: string | null, origin: string, configured?: string): string {
   if (current.trim()) return current;
@@ -18,7 +22,7 @@ export function phoneUnavailableReason(phone: ExecutionPhone, platform?: string)
   if (phone.status === 'revoked') return '已解除绑定';
   if (!phone.online) return '离线，请打开手机助手连接平台';
   if ((phone.capabilities?.protocol || 1) < 2 && platform !== 'whatsapp') return '请更新手机助手';
-  if (phone.capabilities?.protocol === 2 && (!platform || !phone.capabilities.installed?.includes(platform))) return `未安装 ${MOBILE_LABELS[platform || ''] || '对应应用'}`;
+  if ((phone.capabilities?.protocol || 1) >= 2 && (!platform || !phone.capabilities?.installed?.includes(platform))) return `未安装 ${MOBILE_LABELS[platform || ''] || '对应应用'}`;
   if (phone.capabilities?.accessibility === false) return '请开启 Beacon 无障碍服务';
   if (phone.status !== 'ready') return '在线，待开启执行：请在手机任务页点击“连接并检查任务”';
   return undefined;

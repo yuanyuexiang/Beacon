@@ -1,7 +1,7 @@
 "use client";
 import { afterCommit } from "@/lib/after-commit";
 import { phoneStatusLabel } from "@/lib/mobile-channels";
-import { Alert, Button, Card, Drawer, Empty, Image, Input, Popconfirm, QRCode, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Drawer, Empty, Image, Input, Modal, Popconfirm, QRCode, Select, Space, Table, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { MOBILE_ACTIONS, MOBILE_LABELS } from "@/lib/mobile-channels";
@@ -9,7 +9,7 @@ import { pairingAddress, pairingServer } from "@/lib/mobile-channels";
 import { useOperator } from "@/lib/auth";
 
 type Device = { id: string; label: string; account: string | null; status: string; online?: boolean; last_seen_at: string | null; capabilities?: { protocol?: number; accounts?: Record<string, string>; installed?: string[]; unlocked?: boolean | null } };
-type Job = { reason_code?: string; screenshot_url?: string | null; navigation_history?: string[]; id: string; status: string; error: string | null; finished_at: string | null; snapshot: { channel?: string; action?: string; target: string; sender: string; body: string; lead_name: string } };
+type Job = { engine?: string; agent_history?: {step:number;action:string;detail:string;model?:string}[]; alternate_contact?: {channel:string;label:string;source:string;target?:string | null}; reason_code?: string; screenshot_url?: string | null; navigation_history?: string[]; id: string; status: string; error: string | null; finished_at: string | null; snapshot: { channel?: string; action?: string; target: string; sender: string; body: string; lead_name: string } };
 const resultHelp: Record<string, string> = {
   not_registered: '对方未注册，请选择其他联系方式；普通电话仍可保留。',
   messaging_unavailable: '对方未开放此联系入口，本次处理已完成，可按需换用其他渠道。',
@@ -79,8 +79,10 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
   const [devices, setDevices] = useState<Device[]>([]);
   const [device, setDevice] = useState<string>();
   const [contactAction, setContactAction] = useState(MOBILE_ACTIONS[platform]?.[0]?.value || "direct_message");
-  const supports = useCallback((d: Device) => d.status === "ready" && d.online && (d.capabilities?.protocol === 2 ? d.capabilities.installed?.includes(platform) : platform === "whatsapp"), [platform]);
+  const supports = useCallback((d: Device) => d.status === "ready" && d.online && ((d.capabilities?.protocol || 1) >= 2 ? d.capabilities?.installed?.includes(platform) : platform === "whatsapp"), [platform]);
 
+  const [transfer, setTransfer] = useState(false);
+  const [alternateValue, setAlternateValue] = useState("");
   const [reason, setReason] = useState("");
   const [job, setJob] = useState<Job | null>(null);
   const [preview, setPreview] = useState<{ preview_hash: string; payload: Job["snapshot"] }>();
@@ -96,9 +98,17 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
   useEffect(() => { if (!open) return; const timer = setInterval(() => { void Promise.all([refresh(), loadDevices()]).catch(e => setError(String(e))); }, 5000); return () => clearInterval(timer); }, [open, refresh, loadDevices]);
   async function act(key: string, fn: () => Promise<void>) { setBusy(old => ({ ...old, [key]: true })); setError(undefined); try { await fn(); } catch (e) { setError(String(e)); } finally { setBusy(old => ({ ...old, [key]: false })); } }
   return <><Button onClick={() => { setOpen(true); setPreview(undefined); void act("load", async () => { await Promise.all([loadDevices(), refresh()]); }); }}>手机执行／查看结果</Button>
+    <Modal title="转用其他联系渠道" zIndex={1200} open={transfer} onCancel={() => setTransfer(false)} okText="保存并准备消息" confirmLoading={busy.transfer} onOk={() => act("transfer", async () => {
+      const result = await api<{lead_id:string;contact_id:string}>(`/api/mobile/tasks/${taskId}/alternate`, json({contact_ref:alternateValue}));
+      window.location.assign(`/leads/${result.lead_id}?contact=${result.contact_id}&section=contacts`);
+    })}>
+      {error && <Alert type="error" message={error} />}<p>{MOBILE_LABELS[job?.alternate_contact?.channel || ""] || job?.alternate_contact?.channel} 联系方式</p>
+      <Input aria-label="其他渠道联系方式" value={alternateValue} onChange={e => setAlternateValue(e.target.value)} placeholder="完整国际电话号码、邮箱或主页链接" />
+      <p>页面未显示具体号码时可自行填写。保存后进入消息准备，不会直接发送。</p>
+    </Modal>
     <Drawer title={`${MOBILE_LABELS[platform] || platform} 手机执行`} open={open} onClose={() => setOpen(false)} width={620}>
       {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
-      {job ? <><Tag color={job.status === "sent" ? "green" : ["failed", "unknown"].includes(job.status) ? "orange" : "blue"}>{labels[job.status] || job.status}</Tag><p>{job.error}</p>{!!job.navigation_history?.length && <details><summary>查看执行步骤</summary><ol>{job.navigation_history.map((step, index) => <li key={index}>{step}</li>)}</ol></details>}{job.finished_at && <p>更新时间：{new Date(job.finished_at).toLocaleString("zh-CN")}</p>}<p>动作：{MOBILE_ACTIONS[job.snapshot.channel || platform]?.find(a => a.value === job.snapshot.action)?.label || "发送消息"}</p><p>收件人：{job.snapshot.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{job.snapshot.body}</p>
+      {job ? <><Tag color={job.status === "sent" ? "green" : ["failed", "unknown"].includes(job.status) ? "orange" : "blue"}>{labels[job.status] || job.status}</Tag><p>{job.error}</p>{job.engine === "ai-agent-v1" && <Tag color="blue">AI 执行</Tag>}{!!job.agent_history?.length && <details><summary>AI 执行过程 · {job.agent_history.length} 步</summary><ol>{job.agent_history.map(step => <li key={step.step}>{step.detail} <Typography.Text type="secondary">{step.model}</Typography.Text></li>)}</ol></details>}{job.alternate_contact && <Alert style={{marginTop:12}} type="info" showIcon message={`发现其他联系入口：${MOBILE_LABELS[job.alternate_contact.channel] || job.alternate_contact.channel}`} description={<span>本次未跨渠道发送。{writable && <Button size="small" onClick={() => { setAlternateValue(job.alternate_contact?.target || ""); setTransfer(true); }}>转用此渠道</Button>} <a href={job.alternate_contact.source} target="_blank" rel="noreferrer">打开来源页面</a>，可在客户资料中补充该联系方式后准备消息。</span>} />}{!!job.navigation_history?.length && <details><summary>查看执行步骤</summary><ol>{job.navigation_history.map((step, index) => <li key={index}>{step}</li>)}</ol></details>}{job.finished_at && <p>更新时间：{new Date(job.finished_at).toLocaleString("zh-CN")}</p>}<p>动作：{MOBILE_ACTIONS[job.snapshot.channel || platform]?.find(a => a.value === job.snapshot.action)?.label || "发送消息"}</p><p>收件人：{job.snapshot.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{job.snapshot.body}</p>
         {job.status === "queued" && <Alert type="info" showIcon message="已交给手机，等待自动执行。请在手机任务页开启“自动执行”并保持解锁；执行结果会自动回填。" />}
         {job.reason_code && resultHelp[job.reason_code] && <Alert style={{ marginBottom: 12 }} type={job.status === "unknown" ? "warning" : "info"} showIcon message={resultHelp[job.reason_code]} />}
         {job.finished_at && <details style={{ margin: "12px 0" }}><summary>查看执行截图{!job.screenshot_url && "（未获取）"}</summary>{job.screenshot_url ? <><p>任务结束时的手机页面，点击可放大。</p><Image src={job.screenshot_url} alt="手机执行结果截图" width={240} style={{ maxWidth: "100%" }} /></> : <p>本次未获取截图：可能是旧版记录、系统禁止截屏或已离开目标应用。文字结果仍保留。</p>}</details>}

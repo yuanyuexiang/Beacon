@@ -5,12 +5,12 @@ from urllib.parse import parse_qs, urlsplit
 
 PLATFORMS = {
     "whatsapp": {"label": "WhatsApp", "actions": ["direct_message"]},
-    "facebook": {"label": "Facebook", "actions": ["direct_message", "message_request"]},
-    "instagram": {"label": "Instagram", "actions": ["direct_message", "message_request"]},
-    "linkedin": {"label": "LinkedIn", "actions": ["direct_message", "connection_request", "inmail"]},
-    "tiktok": {"label": "TikTok", "actions": ["direct_message", "message_request"]},
-    "youtube": {"label": "YouTube", "actions": ["direct_message", "contact_discovery"]},
-    "x": {"label": "X", "actions": ["direct_message", "message_request"]},
+    "facebook": {"label": "Facebook", "actions": ["direct_message", "message_request", "public_comment"]},
+    "instagram": {"label": "Instagram", "actions": ["direct_message", "message_request", "public_comment"]},
+    "linkedin": {"label": "LinkedIn", "actions": ["direct_message", "connection_request", "inmail", "public_comment"]},
+    "tiktok": {"label": "TikTok", "actions": ["direct_message", "message_request", "public_comment"]},
+    "youtube": {"label": "YouTube", "actions": ["direct_message", "contact_discovery", "public_comment"]},
+    "x": {"label": "X", "actions": ["direct_message", "message_request", "public_comment"]},
 }
 DOMAINS = {
     "facebook": {"facebook.com", "www.facebook.com", "m.facebook.com"},
