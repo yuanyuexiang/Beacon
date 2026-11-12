@@ -266,7 +266,10 @@ def _prefetch_websites(db: Session, jobs: Sequence[BatchJob]) -> dict[str, Any]:
     for j in jobs:
         lead = db.get(Lead, j.lead_id) if j.step == "contacts" else None
         if lead is not None and lead.website:
-            urls.append(lead.website)
+            from app.modules.sales import contacts
+
+            if contacts.cached_scan(lead, lead.website) is None:
+                urls.append(lead.website)
     if not urls:
         return {}
     from app.modules.sales import contacts  # 延迟导入：sales 依赖 leads
@@ -283,7 +286,12 @@ def _collect_contacts(db: Session, run: BatchRun, j: BatchJob, scans: dict[str, 
         raise RunError("门店不存在")
     website_scan = scans.get(lead.website) if lead.website else None
     if isinstance(website_scan, Exception):
-        raise website_scan
+        website_scan = {
+            "url": lead.website,
+            "pages": [{"url": lead.website, "ok": False, "error": str(website_scan)[:300]}],
+            "contacts": [],
+            "identity_documents": [],
+        }
     scan = contacts.collect(db, lead, website_scan)
     audit.record(
         db, None, "record_contacts", "lead", lead.id, after={"run_id": str(run.id), "by": run.started_by, **scan}
@@ -341,6 +349,9 @@ def contact_totals(
             "read_unknown",
             "no_website",
             "with_contacts",
+            "with_email",
+            "with_phone",
+            "with_social",
             "with_recommended",
             "ai_pending",
             "auto_admitted",
@@ -355,6 +366,8 @@ def contact_totals(
         if scan is None or scan.get("execution_error"):
             counts["read_unknown"] += 1
             continue
+        for key in ("with_email", "with_phone", "with_social"):
+            counts[key] += int(bool(scan.get(key)))
         auto = scan.get("auto_admission") or {}
         if auto.get("allowed", 0):
             counts["auto_admitted"] += 1
@@ -374,4 +387,12 @@ def contact_totals(
             counts["read_unknown"] += 1
         else:
             counts["no_website"] += 1
+    # Historical snapshots did not store channel counts; do not display invented zeros.
+    if any(
+        job.status in {JobStatus.succeeded, JobStatus.failed}
+        and not all(key in (snapshots[job.id] or {}) for key in ("with_email", "with_phone", "with_social"))
+        for job in contacts
+    ):
+        for key in ("with_email", "with_phone", "with_social"):
+            counts.pop(key)
     return counts

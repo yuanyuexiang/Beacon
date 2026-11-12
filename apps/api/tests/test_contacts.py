@@ -441,6 +441,9 @@ def test_contact_read_categories_snapshots_and_retry_preserve_results(client, db
     assert result["totals"]["read_partial"] == 1
     assert result["totals"]["read_failed"] == 1
     assert result["totals"]["with_contacts"] == 2  # 失败官网仍保留 Overture 联系方式。
+    assert result["totals"]["with_email"] == 1
+    assert result["totals"]["with_phone"] == 1
+    assert result["totals"]["with_social"] == 0
     assert result["totals"]["succeeded"] == 1 and result["totals"]["failed"] == 2
     job = next(j for j in result["jobs"] if j["lead_id"] == str(partial_lead.id))
     assert job["contact_result"]["page_errors"][0]["error"] == "ConnectError: SSL EOF"

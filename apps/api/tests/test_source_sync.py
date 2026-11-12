@@ -23,7 +23,12 @@ def test_sync_without_ai_preserves_manual_website_and_reuses_candidate(client, d
 
         def enrichment_details(self, pid):
             requests.append("details")
-            return Place(id=pid, websiteUri="https://new.example.org", priceLevel="PRIVATE_PRICE")
+            return Place(
+                id=pid,
+                websiteUri="https://new.example.org",
+                internationalPhoneNumber="+44 1224 123456",
+                priceLevel="PRIVATE_PRICE",
+            )
 
     monkeypatch.setattr(google_places, "_client", lambda *a, **kw: Fake())
     task = workflows.start(db, batch, workflows.WorkflowIn(), "tester")
@@ -35,6 +40,7 @@ def test_sync_without_ai_preserves_manual_website_and_reuses_candidate(client, d
     assert lead.website == "https://old.example.org"
     assert "website_research" not in lead.raw and "google_places_link" not in lead.raw
     assert "PRIVATE_PRICE" not in str(lead.raw)
+    assert lead.raw["source_sync"]["candidates"][0]["phone"] == "+44 1224 123456"
     assert source_sync.fresh(lead, 30)
     source_sync.advance(db, batch, task)
     assert requests == ["search", "details"]

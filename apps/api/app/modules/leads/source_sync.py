@@ -69,7 +69,7 @@ def sync_one(db: Session, lead: Lead, op: Operator, workflow_id: str) -> None:
     saved = []
     for candidate in candidates[:2]:
         place = candidate if linked else client.enrichment_details(candidate.id)
-        saved.append({"place_id": place.id, "website": place.websiteUri})
+        saved.append({"place_id": place.id, "website": place.websiteUri, "phone": place.internationalPhoneNumber})
     current = google_places._lead(db, lead.id, lock=True)
     if google_places._fingerprint(current) != fingerprint:
         raise google.PlacesError("门店资料已变化，请重新同步", 409)

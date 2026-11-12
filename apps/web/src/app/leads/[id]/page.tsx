@@ -388,7 +388,7 @@ export default function LeadDetail() {
             { title: "类型", width: 100, render: (_, c) => CONTACT_KIND[c.kind] ?? c.kind },
             { title: "联系值", render: (_, c) => contactHref(c.channel, c.value) ? <a href={contactHref(c.channel, c.value)} target="_blank" rel="noreferrer">{c.value}</a> : c.value },
             { title: "AI 归属与用途", width: 300, render: (_, c) => <ContactAssessmentView value={c.assessment} /> },
-            { title: "来源", width: 150, render: (_, c) => <Space size={[0, 4]} wrap>{c.sources.map((s) => s.type === "website" ? <Tag key={`${s.type}-${s.ref}`} color="green"><a href={s.ref} target="_blank" rel="noreferrer">官网页面</a></Tag> : <Tag key={s.type} color="blue" title={s.ref}>Overture</Tag>)}</Space> },
+            { title: "来源", width: 150, render: (_, c) => <Space size={[0, 4]} wrap>{c.sources.map((s) => s.type === "website" ? <Tag key={`${s.type}-${s.ref}`} color="green"><a href={s.ref} target="_blank" rel="noreferrer">官网页面</a></Tag> : <Tag key={s.type} color="blue" title={s.ref}>{s.type === "google_places" ? "Google Places" : "Overture"}</Tag>)}</Space> },
             { title: "提示", width: 220, render: (_, c) => <Space size={[0, 4]} wrap>
               {c.personal && <Tag color="orange">可能是个人邮箱</Tag>}
               {c.mobile && <Tag>手机号</Tag>}

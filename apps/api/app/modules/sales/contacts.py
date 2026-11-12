@@ -4,6 +4,7 @@
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlparse
 
@@ -63,6 +64,70 @@ def scan_websites(urls: list[str]) -> dict[str, dict[str, Any] | Exception]:
         return dict(zip(unique, pool.map(one, unique), strict=True))
 
 
+def website_sources(lead: Lead) -> list[str]:
+    """Current/manual website first, then distinct source websites; never rewrite the lead."""
+    raw = lead.raw or {}
+    urls = [lead.website]
+    urls += [c.get("website") for c in (raw.get("source_sync") or {}).get("candidates", [])]
+    ov = raw.get("overture") or {}
+    if ov.get("matched"):
+        urls += ov.get("websites") or []
+    unique: dict[str, str] = {}
+    for url in urls:
+        if not isinstance(url, str):
+            continue
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            continue
+        key = parsed.netloc.lower() + parsed.path.rstrip("/") + ("?" + parsed.query if parsed.query else "")
+        unique.setdefault(key, url)
+    return list(unique.values())[:4]
+
+
+def cached_scan(lead: Lead, url: str) -> dict[str, Any] | None:
+    saved = ((lead.raw or {}).get("contact_source_scans") or {}).get(url) or {}
+    try:
+        if service.now() - datetime.fromisoformat(saved["at"]) > timedelta(hours=1):
+            return None
+        scan = saved["scan"]
+        if scan.get("pages") and all(p.get("ok") for p in scan["pages"]):
+            return dict(scan)
+    except (KeyError, ValueError, TypeError):
+        pass
+    return None
+
+
+def scan_sources(lead: Lead, primary: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, dict]:
+    scans: dict[str, Any] = {}
+    combined: dict[str, Any] = {"url": lead.website, "pages": [], "contacts": [], "identity_documents": []}
+    useful_complete = False
+    for index, url in enumerate(website_sources(lead)):
+        scan = cached_scan(lead, url)
+        if useful_complete and scan is None:
+            continue
+        cached_at = (((lead.raw or {}).get("contact_source_scans") or {}).get(url) or {}).get("at") if scan else None
+        if scan is None:
+            try:
+                scan = dict(primary) if index == 0 and primary is not None else scan_website(url)
+            except Exception as exc:
+                scan = {
+                    "url": url,
+                    "pages": [{"url": url, "ok": False, "error": str(exc)[:300]}],
+                    "contacts": [],
+                    "identity_documents": [],
+                }
+        scans[url] = {"at": cached_at or service.now().isoformat(), "scan": scan}
+        for key in ("pages", "contacts"):
+            combined[key].extend(scan.get(key) or [])
+        combined["identity_documents"].extend(
+            {**doc, "id": f"source{index}_{doc['id']}"} for doc in scan.get("identity_documents") or []
+        )
+        # Stop new fallback requests, but retain useful results already cached.
+        if scan.get("contacts") and scan.get("pages") and all(p.get("ok") for p in scan["pages"]):
+            useful_complete = True
+    return (combined if scans else None), scans
+
+
 def find_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None) -> dict[str, Any]:
     """只读：不写库。官网抓取失败只记录在 website.pages。website_scan 为已读好的官网结果（批量并行时传入）。"""
     found: dict[tuple[str, str], dict[str, Any]] = {}
@@ -82,9 +147,8 @@ def find_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None =
         if not any(s["type"] == source_type and s["ref"] == ref for s in cur["sources"]):
             cur["sources"].append({"type": source_type, "ref": ref})
 
-    website = None
-    if lead.website:
-        website = dict(website_scan) if website_scan is not None else scan_website(lead.website)
+    website, source_scans = scan_sources(lead, website_scan)
+    if website:
         for c in website.pop("contacts"):
             add(c["kind"], c["value"], "website", c["page_url"])
             cur = found[(c["kind"], c["value"])]
@@ -103,6 +167,16 @@ def find_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None =
             if hit:
                 add(*hit, "overture", ref)
 
+    for place in ((lead.raw or {}).get("source_sync") or {}).get("candidates", []):
+        phone = place.get("phone")
+        if phone:
+            add(
+                "phone",
+                wc.normalize_uk_phone(phone) or str(phone).strip(),
+                "google_places",
+                f"Google Places:{place.get('place_id')}",
+            )
+
     recorded = {
         (row.channel.value, row.contact_ref): row
         for row in db.scalars(select(ChannelEligibility).where(ChannelEligibility.lead_id == lead.id)).all()
@@ -116,7 +190,13 @@ def find_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None =
         c["recorded"] = row is not None
         c["eligibility"] = row.eligibility.value if row else None
         c["suppressed"] = service.is_suppressed(db, lead.id, c["value"]) is not None
-    return {"checked_at": service.now().isoformat(), "website": website, "candidates": out, "notice": NOTICE}
+    return {
+        "checked_at": service.now().isoformat(),
+        "website": website,
+        "candidates": out,
+        "notice": NOTICE,
+        "source_scans": source_scans,
+    }
 
 
 def record_contacts(db: Session, lead_id: uuid.UUID, items: list[dict[str, Any]]) -> dict[str, int]:
@@ -162,7 +242,7 @@ def preserve_partial_review(lead: Lead, found: dict, meta: dict) -> None:
         new = current.get(key)
         if new and new.get("evidence"):
             continue
-        if not old.get("evidence") or not old.get("assessment", {}).get("citations"):
+        if not old.get("sources"):
             continue
         saved = {**old, "assessment": {**old["assessment"]}}
         saved["assessment"]["confirmed_at"] = saved["assessment"].get("confirmed_at") or prior.get("checked_at")
@@ -199,6 +279,7 @@ def review_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None
     locked.raw = {
         **(locked.raw or {}),
         "contact_review": {**meta, "website": locked.website, "candidates": found["candidates"]},
+        "contact_source_scans": found.get("source_scans") or {},
     }
     found["admission"] = admission.apply(db, locked, prepared, admission.policy_stamp(selected))
     return found
@@ -224,6 +305,12 @@ def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None)
     scan = {
         "at": found["checked_at"],
         "found": len(found["candidates"]),
+        "with_email": any(c["kind"] == "email" for c in found["candidates"]),
+        "with_phone": any(c["kind"] == "phone" for c in found["candidates"]),
+        "with_social": any(
+            c["kind"] in {"facebook", "instagram", "linkedin", "tiktok", "youtube", "x", "whatsapp"}
+            for c in found["candidates"]
+        ),
         "recorded": result["created"],
         "held_for_review": held,
         "pages_ok": sum(1 for p in pages if p["ok"]),
