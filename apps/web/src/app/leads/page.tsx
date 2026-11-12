@@ -233,13 +233,20 @@ function LeadsInner() {
       .finally(() => setDelBusy(false));
   };
 
+  const contactRunId = workflow?.results[workflow.steps.indexOf("contacts")]?.run_id;
+  const contactRunKey = `${batchKey || ""}:${workflow?.id || ""}:${String(contactRunId || "")}`;
+  const loadedContactRunKey = useRef("");
   useEffect(() => afterCommit(() => {
     let current = true;
-    const result = workflow?.results[workflow.steps.indexOf("contacts")];
-    setContactRun(null); setContactError(undefined);
-    if (buildOpen && result?.run_id) api<NonNullable<typeof contactRun>>(`/api/runs/${result.run_id}`).then((value) => { if (current) setContactRun(value); }).catch((e) => { if (current) setContactError(e.message); });
+    if (loadedContactRunKey.current !== contactRunKey) {
+      loadedContactRunKey.current = contactRunKey;
+      setContactRun(null); setContactError(undefined);
+    }
+    if (buildOpen && contactRunId) api<NonNullable<typeof contactRun>>(`/api/runs/${contactRunId}`).then((value) => {
+      if (current) { setContactRun(value); setContactError(undefined); }
+    }).catch((e) => { if (current) setContactError(e.message); });
     return () => { current = false; };
-  }), [buildOpen, workflow]);
+  }), [buildOpen, workflow, contactRunId, contactRunKey]);
   const filtered = useMemo(() => leads.filter((l) => (me?.role !== "member" ? (ownerView !== "mine" || l.assigned_to === me?.username) && (ownerView !== "unassigned" || !l.assigned_to) && (ownerView !== "returned" || (!l.assigned_to && !!l.assignment_return)) && (!ownerFilter || l.assigned_to === ownerFilter) : true) && (!businessType || l.business_type_id === businessType) && (!screen || l.screening_class === screen) && (!q || l.name.toLowerCase().includes(q.toLowerCase()) || (l.postcode ?? "").toLowerCase().includes(q.toLowerCase()))), [leads, businessType, screen, q, me?.role, me?.username, ownerView, ownerFilter]);
   const stats = useMemo(() => ({ total: leads.length, website: leads.filter((l) => l.website?.trim()).length, candidate: leads.filter((l) => l.screening_class === "candidate").length, unchecked: leads.filter((l) => l.screening_class === "unchecked").length }), [leads]);
   const run = (name: string, p: Promise<unknown>, done: (r: never) => string) => { setBusy(name); p.then((r) => { message.success(done(r as never)); loadLeads(batchKey); loadBatches(); }).catch(err).finally(() => setBusy(null)); };
@@ -360,7 +367,7 @@ function LeadsInner() {
           {workflow.params.authority_name && <p>地区：{workflow.params.authority_name} · 本次数量：{workflow.params.sample_n ?? "全部"}<br />类型：{workflow.params.business_type_ids?.map((id) => businessLabel(id)).join(" / ")}</p>}
           <Steps direction="vertical" size="small" current={workflow.step} status={workflow.status === "failed" ? "error" : workflow.status === "completed" ? "finish" : "process"} items={workflow.steps.map((stage, i) => ({ title: WORKFLOW_TITLES[stage], description: workflowSummary(stage, stage === "contacts" && contactRun ? { totals: contactRun.totals } : workflow.results[i]) }))} />
           {contactError && <Alert type="warning" message={`读取失败明细暂不可用：${contactError}`} />}
-          {contactRun && <Typography.Paragraph type="secondary">联系方式汇总自网站、Overture 和 Google Places。各渠道按门店计数，同一家可计入多类；网站读取失败不影响已有联系方式使用，重试保留成功结果。</Typography.Paragraph>}
+          {workflow.steps.includes("contacts") && <Typography.Paragraph type="secondary">联系方式汇总自网站、Overture 和 Google Places。各渠道按门店计数，同一家可计入多类；网站读取失败不影响已有联系方式使用，重试保留成功结果。</Typography.Paragraph>}
           {contactRun?.jobs.some((j) => j.step === "contacts" && j.status === "failed") && <Collapse style={{ marginTop: 12 }} items={[{ key: "contact-errors", label: "查看未完成门店与具体原因", children: <Table rowKey="id" size="small" pagination={{ pageSize: 5 }} dataSource={contactRun.jobs.filter((j) => j.step === "contacts" && j.status === "failed")} columns={[
             { title: "门店", render: (_, j) => <Link href={`/leads/${j.lead_id}`}>{leads.find((l) => l.id === j.lead_id)?.name || j.lead_id}</Link> },
             { title: "失败原因", render: (_, j) => <><div>{contactFailureLabel(j.contact_result?.page_errors?.map((p) => p.error).join("；") || j.error || "")}</div><details><summary>原始记录</summary>{j.contact_result?.page_errors?.length ? j.contact_result.page_errors.map((p, i) => <p key={i} style={{ overflowWrap: "anywhere" }}>{p.url}<br />{p.error}</p>) : <p>{j.error}；历史任务未保存逐页错误时，需重试确认。</p>}</details></> },
