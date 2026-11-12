@@ -165,12 +165,12 @@ def test_single_and_batch_use_same_review_preserving_old_eligibility(client, db,
     lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
     result = contacts.collect(db, lead)
     db.commit()
-    assert result["recorded"] == 1 and result["recommended"] == 1
+    assert result["recorded"] == 2 and result["recommended"] == 1
     rows = {e["contact_ref"]: e for e in client.get(f"/api/leads/{lead_id}/eligibility").json()}
     assert rows["+44800833551"]["eligibility"] == "unknown"
     assert rows["+441224348534"]["eligibility"] == "blocked"
     assert rows["+441224348534"]["recommendation"]["recommendation"] == "not_recommended"
-    assert "+442079460123" not in rows
+    assert rows["+442079460123"]["eligibility"] == "unknown"
 
 
 def test_single_review_preserves_concurrent_manual_website(client, db, monkeypatch, judge):

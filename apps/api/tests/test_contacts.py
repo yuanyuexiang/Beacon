@@ -259,16 +259,18 @@ def test_batch_without_ai_preserves_existing_and_skips_excluded(client, db, monk
     rows = client.get(f"/api/leads/{lead_id}/eligibility").json()
     by = {(e["channel"], e["contact_ref"]): e for e in rows}
     assert by[("email", "bookings@vesper.example")]["eligibility"] == "blocked"  # 原审核结果保留
-    assert len(rows) == 1  # 无真实 AI 时不自动记录未经筛选的新联系方式。
+    assert len(rows) == 10  # 保存全部候选，AI 不再阻止显示；既有 blocked 保留。
     assert client.get(f"/api/leads/{other}/eligibility").json() == []
     # 列表带出联系方式数量
     counts = {x["name"]: x["contact_count"] for x in client.get("/api/leads", params={"batch_key": "b1"}).json()}
-    assert counts == {"Vesper": 1, "Fish Central": 0}
+    assert counts == {"Vesper": 10, "Fish Central": 0}
+    listed = next(x for x in client.get("/api/leads", params={"batch_key": "b1"}).json() if x["name"] == "Vesper")
+    assert listed["list_summary"]["completeness"]["contacts"] == "done"
     # 摘要写在门店上；再跑一次不重复查同一个官网
     lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
     db.refresh(lead)
     scan = lead.raw["contacts_scan"]
-    assert (scan["found"], scan["recorded"], scan["pages_ok"], scan["website"]) == (10, 0, 2, SITE)
+    assert (scan["found"], scan["recorded"], scan["pages_ok"], scan["website"]) == (10, 9, 2, SITE)
     assert scan["ai_status"] == "ai_unavailable"
     again = client.post("/api/batches/b1/runs", json={"steps": ["contacts"]}).json()
     assert again["jobs"] == [] and runs.STEPS == ("fetch", "analyze", "contacts")
@@ -291,7 +293,7 @@ def test_batch_contacts_holds_back_long_lists_and_continue_runs_in_chunks(client
     assert client.post("/api/runs/00000000-0000-0000-0000-000000000000/continue", json={}).status_code == 404
     # 没有 AI 判断时全部保留待确认，Overture 重复出现也不能作为归属证据。
     got = {(e["channel"], e["contact_ref"]) for e in client.get(f"/api/leads/{lead_id}/eligibility").json()}
-    assert got == set()
+    assert len(got) == 9
     lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
     db.refresh(lead)
     assert lead.raw["contacts_scan"]["held_for_review"] == 9
@@ -353,7 +355,7 @@ def test_failed_contact_pages_are_retryable_and_keep_successful_contacts(
     assert run["status"] == "completed_with_failures"
     assert run["jobs"][0]["status"] == "failed" and run["jobs"][0]["error"]
     before = client.get(f"/api/leads/{lead_id}/eligibility").json()
-    assert before == []  # 无 AI 不自动记录；成功抽取仍保存到候选与证据。
+    assert bool(before) == home_ok  # 成功抽取直接显示，失败不凭空新增。
     lead = db.scalar(select(Lead).where(Lead.name == "Vesper"))
     db.refresh(lead)
     assert bool(lead.raw["contact_review"]["candidates"]) == home_ok
@@ -371,7 +373,7 @@ def test_failed_contact_pages_are_retryable_and_keep_successful_contacts(
     assert any(
         c["value"] == "jane.smith@vesper.example" for c in lead.raw["contact_review"]["candidates"]
     )  # 重试补上邮箱候选。
-    assert values == set()
+    assert len(values) == 10
     assert len(values) == len(after)  # 重试不重复写入首页已有的联系方式
     assert {e["id"] for e in before} <= {e["id"] for e in after}
     assert all(e["eligibility"] == "unknown" and e["contact_usable"] == "unknown" for e in after)
@@ -397,7 +399,8 @@ def test_long_email_list_without_ai_is_not_selected_by_email_prefix(client, db):
     result = contacts.collect(db, lead, scan)
     db.commit()
     rows = client.get(f"/api/leads/{lead_id}/eligibility").json()
-    assert rows == []
+    assert len(rows) == 9
+    assert all(row["eligibility"] == "unknown" for row in rows)
     assert result["held_for_review"] == 9
     assert result["ai_status"] == "ai_unavailable"
     assert len(lead.raw["contact_review"]["candidates"]) == 9
@@ -457,7 +460,10 @@ def test_contact_read_categories_snapshots_and_retry_preserve_results(client, db
     retried = client.post(f"/api/runs/{result['id']}/resume", json={}).json()
     assert retried["totals"]["read_complete"] == 3 and retried["totals"]["read_failed"] == 0
     assert sorted(j["attempts"] for j in retried["jobs"]) == [1, 2, 2]
-    assert client.get(f"/api/leads/{identity}/eligibility").json() == before
+    after = client.get(f"/api/leads/{identity}/eligibility").json()
+    assert {(r["id"], r["contact_ref"], r["eligibility"]) for r in after} == {
+        (r["id"], r["contact_ref"], r["eligibility"]) for r in before
+    }
     # 旧数据缺快照且门店摘要不属于该次运行时，明确标记未知。
     old = db.get(runs.BatchJob, uuid.UUID(job["id"]))
     old.contact_result = None

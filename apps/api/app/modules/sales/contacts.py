@@ -286,7 +286,7 @@ def review_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None
 
 
 def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None) -> dict[str, Any]:
-    """批量仅记录经过原文校验的 AI 推荐项；备选和不确定项保留，不改变既有准入。"""
+    """保存所有来源联系方式，AI 只排序，不决定是否展示；不改变既有准入。"""
     found = review_contacts(db, lead, website_scan)
     items, held = [], 0
     for c in found["candidates"]:
@@ -294,7 +294,6 @@ def collect(db: Session, lead: Lead, website_scan: dict[str, Any] | None = None)
             continue
         if c["assessment"]["recommendation"] != "recommended":
             held += 1
-            continue
         source = "；".join(f"官网 {s['ref']}" if s["type"] == "website" else s["ref"] for s in c["sources"])
         items.append({"channel": c["channel"], "contact_ref": c["value"], "contact_source": source})
     result = record_contacts(db, lead.id, items) if items else {"created": 0, "skipped": 0}
