@@ -66,6 +66,11 @@ def items(db: Session, lead: Lead) -> list[dict]:
     days = policy.current(db).stale_days
     source = raw.get("source_sync") or {}
     scan = raw.get("contacts_scan") or {}
+    from app.modules.sales.models import ChannelEligibility
+
+    has_contacts = (
+        db.scalar(select(ChannelEligibility.id).where(ChannelEligibility.lead_id == lead.id).limit(1)) is not None
+    )
     assets = list(db.scalars(select(MenuAsset).where(MenuAsset.lead_id == lead.id)))
     fetched = [a for a in assets if a.fetch_status == "fetched"]
     latest = [menus.latest_analysis(db, a.id) for a in fetched]
@@ -84,7 +89,7 @@ def items(db: Session, lead: Lead) -> list[dict]:
         (
             "contacts",
             "联系方式",
-            runs._needs_contact_scan(lead) or not fresh(scan.get("at"), days),
+            not has_contacts or runs._needs_contact_scan(lead) or not fresh(scan.get("at"), days),
             scan.get("at"),
             f"已有候选 {scan.get('found', 0)} 项；页面读取失败 {scan.get('pages_failed', 0)} 页"
             if scan

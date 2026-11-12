@@ -147,6 +147,12 @@ def find_contacts(db: Session, lead: Lead, website_scan: dict[str, Any] | None =
         if not any(s["type"] == source_type and s["ref"] == ref for s in cur["sources"]):
             cur["sources"].append({"type": source_type, "ref": ref})
 
+    # A source website may itself be a social profile, not an HTML contact page.
+    for url in website_sources(lead):
+        hit = wc.classify_link(url)
+        if hit:
+            add(*hit, "website", url)
+
     website, source_scans = scan_sources(lead, website_scan)
     if website:
         for c in website.pop("contacts"):

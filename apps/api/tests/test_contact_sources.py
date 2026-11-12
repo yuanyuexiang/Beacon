@@ -93,3 +93,42 @@ def test_source_contacts_survive_all_website_failures(client, db, monkeypatch):
     result = contacts.find_contacts(db, lead)
     assert result["candidates"][0]["value"] == "+441224123456"
     assert result["website"]["pages"][0]["ok"] is False
+
+
+def test_social_website_itself_is_a_contact_even_when_page_has_no_links(client, db, monkeypatch):
+    from app.modules.leads.models import Lead
+
+    url = "https://www.instagram.com/lilybank.bakehouse"
+    identity = _lead_id(client, db, website=url)
+    lead = db.get(Lead, identity)
+    monkeypatch.setattr(contacts, "scan_website", lambda address: scan(address))
+    result = contacts.collect(db, lead)
+    db.commit()
+    assert result["found"] == 1
+    rows = client.get(f"/api/leads/{identity}/eligibility").json()
+    assert len(rows) == 1
+    assert rows[0]["channel"] == "instagram"
+    assert "lilybank.bakehouse" in rows[0]["contact_ref"]
+
+
+def test_read_completed_without_contacts_still_needs_enrichment(client, db):
+    from app.modules.leads import enrichment
+    from app.modules.leads.models import Lead
+    from app.modules.sales import service
+
+    identity = _lead_id(client, db)
+    lead = db.get(Lead, identity)
+    lead.raw = {
+        **lead.raw,
+        "contacts_scan": {
+            "at": service.now().isoformat(),
+            "found": 0,
+            "website": lead.website,
+            "pages_ok": 1,
+            "pages_failed": 0,
+            "ai_status": "completed",
+            "ranking_version": contacts.contact_ranking.VERSION,
+        },
+    }
+    item = next(i for i in enrichment.items(db, lead) if i["key"] == "contacts")
+    assert item["needed"] is True
