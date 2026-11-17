@@ -1,5 +1,7 @@
 # Gmail 邮件服务（D47）
 
+客户自行开通 Google 项目、Gmail 授权及 Places Key，请使用 [客户 Google 服务开通指南](客户Google服务开通指南.md)。
+
 ## 本地首次配置
 
 1. 在仓库根目录运行 `python3 scripts/configure_gmail_service.py`。生成 `infra/secrets/gmail-service-token`，已有密钥不覆盖。文件不进 Git、不进镜像。
