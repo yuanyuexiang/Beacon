@@ -5,9 +5,9 @@ import org.junit.Test
 
 class TaskReturnPolicyTest {
   @Test fun returnsForSettledOutcomesOnly() {
-    for (outcome in listOf("sent", "request_submitted", "unavailable", "failed"))
+    for (outcome in listOf("sent", "request_submitted", "unavailable", "failed", "needs_action"))
       assertTrue(TaskReturnPolicy.shouldReturn(outcome, true, true, false))
-    for (outcome in listOf("unknown", "needs_action", "claimed", ""))
+    for (outcome in listOf("unknown", "claimed", ""))
       assertFalse(TaskReturnPolicy.shouldReturn(outcome, true, true, false))
   }
   @Test fun preservesUserForegroundAndSensitiveScreens() {

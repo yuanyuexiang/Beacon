@@ -132,14 +132,26 @@ class PhoneService : AccessibilityService() {
           check(!Vault(this).disconnected()) { "平台连接已断开" }
           if (!running) {
             if (autoJob != null) {
-              val result = Journal(this).latest()?.let { JSONObject(it) }
+              // Retry only persisted result uploads; never repeat the external action.
+              if (Journal(this).unfinished().isNotEmpty()) {
+                recover()
+                Thread.sleep(5000)
+                continue
+              }
+              val result = Journal(this).latest().takeIf { it.isNotBlank() }?.let { JSONObject(it) }
               check(result != null && result.optString("id") == autoJob && AutomaticPolicy.canContinue(result.optString("outcome"), result.optBoolean("reported"))) {
                 "执行未完成或结果待核对，请回 Beacon 查看记录"
               }
               autoJob = null
+              autoError = ""
             }
             if (AutomaticPolicy.canClaim(autoEnabled && generation == autoGeneration, unlocked, running, Journal(this).unfinished().isNotEmpty())) {
-              val response = request("/claim", JSONObject())
+              val response = try { request("/claim", JSONObject()) } catch (e: java.io.IOException) {
+                autoError = "网络暂时不可用，正在自动重连"
+                Thread.sleep(5000)
+                continue
+              }
+              autoError = ""
               check(response.optString("blocked").isBlank()) { response.optString("blocked") }
               val next = response.optJSONObject("job")
               if (next != null) {
@@ -385,7 +397,7 @@ class PhoneService : AccessibilityService() {
   }
   // Returning is presentation only: never change or repeat the saved execution result.
   private fun returnToBeacon(j: JSONObject) {
-    if (j.optString("outcome") !in setOf("sent", "request_submitted", "unavailable", "failed")) return
+    if (j.optString("outcome") !in setOf("sent", "request_submitted", "unavailable", "failed", "needs_action")) return
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("beacon-mobile:///?tab=" + Uri.encode("任务")))
       .setClassName(packageName, "$packageName.MainActivity")
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)

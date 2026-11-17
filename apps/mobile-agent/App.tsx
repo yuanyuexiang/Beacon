@@ -206,10 +206,10 @@ export default function App() {
             await start();
           })}>
             <Ionicons name={busy === 'work' ? 'hourglass-outline' : status?.autoEnabled ? 'pause' : !paired ? 'qr-code-outline' : !connected ? 'refresh' : 'play'} size={38} color="#fff" />
-            <Text style={styles.workTitle}>{busy === 'work' ? '检查中' : status?.running ? '正在执行' : executionReady ? '工作中' : !paired ? '绑定手机' : !connected ? '重新连接' : hasWorked ? '继续工作' : '开始工作'}</Text>
+            <Text style={styles.workTitle}>{busy === 'work' ? '检查中' : status?.running ? '正在执行' : executionReady ? '工作中' : !paired ? '绑定手机' : status?.autoEnabled ? (!connected ? '等待连接' : !status?.unlocked ? '等待解锁' : '等待就绪') : !connected ? '重新连接' : hasWorked ? '继续工作' : '开始工作'}</Text>
             <Text style={styles.workSubtitle}>{status?.autoEnabled ? '点击暂停领取' : !connected ? '恢复连接后开始工作' : '连接 · 检查 · 接收任务'}</Text>
           </Pressable>
-          <Text style={styles.workHint}>{status?.running ? '正在处理当前任务，请保持屏幕解锁' : executionReady ? '等待网页已确认的任务，收到后自动执行' : status?.autoEnabled ? '工作暂不可用，请处理下方运行检查' : '开始后持续接收网页已确认的任务'}</Text>
+          <Text style={styles.workHint}>{status?.running ? '正在处理当前任务，请保持屏幕解锁' : executionReady ? '等待网页已确认的任务，收到后自动执行' : status?.autoEnabled ? (!connected ? '工作模式保持开启，网络恢复后自动接收任务' : !status?.unlocked ? '工作模式保持开启，解锁后自动继续' : '工作模式保持开启，请处理下方运行检查') : '开始后持续接收网页已确认的任务'}</Text>
         </View>
         <View style={styles.card}>
           <Pressable accessibilityRole="button" accessibilityState={{expanded: checksExpanded || !executionReady}} onPress={() => setChecksExpanded(v => !v)} style={styles.sectionRow}>
