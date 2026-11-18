@@ -1,12 +1,12 @@
 export type ConversationMessage = {
   id: string; task_id?: string; event_id?: string; direction: string; channel: string | null;
   at: string; arrived_at: string; body: string; subject?: string; status: string; source: string;
-  error?: string; headers_only?: boolean;
+  error?: string; headers_only?: boolean; can_delete?: boolean;
   deliveries: { id: string; status: string; source: string; error?: string; at: string }[];
 };
 export type ContactConversation = {
   id: string; channel: string | null; contact_ref: string | null; unread: number;
-  read_through: string | null; messages: ConversationMessage[];
+  archived?: boolean; read_through: string | null; messages: ConversationMessage[];
 };
 export const MESSAGE_STATES: Record<string,string> = {
   completed: "已完成", unavailable: "已完成 · 不可联系", needs_action: "需要手机处理",

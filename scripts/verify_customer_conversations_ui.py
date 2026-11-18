@@ -48,6 +48,9 @@ async def main():
             "deliveries": [],
         },
     ]
+    archived = set()
+    for message in messages["email1"]:
+        message["can_delete"] = True
     errors = []
     writes = []
     overview_requests = []
@@ -133,10 +136,22 @@ async def main():
                         "unread": 0,
                         "read_through": None,
                         "messages": messages[c["id"]],
+                        "archived": c["id"] in archived,
                     }
                     for c in contacts
                 ]
             }
+        elif path.endswith("/archive"):
+            contact = path.split("/")[-2]
+            if body["archived"]:
+                archived.add(contact)
+            else:
+                archived.discard(contact)
+            value = {"ok": True}
+        elif "/messages/" in path and method == "DELETE":
+            contact, identity = path.split("/")[-3], path.split("/")[-1]
+            messages[contact] = [m for m in messages[contact] if m["id"] != identity]
+            value = {"ok": True}
         elif path == "/api/communication/prepare":
             contact = body["eligibility_id"]
             if contact not in active:
@@ -312,7 +327,7 @@ async def main():
             page.get_by_role("textbox", name="文案内容", exact=True).first
         ).to_have_value("Hello, following up on my earlier note.")
         await page.get_by_role("button", name="预览邮件", exact=True).first.click()
-        await page.get_by_role("checkbox").check()
+        await page.locator(".ant-modal").get_by_role("checkbox").check()
         await page.get_by_role("button", name="确认发送", exact=True).click()
         await expect(page.get_by_text("排队中", exact=True)).to_be_visible()
         # Confirmation automatically starts a fresh composer while preserving the previous send.
@@ -369,6 +384,25 @@ async def main():
             "document.documentElement.scrollWidth <= window.innerWidth"
         ), "窄屏横向溢出"
         await page.screenshot(path=str(out / "narrow.png"), full_page=True)
+        await page.set_viewport_size({"width":1600,"height":1150})
+        # Delete one record with explicit confirmation; other history remains visible.
+        await page.locator(".conversation-message").filter(has_text="Previous menu enquiry").get_by_role("button",name="删除记录",exact=True).click()
+        await expect(page.get_by_text("删除这条记录？",exact=True).last).to_be_visible()
+        await page.locator(".ant-modal-confirm").get_by_role("button",name="删除记录",exact=True).click()
+        await expect(page.locator(".conversation-history").get_by_text("Previous menu enquiry",exact=True)).to_have_count(0)
+        await expect(page.locator(".conversation-history").get_by_text("Please contact our manager.",exact=True)).to_be_visible()
+        # Archive one contact, then recover it through the archived view.
+        await page.get_by_role("button",name="归档会话",exact=True).click()
+        await page.locator(".ant-modal-confirm").get_by_role("button",name="归档会话",exact=True).click()
+        await expect(page.get_by_text("会话已归档，可在已归档列表中恢复",exact=True)).to_be_visible()
+        await page.get_by_role("checkbox",name="查看已归档",exact=True).click()
+        await expect(page.get_by_role("checkbox",name="查看已归档",exact=True)).to_be_checked()
+        await expect(page.get_by_role("button",name="恢复会话",exact=True)).to_be_visible()
+        await expect(page.locator(".conversation-history").get_by_text("Please contact our manager.",exact=True)).to_be_visible()
+        await page.get_by_role("button",name="恢复会话",exact=True).click()
+        await page.locator(".ant-modal-confirm").get_by_role("button",name="恢复会话",exact=True).click()
+        await expect(page.get_by_text("会话已恢复",exact=True)).to_be_visible()
+        assert not archived
         assert not errors, errors
         assert len([x for x in writes if x[0].endswith("/confirm")]) == 1
         assert all(not path.endswith("/send") for path, _ in writes)

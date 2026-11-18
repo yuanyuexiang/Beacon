@@ -6,9 +6,9 @@ import { channelLabel } from "@/lib/format";
 import { ReactNode, useEffect, useRef } from "react";
 
 const sources: Record<string,string> = { gmail:"Gmail", manual:"人工记录", mobile:"手机执行", meta:"Meta API", social:"Meta API" };
-export default function ConversationTimeline({ conversation, contacts, actions, onLink, readOnly = false }: {
+export default function ConversationTimeline({ conversation, contacts, actions, onLink, onDelete, readOnly = false }: {
   conversation: ContactConversation; contacts: Contact[]; readOnly?: boolean;
-  actions: (m:ConversationMessage) => ReactNode; onLink: (eventId:string, contactId:string) => void;
+  actions: (m:ConversationMessage) => ReactNode; onDelete?: (message: ConversationMessage) => void; onLink: (eventId:string, contactId:string) => void;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -31,6 +31,7 @@ export default function ConversationTimeline({ conversation, contacts, actions, 
         <div style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{m.body}</div>
         {m.headers_only && <Typography.Paragraph type="secondary" style={{marginTop:8,marginBottom:0}}>仅同步了邮件头，尚未读取回复正文。</Typography.Paragraph>}
         <Space wrap style={{marginTop:10}}><Tag color={m.direction === "inbound" ? "green" : ["failed","blocked","unknown","needs_user"].includes(m.status) ? "orange" : undefined}>{MESSAGE_STATES[m.status] || m.status}</Tag><Typography.Text type="secondary">{sources[m.source] || (m.source.startsWith("mobile") ? "手机回填" : m.source)}</Typography.Text></Space>
+        {!readOnly && m.can_delete && onDelete && <Button danger type="text" size="small" onClick={() => onDelete(m)}>删除记录</Button>}
         {m.error && <Typography.Paragraph type="warning" style={{marginTop:8,marginBottom:0}}>{m.error}</Typography.Paragraph>}
         {m.task_id && <Collapse ghost size="small" items={[{key:"execution",label:"执行详情／截图",children:actions(m)}]} />}
         {conversation.id === "unlinked" && m.event_id && <div style={{marginTop:12}}><Select disabled={readOnly} aria-label="关联回复联系方式" placeholder="选择对应联系方式" style={{width:"100%"}} options={contacts.filter(c => c.channel === m.channel).map(c => ({value:c.id,label:`${channelLabel(c.channel,c.contact_ref)} · ${c.contact_ref}`}))} onChange={value => onLink(m.event_id!,value)} /></div>}

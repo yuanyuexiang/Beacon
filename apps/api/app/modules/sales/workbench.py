@@ -507,6 +507,7 @@ def overview(
     assigned_to: str | None = None,
     q: str = "",
     preparation_group: uuid.UUID | None = None,
+    archived: bool = False,
     page: int = 1,
     page_size: int = 20,
     db: Session = Depends(get_db),
@@ -542,6 +543,40 @@ def overview(
         query = query.where(
             Lead.id.in_(select(ManualTask.lead_id).where(ManualTask.preparation_group_id == preparation_group))
         )
+    # Only evaluate leads this user has ever archived; ordinary lists keep their SQL pagination.
+    from app.core.models import AuditLog
+    from app.modules.sales.conversations import project
+
+    archived_candidates = list(
+        db.scalars(
+            select(AuditLog.entity_id)
+            .where(
+                AuditLog.action == "conversation_archive",
+                AuditLog.entity == "lead",
+                AuditLog.operator_id == op.id,
+            )
+            .distinct()
+        )
+    )
+    hidden = []
+    archived_leads = []
+    visible_ids = set(db.scalars(query.with_only_columns(Lead.id))) if archived_candidates else set()
+    for identity in archived_candidates:
+        try:
+            candidate_id = uuid.UUID(identity)
+        except ValueError:
+            continue
+        if candidate_id not in visible_ids:
+            continue
+        conversations = project(db, candidate_id, op.username)
+        if channel:
+            conversations = [r for r in conversations if r["channel"] == channel.value]
+        used = [r for r in conversations if r["messages"] or r.get("archived")]
+        if any(r.get("archived") for r in used):
+            archived_leads.append(candidate_id)
+        if used and all(r.get("archived") for r in used):
+            hidden.append(candidate_id)
+    query = query.where(Lead.id.in_(archived_leads)) if archived else query.where(Lead.id.not_in(hidden))
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     # Latest activity is computed before pagination, rather than sorting just the visible page.
     last_task = (
@@ -562,7 +597,7 @@ def overview(
                 "name": lead.name,
                 "postcode": lead.postcode,
                 "progress": states[lead.id],
-                **conversation_summary(db, lead.id, op.username),
+                **conversation_summary(db, lead.id, op.username, archived=archived),
             }
             for lead in rows
         ],
@@ -992,10 +1027,10 @@ def activity(lead_id: uuid.UUID, db: Session = Depends(get_db)):
     return {"timeline": sorted(items, key=lambda x: x["at"]), "deliveries": deliveries, "conversations": conversations}
 
 
-def conversation_summary(db: Session, lead_id: uuid.UUID, operator: str) -> dict:
+def conversation_summary(db: Session, lead_id: uuid.UUID, operator: str, *, archived: bool = False) -> dict:
     from app.modules.sales.conversations import project
 
-    rows = project(db, lead_id, operator)
+    rows = [r for r in project(db, lead_id, operator) if bool(r.get("archived")) == archived]
     messages = [m for row in rows for m in row["messages"]]
     last = max(messages, key=lambda m: (m["arrived_at"], m["id"])) if messages else None
     lead = db.get(Lead, lead_id)

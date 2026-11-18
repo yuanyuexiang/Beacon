@@ -1,5 +1,6 @@
 """Conversation isolation, repeated sends and precise unread/reply association."""
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -234,3 +235,148 @@ def test_conversation_permissions_and_read_positions_are_per_operator(client, db
     assert alice.put(url + f"/{contact['id']}/read", json={"through": row["read_through"]}).status_code == 200
     assert next(r for r in alice.get(url).json()["items"] if r["id"] == contact["id"])["unread"] == 0
     assert next(r for r in client.get(url).json()["items"] if r["id"] == contact["id"])["unread"] == 1
+
+
+def test_archive_is_per_contact_per_user_and_new_reply_reopens(client, db):
+    from tests.test_auth import make_operator
+    from tests.test_users import session
+
+    lead, _, _ = _ready(client, db)
+    first = _elig(client, lead).json()["id"]
+    second = ChannelEligibility(lead_id=lead, channel=Channel.email, contact_ref="other@example.org")
+    db.add(second)
+    db.commit()
+    base = f"/api/communication/conversations/{lead}"
+    for key in (first, str(second.id)):
+        assert (
+            client.post(base + f"/{key}/reply", json={"event_key": f"manual:{key}", "summary": key}).status_code == 200
+        )
+    assert client.put(base + f"/{first}/archive", json={"archived": True}).status_code == 200
+    rows = {r["id"]: r for r in client.get(base).json()["items"]}
+    assert rows[first]["archived"] and not rows[str(second.id)]["archived"]
+    assert client.get("/api/communication/overview").json()["total"] == 1
+    archived = client.get("/api/communication/overview?archived=true").json()
+    assert archived["total"] == 1 and archived["items"][0]["last_message"] == first
+    other = make_operator(db, "other-reader")
+    other.role = "director"
+    db.commit()
+    assert not any(r["archived"] for r in session(other).get(base).json()["items"])
+    assert client.put(base + f"/{second.id}/archive", json={"archived": True}).status_code == 200
+    assert client.get("/api/communication/overview").json()["total"] == 0
+    # Old occurrence time must not prevent a newly arrived reply reopening the conversation.
+    assert (
+        client.post(
+            base + f"/{first}/reply",
+            json={
+                "event_key": "manual:new",
+                "summary": "new reply",
+                "occurred_at": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+            },
+        ).status_code
+        == 200
+    )
+    rows = {r["id"]: r for r in client.get(base).json()["items"]}
+    assert not rows[first]["archived"] and rows[str(second.id)]["archived"]
+    assert client.get("/api/communication/overview").json()["total"] == 1
+    assert client.put(base + f"/{second.id}/archive", json={"archived": False}).status_code == 200
+    assert client.get("/api/communication/overview?archived=true").json()["total"] == 0
+
+
+def test_deleted_reply_preserves_suppression_and_deduplication(client, db):
+    from app.core.models import AuditLog
+    from app.modules.sales.models import Suppression
+
+    lead, _, _ = _ready(client, db)
+    contact = _elig(client, lead).json()["id"]
+    base = f"/api/communication/conversations/{lead}/{contact}"
+    body = {"event_key": "manual:reject-delete", "kind": "reject", "summary": "Do not contact us again"}
+    reply = client.post(base + "/reply", json=body).json()
+    event_id = uuid.UUID(reply["id"])
+    suppression_ids = set(db.scalars(select(Suppression.id)))
+    assert suppression_ids
+    delete = base + "/messages/event:" + reply["id"]
+    assert client.delete(delete).status_code == 200
+    assert client.delete(delete).status_code == 200
+    assert db.get(Event, event_id) is not None
+    assert set(db.scalars(select(Suppression.id))) == suppression_ids
+    assert len(list(db.scalars(select(AuditLog).where(AuditLog.action == "conversation_message_deleted")))) == 1
+    assert client.post(base + "/reply", json=body).json()["id"] == reply["id"]
+    row = next(r for r in client.get(f"/api/communication/conversations/{lead}").json()["items"] if r["id"] == contact)
+    assert not row["messages"] and row["unread"] == 0
+    overview = client.get("/api/communication/overview").json()["items"][0]
+    assert "Do not contact" not in overview["last_message"]
+
+
+def test_members_delete_only_own_manual_records_and_not_other_leads(client, db):
+    from app.modules.leads.models import Lead
+    from tests.test_auth import make_operator
+    from tests.test_users import session
+
+    lead, _, _ = _ready(client, db)
+    contact = _elig(client, lead).json()["id"]
+    alice, bob = make_operator(db, "cleanup-alice"), make_operator(db, "cleanup-bob")
+    alice.role = bob.role = "member"
+    db.get(Lead, lead).assigned_to = alice.username
+    db.commit()
+    a, b = session(alice), session(bob)
+    base = f"/api/communication/conversations/{lead}/{contact}"
+    mine = a.post(base + "/reply", json={"event_key": "manual:mine", "summary": "mistyped"}).json()["id"]
+    theirs = client.post(base + "/reply", json={"event_key": "manual:theirs", "summary": "other record"}).json()["id"]
+    provider = Event(
+        lead_id=lead,
+        channel=Channel.email,
+        event_key="provider:test",
+        kind=EventKind.reply,
+        recorded_at=datetime.now(UTC),
+        recorded_by=alice.username,
+        payload={"eligibility_id": contact, "source": "gmail", "summary": "real reply"},
+    )
+    db.add(provider)
+    db.commit()
+    assert a.delete(base + "/messages/event:" + mine).status_code == 200
+    assert a.delete(base + "/messages/event:" + theirs).status_code == 403
+    assert a.delete(base + f"/messages/event:{provider.id}").status_code == 403
+    assert b.put(base + "/archive", json={"archived": True}).status_code == 404
+    assert b.delete(base + "/messages/event:" + mine).status_code == 404
+    assert a.delete(base.replace(contact, "unlinked") + "/messages/event:" + theirs).status_code == 404
+    assert client.delete(base + f"/messages/event:{provider.id}").status_code == 200
+    viewer = make_operator(db, "cleanup-viewer")
+    viewer.role = "viewer"
+    db.commit()
+    v = session(viewer)
+    assert v.put(base + "/archive", json={"archived": True}).status_code == 403
+    assert v.delete(base + "/messages/event:" + theirs).status_code == 403
+
+
+def test_active_and_unknown_send_cannot_be_deleted_but_settled_send_can(client, db):
+    lead, _, _ = _ready(client, db)
+    contact = _elig(client, lead).json()["id"]
+    draft = write(client, prepare_message(client, lead, contact))
+    preview = client.post(f"/api/communication/drafts/{draft['id']}/preview").json()
+    confirmed = client.post(
+        f"/api/communication/drafts/{draft['id']}/confirm",
+        json={"confirmed": True, "preview_hash": preview["preview_hash"]},
+    ).json()
+    task = db.get(ManualTask, confirmed["task_id"])
+    base = f"/api/communication/conversations/{lead}/{contact}"
+    delete = base + f"/messages/task:{task.id}"
+    assert client.delete(delete).status_code == 403
+    from app.modules.gmail.models import EmailDelivery
+
+    task.status = TaskStatus.sent_manual
+    task.sent_at = datetime.now(UTC)
+    delivery = EmailDelivery(
+        task_id=task.id,
+        status="unknown",
+        payload={},
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        request_key="unknown-delete-test",
+    )
+    db.add(delivery)
+    db.commit()
+    assert client.delete(delete).status_code == 403
+    delivery.status = "sent"
+    db.commit()
+    assert client.delete(delete).status_code == 200
+    assert db.get(ManualTask, task.id).status == TaskStatus.sent_manual
+    assert not client.get(f"/api/communication/conversations/{lead}").json()["items"][0]["messages"]

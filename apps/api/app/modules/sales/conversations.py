@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core import audit
 from app.core.auth import current_operator
 from app.core.db import get_db
-from app.core.models import Operator
+from app.core.models import AuditLog, Operator
 from app.modules.content.models import ContentPiece
 from app.modules.gmail.models import EmailDelivery
 from app.modules.mobile.models import Execution
@@ -65,7 +65,7 @@ def event_contact(db: Session, event: Event, contacts: list[ChannelEligibility],
     return matched[0] if len(matched) == 1 else "unlinked"
 
 
-def project(db: Session, lead_id: uuid.UUID, operator: str) -> list[dict]:
+def project(db: Session, lead_id: uuid.UUID, operator: str, *, include_deleted: bool = False) -> list[dict]:
     contacts = list(db.scalars(select(ChannelEligibility).where(ChannelEligibility.lead_id == lead_id)))
     rows: dict[str, dict] = {
         str(c.id): {
@@ -137,7 +137,8 @@ def project(db: Session, lead_id: uuid.UUID, operator: str) -> list[dict]:
                 "deliveries": records,
             }
         )
-    for event in db.scalars(select(Event).where(Event.lead_id == lead_id)):
+    event_rows = {str(e.id): e for e in db.scalars(select(Event).where(Event.lead_id == lead_id))}
+    for event in event_rows.values():
         key = event_contact(db, event, contacts, tasks)
         payload = event.payload or {}
         incoming = event.kind != EventKind.note
@@ -159,10 +160,61 @@ def project(db: Session, lead_id: uuid.UUID, operator: str) -> list[dict]:
         )
         if incoming and (key not in read or event.recorded_at > read[key]):
             rows[key]["unread"] += 1
+    op = db.scalar(select(Operator).where(Operator.username == operator))
+    controls = list(
+        db.scalars(
+            select(AuditLog).where(
+                AuditLog.entity == "lead",
+                AuditLog.entity_id == str(lead_id),
+                AuditLog.action.in_(["conversation_archive", "conversation_message_deleted"]),
+            )
+        )
+    )
+    deleted = {(r.after or {}).get("message_id") for r in controls if r.action == "conversation_message_deleted"}
+    archives = {}
+    for record in sorted(controls, key=lambda r: (r.after or {}).get("changed_at", "")):
+        if record.action == "conversation_archive" and op and record.operator_id == op.id:
+            archives[(record.after or {}).get("contact_key")] = record.after or {}
     for row in rows.values():
+        incoming_times = [m["arrived_at"].isoformat() for m in row["messages"] if m["direction"] == "inbound"]
+        state = archives.get(row["id"], {})
+        row["archived"] = bool(state.get("archived")) and max(incoming_times, default="") <= state.get(
+            "incoming_through", ""
+        )
+        for message in row["messages"]:
+            message["can_delete"] = bool(op and op.role in {"admin", "director"})
+            if message.get("event_id"):
+                recorded_event = event_rows.get(message["event_id"])
+                if (
+                    recorded_event
+                    and (recorded_event.payload or {}).get("source") == "manual"
+                    and recorded_event.recorded_by == operator
+                ):
+                    message["can_delete"] = bool(op and op.role in {"admin", "director", "member"})
+            if message.get("task_id") and message["status"] in {
+                "pending",
+                "opened",
+                "paused",
+                "preview",
+                "ready",
+                "queued",
+                "queued_paused",
+                "claimed",
+                "executing",
+                "sending",
+                "unknown",
+            }:
+                message["can_delete"] = False
+        if not include_deleted:
+            row["messages"] = [m for m in row["messages"] if m["id"] not in deleted]
+        row["unread"] = sum(
+            1
+            for m in row["messages"]
+            if m["direction"] == "inbound" and (row["id"] not in read or m["arrived_at"] > read[row["id"]])
+        )
         row["messages"].sort(key=lambda m: (m["at"], m["id"]))
         row["read_through"] = max((m["arrived_at"] for m in row["messages"]), default=None)
-    return [r for r in rows.values() if r["id"] != "unlinked" or r["messages"]]
+    return [r for r in rows.values() if r["id"] != "unlinked" or r["messages"] or r.get("archived")]
 
 
 @router.get("/conversations/{lead_id}")
@@ -271,3 +323,79 @@ def record_reply(
     )
     db.commit()
     return {"id": str(event.id)}
+
+
+class ArchiveIn(BaseModel):
+    archived: bool
+
+
+@router.put("/conversations/{lead_id}/{contact_key}/archive")
+def archive_conversation(
+    lead_id: uuid.UUID,
+    contact_key: str,
+    body: ArchiveIn,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
+    workbench.lead_or_404(db, lead_id, lock=True)
+    row = next((r for r in project(db, lead_id, op.username, include_deleted=True) if r["id"] == contact_key), None)
+    if not row:
+        raise HTTPException(404, "会话不存在")
+    incoming_times = [m["arrived_at"].isoformat() for m in row["messages"] if m["direction"] == "inbound"]
+    audit.record(
+        db,
+        op,
+        "conversation_archive",
+        "lead",
+        lead_id,
+        after={
+            "contact_key": contact_key,
+            "archived": body.archived,
+            "incoming_through": max(incoming_times, default=""),
+            "changed_at": service.now().isoformat(),
+        },
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/conversations/{lead_id}/{contact_key}/messages/{message_id}")
+def delete_message(
+    lead_id: uuid.UUID,
+    contact_key: str,
+    message_id: str,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
+    workbench.lead_or_404(db, lead_id, lock=True)
+    row = next((r for r in project(db, lead_id, op.username, include_deleted=True) if r["id"] == contact_key), None)
+    message = next((m for m in row["messages"] if m["id"] == message_id), None) if row else None
+    if not message:
+        raise HTTPException(404, "会话记录不存在")
+    if not message["can_delete"]:
+        raise HTTPException(
+            403, "只能删除本人手工记录；真实收发记录需销售总监或管理员处理，进行中及结果未知的消息需先核对"
+        )
+    existing = db.scalar(
+        select(AuditLog.id).where(
+            AuditLog.action == "conversation_message_deleted",
+            AuditLog.entity == "lead",
+            AuditLog.entity_id == str(lead_id),
+            AuditLog.after["message_id"].astext == message_id,
+        )
+    )
+    if not existing:
+        audit.record(
+            db,
+            op,
+            "conversation_message_deleted",
+            "lead",
+            lead_id,
+            after={
+                "contact_key": contact_key,
+                "message_id": message_id,
+                "changed_at": service.now().isoformat(),
+            },
+        )
+    db.commit()
+    return {"ok": True}

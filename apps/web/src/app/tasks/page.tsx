@@ -26,6 +26,7 @@ type ManualPreview = { task_id:string; channel:string; url:string|null; text:str
 
 function TasksInner() {
   const { me } = useOperator();
+  const [modal, modalContext] = Modal.useModal();
   const canWrite = ["admin","director","member"].includes(me?.role || "");
   const identity = useOutreachIdentity();
   const router = useRouter(), sp = useSearchParams();
@@ -34,13 +35,14 @@ function TasksInner() {
   const batch = sp.get("batch") || undefined, assigned = sp.get("owner") || undefined;
   const query = sp.get("q") || "", page = Math.max(1,Number(sp.get("page")) || 1);
   const group = sp.get("preparation") || undefined;
+  const archivedView = sp.get("archived") === "1";
   const back = safeReturnTo(sp.get("returnTo") || (batch ? `/leads?batch=${encodeURIComponent(batch)}` : "/leads"));
   const [rows,setRows] = useState<Customer[]>([]), [total,setTotal] = useState(0);
   const [batches,setBatches] = useState<{batch_key:string}[]>([]), [owners,setOwners] = useState<Assignee[]>([]);
   const [loadedContext,setContext] = useState<LeadContext>(), [loadedConversations,setConversations] = useState<ContactConversation[]>([]);
   // Keep the list mounted while a different customer loads. Never render or act on the previous customer.
   const context = loadedContext?.lead.id === leadId ? loadedContext : undefined;
-  const conversations = context ? loadedConversations : [];
+  const conversations = context ? loadedConversations.filter(c => !!c.archived === archivedView) : [];
   const [contactId,setContactId] = useState<string>(), [drafts,setDrafts] = useState<Record<string,Draft>>({});
   const [error,setError] = useState<string>(), [notice,setNotice] = useState<string>();
   const [busy,setBusy] = useState(false), [details,setDetails] = useState(false), [replyOpen,setReplyOpen] = useState(false);
@@ -59,10 +61,11 @@ function TasksInner() {
     const request=++listGeneration.current;
     const p=new URLSearchParams({page:String(page)});
     if(batch) p.set("batch_key",batch); if(channel) p.set("channel",channel); if(assigned) p.set("assigned_to",assigned);
+    if(archivedView) p.set("archived","true");
     if(query) p.set("q",query); if(group) p.set("preparation_group",group);
     const r=await api<{items:Customer[];total:number}>(`/api/communication/overview?${p}`);
     if(request===listGeneration.current) {setRows(r.items);setTotal(r.total);}
-  },[page,batch,channel,assigned,query,group]);
+  },[page,batch,channel,assigned,query,group,archivedView]);
   const refreshContext = useCallback(async () => {
     const request=++generation.current;
     if(!leadId) return;
@@ -70,8 +73,9 @@ function TasksInner() {
     if(request!==generation.current) return;
     setContext(c);setConversations(r.items);
     const focused=c.tasks.find(t => t.id === focusedTaskId);
-    setContactId(old => r.items.some(x => x.id===old) ? old : focused?.eligibility_id || r.items.find(x => x.unread)?.id || r.items.find(x => x.messages.length)?.id || c.drafts?.find(d => d.queued)?.eligibility_id || r.items[0]?.id);
-  },[leadId,focusedTaskId]);
+    const visible = r.items.filter(c => !!c.archived === archivedView);
+    setContactId(old => visible.some(x => x.id===old) ? old : visible.find(x => x.id === focused?.eligibility_id)?.id || visible.find(x => x.unread)?.id || visible.find(x => x.messages.length)?.id || visible[0]?.id);
+  },[leadId,focusedTaskId,archivedView]);
   const refresh = useCallback(async () => {await Promise.all([refreshList(),refreshContext()]);},[refreshList,refreshContext]);
   useEffect(() => { api<{batch_key:string}[]>("/api/batches").then(setBatches).catch(e => setError(e.message)); api<Assignee[]>("/api/communication/assignees").then(setOwners).catch(e => setError(e.message)); },[]);
   useEffect(() => { refreshList().catch(e => setError(e.message)); },[refreshList]);
@@ -113,6 +117,7 @@ function TasksInner() {
   };
   const activeDraft=contactId ? drafts[contactId] : undefined;
   return <>
+    {modalContext}
     <HeroBand kicker="COMMUNICATION" title="客户沟通" subtitle="按客户和联系方式查看消息，继续发送与跟进。" extra={<Space wrap><Link href={back}><Button readOnlySafe>返回名单</Button></Link><Button readOnlySafe onClick={() => refresh().catch(e => setError(e.message))}>刷新消息</Button><Button readOnlySafe onClick={() => api<Record<string,string>[]>("/api/suppressions").then(setSuppression).catch(e => setError(e.message))}>抑制名单</Button></Space>} />
     {error && <Alert type="error" showIcon message={error} closable onClose={() => setError(undefined)} style={{marginBottom:12}} />}
     {notice && <Alert type="success" showIcon message={notice} closable onClose={() => setNotice(undefined)} style={{marginBottom:12}} />}
@@ -122,6 +127,7 @@ function TasksInner() {
       <Select aria-label="沟通渠道筛选" allowClear placeholder="全部渠道" value={channel} options={CHANNELS} style={{width:160}} onChange={v => navigate({channel:v,page:"1"})} />
       <Select aria-label="沟通负责人筛选" allowClear placeholder="全部负责人" value={assigned} options={owners.map(o => ({value:o.username,label:o.display_name || o.username}))} style={{width:160}} onChange={v => navigate({owner:v,page:"1"})} />
       <Input.Search key={query} defaultValue={query} placeholder="搜索客户／邮编" allowClear style={{width:220}} onSearch={q => navigate({q:q || undefined,page:"1"})} />
+      <Checkbox checked={archivedView} disabled={editing || busy} onChange={e => navigate({archived:e.target.checked ? "1" : undefined,lead:undefined,page:"1"})}>查看已归档</Checkbox>
       {group && <Tag closable onClose={() => navigate({preparation:undefined,page:"1"})}>本次任务</Tag>}
     </Space>
     <div className={`customer-workspace ${details ? "with-details" : ""}`}>
@@ -136,9 +142,10 @@ function TasksInner() {
       <Card key={leadId} size="small" loading={!!leadId && !context} className="customer-chat" title={context?.lead.name || rows.find(r => r.id === leadId)?.name || "选择客户"} extra={<Button readOnlySafe size="small" onClick={() => setDetails(v => !v)}>{details ? "收起资料" : "客户资料"}</Button>}>
         {!context ? <Empty description="从左侧选择客户，或在名单中发起沟通" /> : <>
           <div className="conversation-toolbar"><Select aria-label="客户联系方式" placeholder="选择联系方式" value={contactId} disabled={editing || busy} style={{width:"100%"}} options={conversations.map(c => ({value:c.id,label:`${c.id==="unlinked" ? "未关联记录" : `${channelLabel(c.channel || "",c.contact_ref)} · ${c.contact_ref || "未填写"}`}${c.unread ? ` · ${c.unread} 条未读` : ""}`}))} onChange={id => {setContactId(id);setNotice(undefined);}} />
-          {selected && <Button readOnlySafe onClick={() => {replyForm.resetFields();eventKey.current=undefined;setReplyOpen(true);}}>记录回复</Button>}</div>
-          {conversation ? <ConversationTimeline readOnly={!canWrite} conversation={conversation} contacts={context.contacts} actions={taskActions} onLink={(eventId,contactId) => act(async () => {await api(`/api/communication/conversations/${leadId}/events/${eventId}/link`,json({contact_id:contactId}));})} /> : <Empty description="请在线索详情添加联系方式" />}
-          {selected && <div className="conversation-compose">
+          {conversation && canWrite && <Button disabled={busy || editing} onClick={() => modal.confirm({title:conversation.archived ? "恢复这个会话？" : "归档这个会话？",content:`${context.lead.name} · ${conversation.contact_ref || "未关联记录"}。归档只影响你的默认列表，任务与其他渠道保持原样；收到新回复后会重新出现。`,okText:conversation.archived ? "恢复会话" : "归档会话",cancelText:"取消",onOk:() => act(async () => {await api(`/api/communication/conversations/${leadId}/${conversation.id}/archive`,json({archived:!conversation.archived},"PUT"));setNotice(conversation.archived ? "会话已恢复" : "会话已归档，可在已归档列表中恢复");})})}>{conversation.archived ? "恢复会话" : "归档会话"}</Button>}
+          {selected && !conversation?.archived && <Button readOnlySafe onClick={() => {replyForm.resetFields();eventKey.current=undefined;setReplyOpen(true);}}>记录回复</Button>}</div>
+          {conversation ? <ConversationTimeline readOnly={!canWrite} conversation={conversation} contacts={context.contacts} actions={taskActions} onDelete={m => modal.confirm({title:"删除这条记录？",content:<><p>{context.lead.name} · {conversation.contact_ref || "未关联记录"}</p><p style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{m.body.slice(0,200)}</p><p>仅从 Beacon 会话中移除这一条，不会撤回平台消息；拒收状态、发送结果和去重记录保留。</p></>,okText:"删除记录",okButtonProps:{danger:true},cancelText:"取消",onOk:() => act(async () => {await api(`/api/communication/conversations/${leadId}/${conversation.id}/messages/${encodeURIComponent(m.id)}`,{method:"DELETE"});setNotice("记录已从会话中删除");})})} onLink={(eventId,contactId) => act(async () => {await api(`/api/communication/conversations/${leadId}/events/${eventId}/link`,json({contact_id:contactId}));})} /> : <Empty description={archivedView ? "当前没有已归档会话" : "当前没有未归档会话，可切换已归档列表查看"} />}
+          {selected && !conversation?.archived && <div className="conversation-compose">
             <div className="conversation-compose-heading"><b>写新消息</b><Typography.Text type="secondary">无需等待客户回复，可以继续联系</Typography.Text></div>
             {!activeDraft && <Button type="primary" loading={busy} disabled={!canWrite} onClick={() => act(startDraft)}>写消息／继续草稿</Button>}
             {Object.entries(drafts).filter(([,d]) => d.lead_id === leadId).map(([id,d]) => <div key={d.id} style={{display:id===contactId ? "block" : "none"}}>
