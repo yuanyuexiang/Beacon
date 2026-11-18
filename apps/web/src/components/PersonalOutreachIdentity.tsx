@@ -24,6 +24,6 @@ export default function PersonalOutreachIdentity() {
       setBusy(true); setError(undefined);
       try { const next = await api<Identity>("/api/outreach-identity", json({ ...v, version: own?.version }, "PUT")); setOwn(next); setDirty(false); setSaved(true); }
       catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-    }}><Space wrap><Form.Item name="name" label="我的英文姓名"><Input maxLength={100} /></Form.Item><Form.Item name="role" label="我的英文职务（可选）"><Input maxLength={100} /></Form.Item></Space><p style={{ whiteSpace: "pre-wrap" }}>{own?.sender_identity || "尚未设置署名"}</p><Button htmlType="submit" loading={busy}>保存我的署名</Button></Form>
+    }}><Space wrap><Form.Item name="name" label="我的英文姓名" extra="例如 Tom，首字母大写；只填写本人姓名。"><Input maxLength={100} /></Form.Item><Form.Item name="role" label="我的英文职务（可选）" extra="留空会沿用公司默认职务；不需要职务时也请清空公司默认值。"><Input maxLength={100} /></Form.Item></Space><p style={{ whiteSpace: "pre-wrap" }}>{own?.sender_identity || "尚未设置署名"}</p><Button htmlType="submit" loading={busy}>保存我的署名</Button></Form>
   </Card>;
 }

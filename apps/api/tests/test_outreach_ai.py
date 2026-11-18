@@ -225,3 +225,28 @@ def test_real_provider_protocol_uses_structured_output_without_network(db, monke
     else:
         with pytest.raises(ProviderUnavailable):
             outreach_ai.generate({"sources": []})
+
+
+@pytest.mark.parametrize("channel", ["email", "facebook", "whatsapp"])
+def test_configured_company_website_is_appended_once_and_frozen(client, db, monkeypatch, channel):
+    identity = setup_lead(client, db)
+    offered = configure(client)
+    saved = client.put("/api/outreach-profile", json={**offered, "website": "https://ai-onestep.com/zh-hans/"})
+    assert saved.status_code == 200
+    monkeypatch.setattr(
+        outreach_ai,
+        "generate",
+        lambda _: result(
+            body="Hi, we help restaurants with menu design and printing. Are you responsible for menu updates?"
+        ),
+    )
+    response = request(client, identity, channel=channel, sender_identity=IDENT + "\nhttps://ai-onestep.com/")
+    assert response.status_code == 201, response.text
+    piece = response.json()
+    assert "printing.\n\nAre you" in piece["body_text"]
+    assert piece["body_text"].count("https://ai-onestep.com/en/") == 1
+    assert "zh-hans" not in piece["body_text"]
+    assert piece["spec"]["sender_identity"].endswith("https://ai-onestep.com/en/")
+    client.put("/api/outreach-profile", json={**saved.json(), "website": "https://example.com/"})
+    previous = next(p for p in client.get(f"/api/leads/{identity}/content").json() if p["id"] == piece["id"])
+    assert previous["body_text"] == piece["body_text"]

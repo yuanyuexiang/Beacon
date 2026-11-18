@@ -59,13 +59,14 @@ export default function OutreachProfileSettings() {
         <Form.Item name="proof" label="可验证案例与优势（可选）"><Input.TextArea rows={2} maxLength={4000} placeholder="真实作品链接、案例与有依据的优势；没有可以留空" /></Form.Item>
         <Form.Item name="constraints" label="服务范围与承诺限制（可选）"><Input.TextArea rows={2} maxLength={2000} placeholder="例如：报价和交期需确认需求后提供；请按真实情况填写" /></Form.Item>
         <Typography.Title level={5}>2. 对外资料 · 使用英文</Typography.Title>
-        <Form.Item name="english_brand" label="英文品牌名称" rules={[{ max: 80, message: "只填写简短品牌名，不要粘贴服务介绍" }, { pattern: /^(?!\s*(?:we (?:help|provide|offer|work)|our (?:services|company))\b)/i, message: "这里填写品牌名称，例如 Xiaodangjia；服务介绍请填到下方" }]} extra="填写你确认使用的名称，AI 不会擅自翻译公司名称。"><Input maxLength={80} placeholder="例如 Xiaodangjia，仅填写品牌名" /></Form.Item>
+        <Form.Item name="english_brand" label="英文品牌名称" rules={[{ max: 80, message: "只填写简短品牌名，不要粘贴服务介绍" }, { pattern: /^(?!\s*(?:we (?:help|provide|offer|work)|our (?:services|company))\b)/i, message: "这里填写品牌名称，例如 Xiaodangjia；服务介绍请填到下方" }]} extra="这里只填公司／品牌，不填第二个人名。小当家可使用经确认的 Xiaodangjia · One Step Group；AI 不会擅自更改。"><Input maxLength={80} placeholder="例如 Xiaodangjia，仅填写品牌名" /></Form.Item>
         <Form.Item name="english_summary" label="英文服务介绍（可选）" extra="可以自行填写，也可以让 AI 从上面的事实整理后核对采用。"><Input.TextArea rows={3} maxLength={3000} /></Form.Item>
         {me?.role === "admin" && <Button loading={busy === "organise"} disabled={!!busy} onClick={() => void runAI("organise")}>AI 整理英文介绍</Button>}
         {suggestion && <Alert style={{ marginTop: 12 }} type="info" message="待核对的英文介绍" description={<><p style={{ whiteSpace: "pre-wrap" }}>{suggestion.english_summary}</p>{suggestion.missing.map(x => <p key={x}>{x}</p>)}<Button onClick={() => { form.setFieldValue("english_summary", suggestion.english_summary); changed(); }}>采用英文介绍</Button></>} />}
         <Typography.Title level={5}>3. 默认署名与表达偏好</Typography.Title>
-        <Space wrap align="start"><Form.Item name="sender_name" label="默认发件人英文姓名"><Input maxLength={100} placeholder="真实英文名或拼音" /></Form.Item><Form.Item name="sender_role" label="英文职务（可选）"><Input maxLength={100} /></Form.Item></Space>
-        <Form.Item name="website" label="公司官网（可选）"><Input maxLength={500} placeholder="https://…" /></Form.Item>
+        <Space wrap align="start"><Form.Item name="sender_name" label="默认发件人英文姓名" extra="例如 Tom，注意姓名首字母大写。"><Input maxLength={100} placeholder="真实英文名或拼音" /></Form.Item><Form.Item name="sender_role" label="英文职务（可选）" extra="首次简短触达可留空，不必填写 CEO。"><Input maxLength={100} /></Form.Item></Space>
+        <Form.Item name="website" label="对外官网（建议使用英文页面）" extra="官网随署名放在消息末尾。英国客户使用英文入口；修改后重新生成消息，已有草稿及发送记录不会自动改变。"><Input maxLength={500} placeholder="https://ai-onestep.com/en/" /></Form.Item>
+        <Button disabled={!!busy || me?.role !== "admin" || !profile} onClick={() => { form.setFieldValue("website", "https://ai-onestep.com/en/"); changed(); }}>使用小当家官网英文版</Button>
         <p>客户消息语言：<Tag>English (UK)</Tag> AI 分析说明：中文</p>
         <Form.Item name="tone" label="表达风格" initialValue="professional"><Select options={[{ value: "professional", label: "专业简洁" }, { value: "warm", label: "自然友好" }]} /></Form.Item>
         <Form.Item name="opt_out_text" label="英文退出说明"><Input.TextArea rows={2} maxLength={1000} /></Form.Item>

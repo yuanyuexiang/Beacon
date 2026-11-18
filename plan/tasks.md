@@ -839,3 +839,7 @@ D73 验证：邮件服务 20 项、API／登录 27 项、前端 25 项，mypy／
   返回策略修复验证：49 项原生单测、移动端 typecheck／lint、release 构建通过，无线覆盖安装成功；未触达客户，具体 Facebook 无入口场景待下一次任务真机复验。
 
 - [x] 2026-11-17 编写客户 Google 服务开通指南：Gmail Web OAuth／正式发布与审核、Places API (New)／结算与密钥限制、交付及验收清单；按当前代码及 Google 官方资料核对。
+
+- [x] 2026-11-18 官网接入英文触达：设置一键采用英文官网、已知中文首页转换、AI 新消息署名补齐去重；保留空配置、旧草稿与历史。后端 profile_tools／outreach_ai 27 项测试通过；Web typecheck、专项 ESLint、Ruff、mypy 和设置页模拟 UI 回归通过（3001，全 API 模拟，未保存真实资料）。仅本地，未发送或发布。
+
+- [x] 2026-11-18 简化首次触达格式：短介绍与单问题分段、减少服务类型罗列与索要菜单、补齐姓名／职务／品牌填写提示；已配置真实身份不自动改名，旧消息保留。28 项 profile_tools／outreach_ai 测试、Web typecheck、专项 ESLint、Ruff、mypy 通过。无真实模型调用／发送，未发布。

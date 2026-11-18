@@ -109,15 +109,22 @@ Use the actual services offered, relevant verified menu details and confirmed pr
 No invented problems, client cases, prices, discounts, delivery promises, prepared samples, visits or relationships.
 Menu items may be an excerpt; never infer that missing entries are absent from the actual menu.
 No profitability/allergen/dietary claims. If no confirmed problems, offer relevant design/printing cooperation without
-criticising the menu. If no reviewed menu, ask for a menu or the responsible person; never say there is no menu.
+criticising the menu. Never say there is no menu merely because no reviewed menu was supplied.
+For an initial message without a reviewed menu, ask whether the recipient handles menu updates.
+Do not request their menu or offer multiple alternative requests in that first message.
+For replies and follow-ups, respond to the actual conversation; a menu request is appropriate when relevant.
 Internal writing_constraints are guardrails, never customer-facing copy. Do not describe verification procedures,
 source checking or what you would only say after checking. Avoid a catalogue of our services or printing specifications.
 Never infer that an academy, school, club or other organisation runs a cafe or needs menus from its name or FSA listing.
 If hospitality activity is not evidenced, make a brief conditional relevance enquiry, without saying "we understand".
 Ask one easy next question. Do not ask for a meeting, files, specifications and a purchasing contact all at once.
-For no-menu first contact, use 45-85 words excluding signature. With reviewed menu evidence, use 70-120 words.
-Email: concise subject and a natural, specific body. Social: no subject, 2-4 short sentences, no bulk-email formatting.
-Do not include sender signature or opt-out (the program appends these exactly).
+For initial email without reviewed menu evidence, use 35-65 words excluding signature; with evidence, use 55-90 words.
+For initial social messages, use 25-50 words, no subject, 2-3 short sentences.
+Use two short paragraphs separated by a blank line: a relevant service introduction, then one easy question.
+Do not list restaurants, cafes, takeaways and bars; refer simply to restaurants when relevant.
+Avoid vague filler such as "I'm happy to take a look first" and generic "Hello — we work with" openings.
+Use a simple "Hi," greeting. Email may have a concise subject; social must not use bulk-email formatting.
+Do not include sender signature, website links or opt-out (the program appends these exactly).
 Return a JSON object matching output_schema. Do not grant consent, approve or send anything.
 MANDATORY: subject and body must be written entirely in English even when source facts are Chinese.
 Chinese is permitted only in rationale, missing and translation_zh. Never put [Name], [Company] or other placeholders
@@ -149,13 +156,61 @@ def service_source(offered: ServiceProfile) -> str:
     )
 
 
+def outreach_website(website: str) -> str:
+    """Use the confirmed English homepage for our known multilingual site only."""
+    from urllib.parse import urlsplit
+
+    value = website.strip()
+    try:
+        url = urlsplit(value)
+    except ValueError:
+        return value
+    if (
+        url.scheme in {"https", "http"}
+        and url.hostname in {"ai-onestep.com", "www.ai-onestep.com"}
+        and not url.username
+        and not url.password
+        and url.path.rstrip("/") in {"", "/zh", "/zh-hans", "/zh-hant"}
+        and not url.query
+        and not url.fragment
+    ):
+        return "https://ai-onestep.com/en/"
+    return value
+
+
+def outreach_sender(sender: str, offered: ServiceProfile) -> str:
+    """Keep the actual sender while adding the configured company website once."""
+    website = outreach_website(offered.website)
+    if not website:
+        return sender.strip()
+    lines = [line for line in sender.strip().splitlines() if outreach_website(line) != website]
+    return "\n".join([*lines, website])
+
+
 def signature(offered: ServiceProfile, name: str = "", role: str = "") -> str:
     validate_brand(offered.english_brand)
     return "\n".join(
         x.strip()
-        for x in (name or offered.sender_name, role or offered.sender_role, offered.english_brand, offered.website)
+        for x in (
+            name or offered.sender_name,
+            role or offered.sender_role,
+            offered.english_brand,
+            outreach_website(offered.website),
+        )
         if x.strip()
     )
+
+
+def format_outreach_body(body: str) -> str:
+    """Separate a flattened generated introduction from its closing question."""
+    clean = body.strip()
+    if "\n" in clean:
+        return clean
+    # A standalone final question is a useful paragraph boundary, without changing words.
+    match = re.search(r"[.!]\s+(?=(?:Are|Do|Does|Could|Would|Is|Who|Can|If)\b)", clean)
+    if match:
+        return clean[: match.start() + 1] + "\n\n" + clean[match.end() :]
+    return clean
 
 
 def append_identity(body: str, sender: str, opt_out: str) -> str:
@@ -190,7 +245,7 @@ def generate(task: dict, *, retry_invalid: bool = True) -> tuple[GeneratedMessag
     provider = model_client("writing")
     from app.integrations.ai_observation import observe
 
-    with observe("outreach_message", provider.model, "outreach-2-en-GB") as record:
+    with observe("outreach_message", provider.model, "outreach-3-en-GB") as record:
         try:
             record.update(metadata(provider))
             response = provider.complete(
@@ -381,7 +436,8 @@ def create(db: Session, lead: Lead, request: GenerateIn, by: str) -> ContentPiec
         raise service.ContentError("AI 引用来源无效，请重新生成")
     if a and "menu" not in result.cited_ids:
         raise service.ContentError("AI 未引用所选菜单，请重新生成")
-    body = append_identity(result.body, request.sender_identity, request.opt_out_text)
+    sender = outreach_sender(request.sender_identity, offered)
+    body = append_identity(format_outreach_body(result.body), sender, request.opt_out_text)
     if request.channel != "email" and len(body) > 1000:
         raise service.ContentError("AI 社媒消息过长，请重新生成更简短的消息")
     if "\n" in result.subject or "\r" in result.subject or (request.channel == "email" and not result.subject.strip()):
@@ -399,7 +455,7 @@ def create(db: Session, lead: Lead, request: GenerateIn, by: str) -> ContentPiec
         "mode": "menu_analysis" if a else "menu_inquiry",
         "template": "ai_outreach_v1",
         "ai": result._ai_metadata,
-        "sender_identity": request.sender_identity.strip(),
+        "sender_identity": sender,
         "opt_out_text": request.opt_out_text.strip(),
         "subject": result.subject.strip() if request.channel == "email" else "",
         "channel": request.channel,

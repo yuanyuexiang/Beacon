@@ -141,7 +141,8 @@ def preview(body: ai.ServiceProfile, op: Operator = Depends(current_operator)):
                         "id": "store",
                         "text": (
                             "Example Restaurant is a fictional placeholder. No menu or contact role is known. "
-                            "Ask for a menu or the responsible person. Do not invent restaurant details."
+                            "Ask whether the recipient handles menu updates. "
+                            "Do not request a menu in this first message. Do not invent restaurant details."
                         ),
                     },
                     {"id": "services", "text": ai.service_source(body)},
@@ -156,7 +157,7 @@ def preview(body: ai.ServiceProfile, op: Operator = Depends(current_operator)):
             raise service.ContentError("示例邮件主题无效，请重试")
         return {
             "subject": result.subject,
-            "body": ai.append_identity(result.body, sender, body.opt_out_text),
+            "body": ai.append_identity(ai.format_outreach_body(result.body), sender, body.opt_out_text),
             "translation_zh": result.translation_zh,
             "rationale": result.rationale,
             "missing": result.missing,

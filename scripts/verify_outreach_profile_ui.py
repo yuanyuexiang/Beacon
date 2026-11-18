@@ -1,6 +1,7 @@
 """British English settings and personal signature; mock APIs, no sends or real data writes."""
 import asyncio
 import json
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -8,6 +9,7 @@ from playwright.async_api import async_playwright, expect
 
 
 async def main():
+    base = os.environ.get("BEACON_UI_BASE", "http://localhost:3000").rstrip("/")
     profile = dict(version="initial", company="", services="", proof="", constraints="", tone="professional", opt_out_text="Please let me know if you would prefer not to hear from us again.")
     own = dict(version="initial", name="", role="", sender_identity="")
     role = "admin"
@@ -46,21 +48,25 @@ async def main():
         page = await browser.new_page(viewport=dict(width=1600, height=1100))
         page.on("pageerror", lambda e: errors.append(str(e)))
         await page.route("**/api/**", handle)
-        await page.goto("http://localhost:3000/settings?section=profile")
+        await page.goto(base + "/settings?section=profile")
         await page.get_by_label("公司／品牌介绍", exact=True).fill("真实菜单工作室")
         await page.get_by_label("菜单设计与印刷服务", exact=True).fill("提供菜单排版设计")
         await page.get_by_label("英文品牌名称", exact=True).fill("Example Studio")
         await page.get_by_label("默认发件人英文姓名", exact=True).fill("Tom")
+        await page.get_by_role("button", name="使用小当家官网英文版", exact=True).click()
+        await expect(page.get_by_label("对外官网（建议使用英文页面）", exact=True)).to_have_value("https://ai-onestep.com/en/")
+        assert not writes  # Explicit save is still required.
         # A model response must not overwrite newer edits, and other buttons must not spin.
         hold = True
-        await page.get_by_role("button", name="AI 整理英文介绍", exact=True).click()
+        await page.get_by_role("button", name=re.compile("AI 整理英文介绍$")).click()
         await expect(page.get_by_role("button", name="AI 整理英文介绍")).to_have_class(re.compile(".*ant-btn-loading.*"))
         await expect(page.get_by_role("button", name="预览英文示例", exact=True)).not_to_have_class(re.compile(".*ant-btn-loading.*"))
         await page.get_by_label("菜单设计与印刷服务", exact=True).fill("提供菜单排版设计，不承诺交期")
         release.set()
         await expect(page.get_by_text("资料已修改，请根据最新资料重新生成。", exact=True)).to_be_visible()
         hold = False
-        await page.get_by_role("button", name="AI 整理英文介绍", exact=True).click()
+        await expect(page.get_by_role("button", name=re.compile("AI 整理英文介绍$"))).to_be_enabled()
+        await page.get_by_role("button", name=re.compile("AI 整理英文介绍$")).click()
         await expect(page.get_by_role("button", name="采用英文介绍", exact=True)).to_be_visible()
         await page.get_by_role("button", name="采用英文介绍", exact=True).click()
         await expect(page.get_by_label("英文服务介绍（可选）", exact=True)).to_have_value("We provide menu layout design.")
@@ -78,12 +84,13 @@ async def main():
         await page.get_by_role("button", name="保存服务资料", exact=True).click()
         await expect(page.get_by_text("服务资料已保存", exact=True)).to_be_visible()
         assert len(writes) == 1 and writes[0]["english_brand"] == "Example Studio"
+        assert writes[0]["website"] == "https://ai-onestep.com/en/"
         role = "member"
-        await page.goto("http://localhost:3000/account")
+        await page.goto(base + "/account")
         await page.get_by_label("我的英文姓名", exact=True).fill("Alice")
         await page.get_by_role("button", name="保存我的署名", exact=True).click()
         await expect(page.get_by_text("个人署名已保存", exact=True)).to_be_visible()
-        await page.goto("http://localhost:3000/settings")
+        await page.goto(base + "/settings")
         await expect(page.get_by_text("此页面仅限管理员使用", exact=True)).to_be_visible()
         assert len(writes) == 1
         assert not errors, errors

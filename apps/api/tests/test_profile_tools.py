@@ -209,3 +209,37 @@ def test_real_generation_retries_invalid_language_once(db, monkeypatch):
     message, _ = result(body="Hello, I am [Name].")
     with pytest.raises(outreach_ai.service.ContentError):
         outreach_ai.validate_generated(message)
+
+
+def test_outreach_website_uses_confirmed_english_homepage_only():
+    for url in ("https://ai-onestep.com", "https://ai-onestep.com/zh-hans/", "https://www.ai-onestep.com/zh/"):
+        assert outreach_ai.outreach_website(url) == "https://ai-onestep.com/en/"
+    for url in (
+        "",
+        "https://example.com/zh/",
+        "https://ai-onestep.com/en/design/",
+        "https://ai-onestep.com/zh-hans/?campaign=1",
+    ):
+        assert outreach_ai.outreach_website(url) == url
+
+
+def test_outreach_sender_adds_configured_website_once_without_replacing_identity():
+    offered = outreach_ai.ServiceProfile(website="https://ai-onestep.com/zh-hans/")
+    sender = "Tom\nDesigner\nXiaodangjia\nhttps://ai-onestep.com/"
+    expected = "Tom\nDesigner\nXiaodangjia\nhttps://ai-onestep.com/en/"
+    assert outreach_ai.outreach_sender(sender, offered) == expected
+    assert outreach_ai.outreach_sender(expected, offered) == expected
+    assert outreach_ai.outreach_sender("Tom", offered).endswith("https://ai-onestep.com/en/")
+    assert outreach_ai.outreach_sender("Tom", outreach_ai.ServiceProfile()) == "Tom"
+
+
+def test_generated_intro_and_question_are_separated_without_rewriting_words():
+    original = (
+        "Hi, we help restaurants with menu design and printing. Are you responsible for menu updates at the Abbey Inn?"
+    )
+    formatted = outreach_ai.format_outreach_body(original)
+    assert formatted == original.replace(". Are", ".\n\nAre")
+    assert outreach_ai.format_outreach_body(formatted) == formatted
+    assert outreach_ai.format_outreach_body("Could you help with menus?") == "Could you help with menus?"
+    custom = "Hi,\n\nThanks for your reply. Could you share the menu?"
+    assert outreach_ai.format_outreach_body(custom) == custom
