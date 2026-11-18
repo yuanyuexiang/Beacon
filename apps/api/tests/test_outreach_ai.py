@@ -221,10 +221,17 @@ def test_real_provider_protocol_uses_structured_output_without_network(db, monke
         ),
     )
     if finish == "stop":
-        assert outreach_ai.generate({"sources": []})[0].subject == "Menu design and printing"
+        assert (
+            outreach_ai.generate(
+                {"sources": [{"id": "store", "text": "Restaurant"}, {"id": "services", "text": "Design"}]}
+            )[0].subject
+            == "Menu design and printing"
+        )
     else:
         with pytest.raises(ProviderUnavailable):
-            outreach_ai.generate({"sources": []})
+            outreach_ai.generate(
+                {"sources": [{"id": "store", "text": "Restaurant"}, {"id": "services", "text": "Design"}]}
+            )
 
 
 @pytest.mark.parametrize("channel", ["email", "facebook", "whatsapp"])
@@ -250,3 +257,181 @@ def test_configured_company_website_is_appended_once_and_frozen(client, db, monk
     client.put("/api/outreach-profile", json={**saved.json(), "website": "https://example.com/"})
     previous = next(p for p in client.get(f"/api/leads/{identity}/content").json() if p["id"] == piece["id"])
     assert previous["body_text"] == piece["body_text"]
+
+
+def citation_client(monkeypatch, outputs, seen):
+    import json
+
+    import httpx
+
+    from app.integrations.ai_runtime import Client
+
+    def respond(request):
+        payload = json.loads(request.content)
+        seen.append(json.loads(payload["messages"][1]["content"])["data"])
+        value = outputs[min(len(seen) - 1, len(outputs) - 1)]
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": result(**value)[0].model_dump_json(),
+                        },
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        outreach_ai,
+        "model_client",
+        lambda _: Client(
+            {
+                "provider": "deepseek",
+                "protocol": "chat",
+                "model": "citation-test",
+                "base_url": "https://model.example",
+                "key": "test",
+                "json_mode": True,
+            },
+            httpx.MockTransport(respond),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "action,expected",
+    [
+        ("initial", ["menu", "services", "store"]),
+        ("followup", ["conversation"]),
+        ("reply", ["conversation"]),
+        ("shorten", ["current_draft"]),
+    ],
+)
+def test_citation_requirements_follow_actual_writing_action(action, expected):
+    task = {
+        "writing_action": action,
+        "has_reviewed_menu": True,
+        "sources": [
+            {"id": "store", "text": "Restaurant"},
+            {"id": "services", "text": "Menu design"},
+            {"id": "menu", "text": "Reviewed menu"},
+            {"id": "conversation", "text": '[{"body":"Thanks"}]'},
+            {"id": "current_draft", "text": "Could we help?"},
+        ],
+    }
+    policy = outreach_ai.citation_requirements(task)
+    assert policy["required_ids"] == expected
+    outreach_ai.validate_citations(result(cited_ids=expected)[0], task)
+    with pytest.raises(outreach_ai.CitationError):
+        outreach_ai.validate_citations(result(cited_ids=[*expected, "invented"])[0], task)
+
+
+def test_empty_conversation_falls_back_to_store_and_services():
+    task = {
+        "writing_action": "reply",
+        "sources": [
+            {"id": "store", "text": "Restaurant"},
+            {"id": "services", "text": "Design"},
+            {"id": "conversation", "text": "[]"},
+        ],
+    }
+    assert outreach_ai.citation_requirements(task)["required_ids"] == ["services", "store"]
+    with pytest.raises(outreach_ai.CitationError):
+        outreach_ai.validate_citations(result(cited_ids=["conversation"])[0], task)
+
+
+@pytest.mark.parametrize("invalid", [["wrong", "services"], ["store"], []])
+def test_invalid_citations_are_regenerated_once_with_explicit_source_ids(db, monkeypatch, invalid):
+    seen: list[dict] = []
+    citation_client(monkeypatch, [{"cited_ids": invalid}, {}], seen)
+    task = {"sources": [{"id": "store", "text": "Restaurant"}, {"id": "services", "text": "Design"}]}
+    generated, _ = outreach_ai.generate(task)
+    assert generated.cited_ids == ["store", "services"]
+    assert len(seen) == 2
+    assert seen[1]["previous_cited_ids"] == invalid
+    assert seen[1]["citation_requirements"] == {
+        "allowed_ids": ["services", "store"],
+        "required_ids": ["services", "store"],
+    }
+    assert "previous_output_error" in seen[1] and "Regenerate" in seen[1]["output_correction"]
+
+
+def test_two_invalid_citation_outputs_leave_existing_draft_unchanged(client, db, monkeypatch):
+    from tests.test_conversations import prepare_message, write
+    from tests.test_sales import _elig, _ready
+
+    identity, _, _ = _ready(client, db)
+    configure(client)
+    contact = _elig(client, identity).json()["id"]
+    draft = write(client, prepare_message(client, identity, contact), "My existing draft")
+    original = client.get(f"/api/leads/{identity}/content").json()
+    seen: list[dict] = []
+    citation_client(monkeypatch, [{"cited_ids": ["invented"]}], seen)
+    response = request(
+        client, identity, eligibility_id=contact, conversation_draft_id=draft["id"], writing_action="shorten"
+    )
+    assert response.status_code == 503, response.text
+    assert "原草稿未修改" in response.json()["detail"]
+    assert len(seen) == 2
+    assert client.get(f"/api/leads/{identity}/content").json() == original
+    assert client.get(f"/api/communication/drafts/{draft['id']}").json()["content_id"] == draft["content_id"]
+
+
+@pytest.mark.parametrize(
+    "action,cited", [("followup", "conversation"), ("reply", "conversation"), ("shorten", "current_draft")]
+)
+def test_context_only_citations_are_valid_for_followups_replies_and_shortening(client, db, monkeypatch, action, cited):
+    from tests.test_conversations import prepare_message, write
+    from tests.test_sales import _elig, _ready
+
+    identity, _, _ = _ready(client, db)
+    configure(client)
+    contact = _elig(client, identity).json()["id"]
+    draft = write(client, prepare_message(client, identity, contact))
+    assert (
+        client.post(
+            f"/api/communication/conversations/{identity}/{contact}/reply",
+            json={"event_key": "manual:context", "summary": "Please speak to our manager"},
+        ).status_code
+        == 200
+    )
+    monkeypatch.setattr(outreach_ai, "generate", lambda _: result(cited_ids=[cited]))
+    response = request(
+        client, identity, eligibility_id=contact, conversation_draft_id=draft["id"], writing_action=action
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["spec"]["cited_ids"] == [cited]
+
+
+def test_menu_reference_is_required_for_initial_menu_message(db, monkeypatch):
+    seen: list[dict] = []
+    citation_client(monkeypatch, [{}, {"cited_ids": ["store", "services", "menu"]}], seen)
+    task = {
+        "has_reviewed_menu": True,
+        "sources": [
+            {"id": "store", "text": "Restaurant"},
+            {"id": "services", "text": "Design"},
+            {"id": "menu", "text": "Reviewed menu"},
+        ],
+    }
+    generated, _ = outreach_ai.generate(task)
+    assert "menu" in generated.cited_ids and len(seen) == 2
+    assert seen[1]["citation_requirements"]["required_ids"] == ["menu", "services", "store"]
+
+
+def test_valid_context_citation_does_not_trigger_retry(db, monkeypatch):
+    seen: list[dict] = []
+    citation_client(monkeypatch, [{"cited_ids": ["conversation"]}], seen)
+    task = {
+        "writing_action": "reply",
+        "sources": [
+            {"id": "store", "text": "Restaurant"},
+            {"id": "services", "text": "Design"},
+            {"id": "conversation", "text": '[{"body":"Please speak to our manager"}]'},
+        ],
+    }
+    assert outreach_ai.generate(task)[0].cited_ids == ["conversation"]
+    assert len(seen) == 1

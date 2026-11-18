@@ -198,13 +198,20 @@ def test_real_generation_retries_invalid_language_once(db, monkeypatch):
             httpx.MockTransport(handle),
         ),
     )
-    generated, _ = outreach_ai.generate({"language": "en-GB"})
+    generated, _ = outreach_ai.generate(
+        {"language": "en-GB", "sources": [{"id": "store", "text": "Restaurant"}, {"id": "services", "text": "Design"}]}
+    )
     assert generated.body.startswith("Could you") and len(calls) == 2
     assert "output_correction" in calls[1]["messages"][1]["content"]
     always_bad = True
     calls.clear()
     with pytest.raises(ProviderUnavailable):
-        outreach_ai.generate({"language": "en-GB"})
+        outreach_ai.generate(
+            {
+                "language": "en-GB",
+                "sources": [{"id": "store", "text": "Restaurant"}, {"id": "services", "text": "Design"}],
+            }
+        )
     assert len(calls) == 2
     message, _ = result(body="Hello, I am [Name].")
     with pytest.raises(outreach_ai.service.ContentError):

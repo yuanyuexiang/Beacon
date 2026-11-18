@@ -201,7 +201,7 @@ def test_ai_followup_only_receives_selected_contact_history(client, db, monkeypa
 
     def generate(task):
         captured.append(task)
-        return result()
+        return result(cited_ids=["conversation"])
 
     monkeypatch.setattr(outreach_ai, "generate", generate)
     response = request(
