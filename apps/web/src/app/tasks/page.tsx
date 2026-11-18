@@ -149,7 +149,7 @@ function TasksInner() {
             <div className="conversation-compose-heading"><b>写新消息</b><Typography.Text type="secondary">无需等待客户回复，可以继续联系</Typography.Text></div>
             {!activeDraft && <Button type="primary" loading={busy} disabled={!canWrite} onClick={() => act(startDraft)}>写消息／继续草稿</Button>}
             {Object.entries(drafts).filter(([,d]) => d.lead_id === leadId).map(([id,d]) => <div key={d.id} style={{display:id===contactId ? "block" : "none"}}>
-              <MessageComposer draft={d} assignees={owners} returnTo={back} sender={identity.sender} optOut={identity.optOut} lockedRecipient conversation onChange={value => setDrafts(old => ({...old,[id]:value}))} onWorkingChange={(key,active) => {if(active) working.current.add(key);else working.current.delete(key);setEditing(working.current.size>0);}} onResultChange={async result => {await refresh();if(result && result.status!=="manual") {setNotice(result.message);await startDraft();}}} />
+              <MessageComposer draft={d} assignees={owners} returnTo={back} sender={identity.sender} optOut={identity.optOut} resolveIdentity={identity.resolve} lockedRecipient conversation onChange={value => setDrafts(old => ({...old,[id]:value}))} onWorkingChange={(key,active) => {if(active) working.current.add(key);else working.current.delete(key);setEditing(working.current.size>0);}} onResultChange={async result => {await refresh();if(result && result.status!=="manual") {setNotice(result.message);await startDraft();}}} />
             </div>)}
           </div>}
         </>}

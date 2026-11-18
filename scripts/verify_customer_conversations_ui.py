@@ -48,6 +48,7 @@ async def main():
             "deliveries": [],
         },
     ]
+    saved_identity = {"sender_identity":"tom\nCEO\nrick", "opt_out_text":"Please let me know if you would prefer not to hear from us again."}
     archived = set()
     for message in messages["email1"]:
         message["can_delete"] = True
@@ -74,7 +75,14 @@ async def main():
         body = route.request.post_data_json if route.request.post_data else {}
         if method != "GET":
             writes.append((path, body))
-        if path == "/api/batches":
+        if path == "/api/outreach-identity":
+            value = saved_identity
+        elif path == f"/api/leads/{f.ID}/outreach-message":
+            assert body["sender_identity"] == "Tom\nXiaodangjia · One Step Group\nhttps://ai-onestep.com/en/", body
+            d = drafts[body["conversation_draft_id"]]
+            d["piece"] = {"id":"fresh-ai-piece", "body_text":"Hi, we help restaurants with menu design.\n\nAre you responsible for menus?", "spec":{"subject":"Menu enquiry"}, "version":1}
+            value = {"id":"fresh-ai-piece"}
+        elif path == "/api/batches":
             value = []
         elif path == "/api/communication/overview":
             overview_requests.append(path)
@@ -309,6 +317,13 @@ async def main():
         )
         await page.evaluate("window.customerObserver.disconnect()")
         await page.get_by_role("button", name="写消息／继续草稿").click()
+        # A changed saved identity must be read again immediately before AI generation.
+        await page.get_by_text("查看发件署名与官网",exact=True).click()
+        await expect(page.get_by_text("tom\nCEO\nrick",exact=True)).to_be_visible()
+        saved_identity["sender_identity"] = "Tom\nXiaodangjia · One Step Group\nhttps://ai-onestep.com/en/"
+        await page.get_by_role("button", name="AI 起草跟进", exact=True).click()
+        await expect(page.get_by_role("textbox", name="文案内容", exact=True)).to_have_value("Hi, we help restaurants with menu design.\n\nAre you responsible for menus?")
+        await expect(page.get_by_text(saved_identity["sender_identity"],exact=True)).to_be_visible()
         await page.get_by_role("textbox", name="文案内容", exact=True).fill(
             "Hello, following up on my earlier note."
         )

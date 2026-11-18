@@ -67,6 +67,7 @@ export default function OutreachProfileSettings() {
         <Space wrap align="start"><Form.Item name="sender_name" label="默认发件人英文姓名" extra="例如 Tom，注意姓名首字母大写。"><Input maxLength={100} placeholder="真实英文名或拼音" /></Form.Item><Form.Item name="sender_role" label="英文职务（可选）" extra="首次简短触达可留空，不必填写 CEO。"><Input maxLength={100} /></Form.Item></Space>
         <Form.Item name="website" label="对外官网（建议使用英文页面）" extra="官网随署名放在消息末尾。英国客户使用英文入口；修改后重新生成消息，已有草稿及发送记录不会自动改变。"><Input maxLength={500} placeholder="https://ai-onestep.com/en/" /></Form.Item>
         <Button disabled={!!busy || me?.role !== "admin" || !profile} onClick={() => { form.setFieldValue("website", "https://ai-onestep.com/en/"); changed(); }}>使用小当家官网英文版</Button>
+        <Button disabled={!!busy || me?.role !== "admin" || !profile} onClick={() => { form.setFieldsValue({english_brand:"Xiaodangjia · One Step Group",website:"https://ai-onestep.com/en/"}); changed(); }}>使用小当家英文品牌与官网</Button>
         <p>客户消息语言：<Tag>English (UK)</Tag> AI 分析说明：中文</p>
         <Form.Item name="tone" label="表达风格" initialValue="professional"><Select options={[{ value: "professional", label: "专业简洁" }, { value: "warm", label: "自然友好" }]} /></Form.Item>
         <Form.Item name="opt_out_text" label="英文退出说明"><Input.TextArea rows={2} maxLength={1000} /></Form.Item>

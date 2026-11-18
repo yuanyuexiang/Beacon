@@ -56,6 +56,10 @@ async def main():
         await page.get_by_role("button", name="使用小当家官网英文版", exact=True).click()
         await expect(page.get_by_label("对外官网（建议使用英文页面）", exact=True)).to_have_value("https://ai-onestep.com/en/")
         assert not writes  # Explicit save is still required.
+        await page.get_by_role("button", name="使用小当家英文品牌与官网", exact=True).click()
+        await expect(page.get_by_label("英文品牌名称", exact=True)).to_have_value("Xiaodangjia · One Step Group")
+        assert not writes
+        await page.get_by_label("英文品牌名称", exact=True).fill("Example Studio")
         # A model response must not overwrite newer edits, and other buttons must not spin.
         hold = True
         await page.get_by_role("button", name=re.compile("AI 整理英文介绍$")).click()
