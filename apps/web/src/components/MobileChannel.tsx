@@ -122,7 +122,7 @@ export function MobileTask({ taskId, onChanged, platform = "whatsapp" }: { taskI
         <Select aria-label="手机联系动作" style={{ width: "100%", marginBottom: 12 }} value={contactAction} options={MOBILE_ACTIONS[platform] || []} onChange={v => { setContactAction(v); setPreview(undefined); }} />
         <Select placeholder="选择已就绪手机" style={{ width: "100%" }} value={device} onChange={v => { setDevice(v); setPreview(undefined); }} options={devices.filter(d => d.status !== "revoked").map(d => ({ value: d.id, disabled: !supports(d), label: `${d.label} · ${d.capabilities?.accounts?.[platform] || (platform !== "whatsapp" ? "App 当前登录账号" : d.account || "App 当前登录账号")} · ${!d.online ? "离线" : labels[d.status] || d.status}` }))} />
         {!devices.some(supports) && <Alert style={{ marginTop: 12 }} type="info" message="请先在手机点击“开启自动执行”，保持对应应用已安装并登录。" />}
-        <p><a href="/settings?section=mobile">管理手机与配对</a></p>
+        <p><a href="/devices">管理手机与配对</a></p>
         <Button disabled={!device || !writable} loading={busy.preview} onClick={() => act("preview", async () => setPreview(await api(`/api/mobile/tasks/${taskId}/preview`, json({ device_id: device, preview_hash: "0".repeat(64), action: contactAction }))))}>预览消息</Button>
         {preview && <Card title="确认本次发送" style={{ marginTop: 16 }}><p>本方账号：{preview.payload.sender}</p><p>收件人：{preview.payload.target}</p><p style={{ whiteSpace: "pre-wrap" }}>{preview.payload.body}</p><Button type="primary" disabled={!writable} loading={busy.confirm} onClick={() => act("confirm", async () => { setJob(await api(`/api/mobile/tasks/${taskId}/confirm`, json({ device_id: device, preview_hash: preview.preview_hash, action: contactAction }))); setPreview(undefined); onChanged(); })}>确认交给手机执行</Button></Card>}
       </>}

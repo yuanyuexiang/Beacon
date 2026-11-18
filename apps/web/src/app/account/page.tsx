@@ -1,6 +1,7 @@
 "use client";
 import { Alert, Button, Card, Form, Input, Space, Typography } from "antd";
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api, json } from "@/lib/api";
 import { ROLE_LABELS, useOperator } from "@/lib/auth";
@@ -31,6 +32,7 @@ export default function AccountPage() {
         <Button type="primary" htmlType="submit" loading={pending === "profile"}>保存资料</Button>
       </Form>
     </Card>
+    {!me.must_change_password && me.role !== "viewer" && <Card title="我的手机" style={{ marginBottom: 20 }}><p>绑定、查看和管理本人手机，无需管理员设置权限。</p><Link href="/devices">配对或管理我的手机 →</Link></Card>}
     {!me.must_change_password && <PersonalOutreachIdentity />}
     <Card title="修改密码">
       <Form form={passwordForm} layout="vertical" disabled={busy} onFinish={(v) => act("password", async () => { await api("/api/auth/password", json({ current_password: v.current_password, new_password: v.new_password })); passwordForm.resetFields(); await refresh(); setSuccess("密码已修改，其他登录会话已失效"); })} style={{ maxWidth: 440 }}>

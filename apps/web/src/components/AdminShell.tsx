@@ -1,7 +1,7 @@
 "use client";
 import { afterCommit } from "@/lib/after-commit";
 import { UserAvatar } from "@/components/UserAvatar";
-import { DashboardOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
+import { DashboardOutlined, LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, MessageOutlined, MobileOutlined, SafetyCertificateOutlined, SettingOutlined, ShopOutlined } from "@ant-design/icons";
 import { Alert, Breadcrumb, Dropdown, Layout, Menu, Space, Tooltip, Typography } from "antd";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -18,12 +18,13 @@ const NAV_GROUPS = [
       { key: "/directory", label: "门店池", icon: <ShopOutlined /> },
       { key: "/leads", label: "批次与线索", icon: <ShopOutlined /> },
       { key: "/tasks", label: "客户沟通", icon: <MessageOutlined /> },
+      { key: "/devices", label: "我的手机", icon: <MobileOutlined /> },
     ],
   },
   { key: "system", label: "系统", items: [{ key: "/settings", label: "设置", icon: <SettingOutlined /> }, { key: "/users", label: "用户管理", icon: <SafetyCertificateOutlined /> }] },
 ];
 
-const TITLES: Record<string, string> = { "/": "仪表盘", "/leads": "批次与线索", "/directory": "门店池", "/tasks": "客户沟通", "/settings": "设置", "/users": "用户管理", "/account": "个人账号" };
+const TITLES: Record<string, string> = { "/": "仪表盘", "/leads": "批次与线索", "/directory": "门店池", "/tasks": "客户沟通", "/settings": "设置", "/users": "用户管理", "/account": "个人账号", "/devices": "我的手机" };
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -45,7 +46,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }, [router]);
   useEffect(() => { if (me?.must_change_password && path !== "/account") router.replace("/account"); }, [me, path, router]);
   if (["/login", "/terms", "/privacy"].includes(path)) return <>{children}</>;
-  const section = path.startsWith("/account") ? "/account" : path.startsWith("/users") ? "/users" : path.startsWith("/directory") ? "/directory" : path.startsWith("/leads") ? "/leads" : path.startsWith("/tasks") ? "/tasks" : path.startsWith("/settings") ? "/settings" : "/";
+  const section = path.startsWith("/devices") ? "/devices" : path.startsWith("/account") ? "/account" : path.startsWith("/users") ? "/users" : path.startsWith("/directory") ? "/directory" : path.startsWith("/leads") ? "/leads" : path.startsWith("/tasks") ? "/tasks" : path.startsWith("/settings") ? "/settings" : "/";
   const crumbs = [{ title: <Link href="/">首页</Link> }, { title: TITLES[section] }];
   if (path.startsWith("/leads/") && path !== "/leads") crumbs.push({ title: "线索详情" });
   return (
@@ -62,7 +63,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           )}
         </Link>
         <Menu className="beacon-nav" theme="dark" mode="inline" selectedKeys={[section]}
-          items={NAV_GROUPS.filter((g) => g.key !== "system" || me?.role === "admin" || me?.role === "director").map((g) => ({ key: g.key, type: "group" as const, label: g.label, children: g.items.filter((n) => !(me?.role === "member" && n.key === "/directory") && !(me?.role === "director" && n.key === "/settings")).map((n) => ({ key: n.key, icon: n.icon, label: <Link href={n.key}>{n.label}</Link> })) }))} />
+          items={NAV_GROUPS.filter((g) => g.key !== "system" || me?.role === "admin" || me?.role === "director").map((g) => ({ key: g.key, type: "group" as const, label: g.label, children: g.items.filter((n) => !(me?.role === "member" && n.key === "/directory") && !(me?.role === "viewer" && n.key === "/devices") && !(me?.role === "director" && n.key === "/settings")).map((n) => ({ key: n.key, icon: n.icon, label: <Link href={n.key}>{n.label}</Link> })) }))} />
         <div className="beacon-sider-foot">
           {collapsed ? (
             <Tooltip placement="right" title="邮件与已连接社媒会话预览确认后发送，其余渠道人工触达"><SafetyCertificateOutlined /></Tooltip>

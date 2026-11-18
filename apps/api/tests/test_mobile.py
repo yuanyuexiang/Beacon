@@ -3,6 +3,7 @@
 import uuid
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.modules.mobile.models import Device, Execution
@@ -360,3 +361,29 @@ def test_locked_phone_stays_online_and_preserves_queue(client, db):
     )
     assert response.status_code == 200
     assert client.post("/api/mobile/device/claim", headers=headers, json={}).json()["job"]["id"] == job["id"]
+
+
+@pytest.mark.parametrize("role", ["member", "director"])
+def test_nonadmin_manages_only_own_devices_without_settings_access(client, db, role):
+    from tests.test_auth import make_operator
+    from tests.test_users import session
+
+    op = make_operator(db, "device-owner-" + role)
+    op.role = role
+    other = make_operator(db, "other-device-owner")
+    db.commit()
+    owner_client, other_client = session(op), session(other)
+    code = owner_client.post("/api/mobile/pairing")
+    assert code.status_code == 200, code.text
+    assert code.json()["owner"] == op.username
+    paired = client.post("/api/mobile/device/pair", json={"code": code.json()["code"], "label": "My phone"})
+    assert paired.status_code == 200, paired.text
+    identity = paired.json()["device_id"]
+    assert [d["id"] for d in owner_client.get("/api/mobile/devices").json()] == [identity]
+    assert other_client.get("/api/mobile/devices").json() == []
+    assert other_client.post(f"/api/mobile/devices/{identity}/revoke").status_code == 404
+    assert other_client.delete(f"/api/mobile/devices/{identity}").status_code == 404
+    assert owner_client.put("/api/outreach-profile", json={}).status_code == 403
+    assert owner_client.post(f"/api/mobile/devices/{identity}/revoke").status_code == 200
+    assert owner_client.delete(f"/api/mobile/devices/{identity}").status_code == 200
+    assert owner_client.get("/api/mobile/devices").json() == []
