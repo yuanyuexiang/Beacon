@@ -166,3 +166,5 @@ D73（2026-10-22）：Gmail 网页授权为主入口，分开发送与回复 met
 
 
 2026-11-10 客户沟通：`/tasks` 改为客户／具体联系方式连续会话，联系人草稿隔离、下一条消息独立确认、执行详情截图、人工回复、未关联历史与按用户已读。AI 可用当前联系人历史起草跟进／回复或缩短草稿。迁移 `d182a0010001`，compatibility 已同步；历史内容保留，降级额外草稿取消保留。专项 `tests/test_conversations.py tests/test_sendflow.py tests/test_communication.py`，全模拟 UI `scripts/verify_customer_conversations_ui.py`（默认 localhost:3001）；旧 verify_communication_ui.py 转调该回归。详见 plan/customer-conversations.md。本地验收后用户自行提交推送，不自动真实发送或云发布。
+
+2026-11-18 App 分发：`/devices`“我的手机”支持管理员上传／校验／显式发布 APK 和上一版回退，业务人员／销售总监下载及限时二维码。包名固定、签名一致，256 MB 流式上限；APK 存数据卷 mobile-apps，元数据／发布记录用 AuditLog，无迁移。API 镜像新增 aapt、apksigner、Java；只重启旧镜像不足。专项 `cd apps/api && uv run pytest tests/test_mobile_app_releases.py tests/test_mobile.py tests/test_auth.py -q`；`BEACON_TEST_APK` 指向真实 APK 可追加隔离大文件验收，需可用 JAVA_HOME。UI `BEACON_UI_BASE=http://localhost:3001 uv run --project apps/api --extra maps-worker python scripts/verify_mobile_app_downloads_ui.py`（全 API 模拟、不真实发布）。本轮功能与真实 APK 隔离链路通过；本机 Debian 网络超时导致容器构建未通过，镜像验收待完成。未发布云端。见操作手册“我的手机：App 安装包上传与下载”。

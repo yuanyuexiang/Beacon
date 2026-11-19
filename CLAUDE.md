@@ -147,3 +147,5 @@ D73（2026-10-22）：网页 Gmail OAuth，设置页 Web 客户端向导／分�
 
 
 2026-11-10 客户沟通：`/tasks` 改为客户／具体联系方式连续会话，联系人草稿隔离、下一条消息独立确认、执行详情截图、人工回复、未关联历史与按用户已读。AI 可用当前联系人历史起草跟进／回复或缩短草稿。迁移 `d182a0010001`，compatibility 已同步；历史内容保留，降级额外草稿取消保留。专项 `tests/test_conversations.py tests/test_sendflow.py tests/test_communication.py`，全模拟 UI `scripts/verify_customer_conversations_ui.py`（默认 localhost:3001）；旧 verify_communication_ui.py 转调该回归。详见 plan/customer-conversations.md。本地验收后用户自行提交推送，不自动真实发送或云发布。
+
+2026-11-18 App 下载／管理：新增 `/devices` 安装包区域，管理员上传校验后显式发布、上一版回退，业务人员／总监获取 15 分钟 APK 专用二维码。无迁移，保留现有设备绑定。专项 `cd apps/api && uv run pytest tests/test_mobile_app_releases.py tests/test_mobile.py tests/test_auth.py -q`；真实包用环境变量 BEACON_TEST_APK 与 JAVA_HOME 启用隔离验收；模拟 UI `BEACON_UI_BASE=http://localhost:3001 uv run --project apps/api --extra maps-worker python scripts/verify_mobile_app_downloads_ui.py`。43 项后端及三角色 UI、原配对回归通过；API 镜像需安装 aapt／apksigner／Java，本机 Debian 下载超时导致构建尚未通过，不能声明镜像验收或云端发布完成。

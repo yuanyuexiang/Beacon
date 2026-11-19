@@ -23,7 +23,12 @@ class OAuthAccessFilter(logging.Filter):
         if isinstance(record.args, tuple) and len(record.args) >= 3:
             path = record.args[2]
             if isinstance(path, str) and path.startswith(
-                ("/api/gmail/oauth/callback", "/api/outreach/oauth/callback", "/api/outreach/webhook")
+                (
+                    "/api/gmail/oauth/callback",
+                    "/api/outreach/oauth/callback",
+                    "/api/outreach/webhook",
+                    "/api/mobile/app-download/",
+                )
             ):
                 args = list(record.args)
                 args[2] = path.split("?", 1)[0]
@@ -118,6 +123,8 @@ from app.modules.leads.website_search import router as website_search_router  # 
 from app.modules.menus.maps import router as maps_menu_router  # noqa: E402
 from app.modules.menus.maps import worker_router as maps_worker_router  # noqa: E402
 from app.modules.menus.routes import router as menus_router  # noqa: E402
+from app.modules.mobile.app_releases import public_router as mobile_app_download_router  # noqa: E402
+from app.modules.mobile.app_releases import router as mobile_app_router  # noqa: E402
 from app.modules.mobile.notifications import router as mobile_notifications_router  # noqa: E402
 from app.modules.mobile.notifications import worker_router as mobile_notifications_worker_router  # noqa: E402
 from app.modules.mobile.routes import router as mobile_router  # noqa: E402
@@ -126,6 +133,7 @@ from app.modules.outreach.routes import public_router as outreach_public_router 
 from app.modules.outreach.routes import router as outreach_router  # noqa: E402
 from app.modules.sales.routes import router as sales_router  # noqa: E402
 
+protected.include_router(mobile_app_router)
 protected.include_router(mobile_notifications_router)
 protected.include_router(mobile_router)
 protected.include_router(ai_router)
@@ -175,6 +183,7 @@ def include_module_routers() -> None:
     app.include_router(api)
     app.include_router(protected)
     app.include_router(maps_worker_router)
+    app.include_router(mobile_app_download_router)
     app.include_router(mobile_worker_router)
     app.include_router(mobile_notifications_worker_router)
     app.include_router(gmail_callback_router)
