@@ -49,12 +49,12 @@ export default function MobileAppDownloads() {
     {context}
     {error && <Alert type="error" showIcon message={error} style={{marginBottom:12}} />}
     {notice && <Alert type="success" showIcon message={notice} style={{marginBottom:12}} />}
-    {data?.current ? <>
-      <Space wrap><Typography.Text strong>Beacon Android 手机助手</Typography.Text><Tag>{version(data.current)}</Tag><Typography.Text type="secondary">{(data.current.size/1024**2).toFixed(1)} MB · 更新于 {new Date(data.current.published_at || data.current.uploaded_at).toLocaleString("zh-CN")}</Typography.Text></Space>
-      {data.current.notes && <Typography.Paragraph style={{whiteSpace:"pre-wrap",marginTop:12}}>{data.current.notes}</Typography.Paragraph>}
-      <Space wrap style={{marginTop:12}}><Button type="primary" loading={busy==="download"} disabled={!!busy} onClick={() => void run("download",() => makeLink(true))}>下载 Android App</Button><Button loading={busy==="qr"} disabled={!!busy} onClick={() => void run("qr",() => makeLink(false))}>手机扫码下载</Button></Space>
-      <Typography.Paragraph type="secondary" style={{marginTop:12}}>先下载安装 App，再扫描下方配对二维码绑定。Android 提示安装权限时，仅为本次下载使用的浏览器允许安装；当前不提供 iPhone 安装包。</Typography.Paragraph>
-    </> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={data ? "管理员尚未发布安装包，请联系管理员上传发布" : "正在读取 App 版本…"} />}
+    {data?.current ? <div style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:16}}>
+      <Space wrap size={[12,8]}><Typography.Text strong>Beacon Android 手机助手</Typography.Text><Tag>{version(data.current)}</Tag><Typography.Text type="secondary">{(data.current.size/1024**2).toFixed(1)} MB · 更新于 {new Date(data.current.published_at || data.current.uploaded_at).toLocaleString("zh-CN")}</Typography.Text></Space>
+      {data.current.notes && <Typography.Paragraph style={{whiteSpace:"pre-wrap",margin:0}}>{data.current.notes}</Typography.Paragraph>}
+      <Space wrap size={[12,12]}><Button type="primary" loading={busy==="download"} disabled={!!busy} onClick={() => void run("download",() => makeLink(true))}>下载 Android App</Button><Button loading={busy==="qr"} disabled={!!busy} onClick={() => void run("qr",() => makeLink(false))}>手机扫码下载</Button></Space>
+      <Typography.Paragraph type="secondary" style={{margin:0,lineHeight:1.8,maxWidth:960}}>先下载安装 App，再扫描下方配对二维码绑定。Android 提示安装权限时，仅为本次下载使用的浏览器允许安装；当前不提供 iPhone 安装包。</Typography.Paragraph>
+    </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={data ? "管理员尚未发布安装包，请联系管理员上传发布" : "正在读取 App 版本…"} />}
     {link && <Card size="small" title="扫码下载安装包 · 不是设备配对码" style={{marginTop:16}}>
       {expired ? <Alert type="info" message="下载二维码已过期，请重新点击“手机扫码下载”" /> : <Space align="start" wrap size="large">
         {qr ? <QRCode value={qr} size={180} /> : <Typography.Paragraph>请填写手机能访问的平台地址，生成下载二维码。</Typography.Paragraph>}
