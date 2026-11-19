@@ -21,7 +21,12 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
       if (res.headers.get("X-Beacon-Action") === "change-password") window.dispatchEvent(new Event("beacon-password-required"));
     }
     const detail = (body as { detail?: unknown })?.detail;
-    throw new ApiError(res.status, typeof detail === "string" ? detail : JSON.stringify(detail ?? body));
+    const value = body && typeof body === "object" && "detail" in body ? detail : body;
+    const fallback = `请求失败（HTTP ${res.status}），服务器未返回有效说明，请重试或联系管理员`;
+    const message = typeof value === "string"
+      ? (value.trim() && value.trim() !== "null" ? value : fallback)
+      : value == null ? fallback : JSON.stringify(value);
+    throw new ApiError(res.status, message);
   }
   return body as T;
 }

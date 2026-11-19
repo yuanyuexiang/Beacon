@@ -17,11 +17,12 @@ async def verify(browser, role):
     second = dict(first, id="second", version_code=2, version_name="1.1.0", sha256="b" * 64)
     current, previous, drafts = first, None, []
     calls, errors = [], []
+    uploaded = b""
     page = await browser.new_page(viewport={"width":1500,"height":1100})
     page.on("pageerror", lambda error: errors.append(str(error)))
 
     async def handle(route):
-        nonlocal current, previous, drafts
+        nonlocal current, previous, drafts, uploaded
         request, path = route.request, urlsplit(route.request.url).path
         calls.append((path, request.method))
         if path == "/api/auth/me":
@@ -29,9 +30,16 @@ async def verify(browser, role):
         elif path == "/api/mobile/app":
             data = dict(current=current, previous=previous, drafts=drafts if role=="admin" else [],
                         max_bytes=256*1024**2, server="https://beacon.example", validator_available=True)
-        elif path == "/api/mobile/app/uploads":
+        elif path == "/api/mobile/app/uploads/start":
             assert role=="admin"
-            if request.post_data_buffer == b"bad":
+            uploaded = b""
+            data = dict(upload_id="test-upload",chunk_bytes=2*1024**2)
+        elif path.endswith("/chunks"):
+            uploaded += request.post_data_buffer
+            data = dict(received=len(uploaded))
+        elif path.endswith("/finish"):
+            assert role=="admin"
+            if uploaded == b"bad":
                 await route.fulfill(status=422, content_type="application/json", body=json.dumps({"detail":"APK 签名校验失败"}))
                 return
             drafts = [second]
@@ -96,7 +104,7 @@ async def verify(browser, role):
         await expect(page.locator(".ant-modal-confirm")).to_have_count(0)
     else:
         await expect(page.get_by_text("安装包管理 · 仅管理员",exact=True)).to_have_count(0)
-        assert not any(path.endswith("/uploads") or path.endswith("/publish") for path,_ in calls)
+        assert not any("/uploads/" in path or path.endswith("/publish") for path,_ in calls)
     folder=Path("data/devchecks/mobile-app");folder.mkdir(parents=True,exist_ok=True)
     await page.screenshot(path=str(folder/f"{role}-desktop.png"),full_page=True)
     await page.set_viewport_size({"width":850,"height":1100})

@@ -215,7 +215,8 @@ def test_android_tool_failures_are_not_accepted(monkeypatch):
         apktools.output(["apksigner", "verify", "bad.apk"])
 
 
-def test_built_release_apk_stream_upload_publish_and_download(client, db, monkeypatch, tmp_path):
+@pytest.mark.parametrize("segmented", [False, True])
+def test_built_release_apk_stream_upload_publish_and_download(client, db, monkeypatch, tmp_path, segmented):
     """Opt-in local integration: real Android tools and real bytes, isolated test DB/data only."""
     import hashlib
     import os
@@ -227,12 +228,25 @@ def test_built_release_apk_stream_upload_publish_and_download(client, db, monkey
     path = Path(value)
     login(client, db)
     monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
-    with path.open("rb") as stream:
-        response = client.post(
-            "/api/mobile/app/uploads",
-            content=iter(lambda: stream.read(1024**2), b""),
-            headers={"Content-Type": "application/vnd.android.package-archive"},
-        )
+    if segmented:
+        from app.modules.mobile import apk_uploads
+
+        base = start(client, path.stat().st_size)
+        with path.open("rb") as stream:
+            offset = 0
+            for chunk in iter(lambda: stream.read(apk_uploads.CHUNK_BYTES), b""):
+                part = client.put(base + f"/chunks?offset={offset}", content=chunk)
+                assert part.status_code == 200, part.text
+                offset += len(chunk)
+                assert part.json()["received"] == offset
+        response = client.post(base + "/finish")
+    else:
+        with path.open("rb") as stream:
+            response = client.post(
+                "/api/mobile/app/uploads",
+                content=iter(lambda: stream.read(1024**2), b""),
+                headers={"Content-Type": "application/vnd.android.package-archive"},
+            )
     assert response.status_code == 201, response.text
     item = response.json()
     assert item["package"] == "com.beacon.mobile"
@@ -244,3 +258,129 @@ def test_built_release_apk_stream_upload_publish_and_download(client, db, monkey
     assert downloaded.status_code == 200
     assert len(downloaded.content) == path.stat().st_size == item["size"]
     assert hashlib.sha256(downloaded.content).hexdigest() == item["sha256"]
+
+
+def start(client, size):
+    response = client.post("/api/mobile/app/uploads/start", json={"size": size})
+    assert response.status_code == 201, response.text
+    return "/api/mobile/app/uploads/" + response.json()["upload_id"]
+
+
+def test_segmented_upload_retries_and_finishes_only_complete_file(client, db, setup_release):
+    import hashlib
+
+    data = apk()
+    base = start(client, len(data))
+    assert client.post(base + "/finish").status_code == 409
+    assert client.put(base + "/chunks?offset=1", content=data[:10]).status_code == 409
+    first = client.put(base + "/chunks?offset=0", content=data[:10])
+    assert first.json()["received"] == 10
+    assert client.put(base + "/chunks?offset=0", content=data[:10]).json()["received"] == 10
+    assert client.put(base + "/chunks?offset=0", content=b"different!").status_code == 409
+    assert client.put(base + "/chunks?offset=10", content=data[10:]).json()["received"] == len(data)
+    result = client.post(base + "/finish")
+    assert result.status_code == 201, result.text
+    assert result.json()["sha256"] == hashlib.sha256(data).hexdigest()
+    assert client.get("/api/mobile/app").json()["current"] is None
+    assert client.post(base + "/finish").status_code == 404
+    assert not list((releases.directory() / "staging").iterdir())
+
+
+def test_segmented_upload_permissions_limits_and_cleanup(client, db, setup_release):
+    from app.modules.mobile import apk_uploads
+
+    base = start(client, 100)
+    assert client.put(base + "/chunks?offset=0", content=b"x" * 101).status_code == 422
+    assert client.put(base + "/chunks?offset=0", content=b"x" * (apk_uploads.CHUNK_BYTES + 1)).status_code == 413
+    assert client.post("/api/mobile/app/uploads/start", json={"size": releases.MAX_BYTES + 1}).status_code == 422
+    other = make_operator(db, username="other-admin")
+    stranger = session(other)
+    assert stranger.put(base + "/chunks?offset=0", content=b"x").status_code == 404
+    assert stranger.post(base + "/finish").status_code == 404
+    assert stranger.delete(base).status_code == 404
+    user = make_operator(db, username="upload-member")
+    user.role = "member"
+    db.commit()
+    member = session(user)
+    assert member.post("/api/mobile/app/uploads/start", json={"size": 100}).status_code == 403
+    assert member.put(base + "/chunks?offset=0", content=b"x").status_code == 403
+    assert member.post(base + "/finish").status_code == 403
+    assert member.delete(base).status_code == 403
+    assert client.delete(base).status_code == 204
+    assert client.put(base + "/chunks?offset=0", content=b"x").status_code == 404
+
+
+def test_segmented_upload_expiry_and_active_limit(client, db, setup_release, monkeypatch):
+    from app.modules.mobile import apk_uploads
+
+    bases = [start(client, 100) for _ in range(4)]
+    assert client.post("/api/mobile/app/uploads/start", json={"size": 100}).status_code == 409
+    future = time.time() + 7200
+    monkeypatch.setattr(apk_uploads.time, "time", lambda: future)
+    assert client.post(bases[0] + "/finish").status_code == 410
+    assert start(client, 100)
+    assert len(list((releases.directory() / "staging").iterdir())) == 1
+
+
+def test_built_apk_through_real_next_http_proxy(client, db, monkeypatch, tmp_path):
+    """Opt-in real HTTP: Next rewrite -> Uvicorn -> Android tools -> signed download."""
+    import os
+    import shutil
+    import socket
+    import threading
+    from pathlib import Path
+
+    import httpx
+    import uvicorn
+
+    if not os.environ.get("BEACON_TEST_APK"):
+        pytest.skip("Set BEACON_TEST_APK for real HTTP proxy and Android validation")
+    repo = Path(__file__).resolve().parents[3]
+    fixture = tmp_path / "next"
+    fixture.mkdir()
+    shutil.copy(repo / "apps/web/next.config.ts", fixture)
+    (fixture / "node_modules").symlink_to(repo / "apps/web/node_modules")
+    (fixture / "package.json").write_text('{"private":true}')
+    (fixture / "app").mkdir()
+    (fixture / "app/page.js").write_text('export default function Page(){return "probe"}')
+    (fixture / "app/layout.js").write_text(
+        "export default function Layout({children}){return <html><body>{children}</body></html>}"
+    )
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        api_port = listener.getsockname()[1]
+        server = uvicorn.Server(uvicorn.Config(client.app, lifespan="off", log_level="error"))
+        thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+        thread.start()
+        with socket.socket() as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            web_port = reservation.getsockname()[1]
+        env = {**os.environ, "BEACON_API_URL": f"http://127.0.0.1:{api_port}", "NEXT_TELEMETRY_DISABLED": "1"}
+        with (fixture / "next.log").open("w+") as log:
+            process = subprocess.Popen(
+                ["node", str(repo / "apps/web/node_modules/next/dist/bin/next"), "dev", "--port", str(web_port)],
+                cwd=fixture,
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
+            try:
+                for _ in range(300):
+                    try:
+                        with socket.create_connection(("127.0.0.1", web_port), timeout=0.2):
+                            break
+                    except OSError:
+                        if process.poll() is not None:
+                            raise RuntimeError("Next startup failed") from None
+                        time.sleep(0.1)
+                with httpx.Client(base_url=f"http://127.0.0.1:{web_port}", timeout=120) as proxy:
+                    test_built_release_apk_stream_upload_publish_and_download(proxy, db, monkeypatch, tmp_path, True)
+            except Exception:
+                log.seek(0)
+                print(log.read()[-4000:])
+                raise
+            finally:
+                process.terminate()
+                process.wait(timeout=15)
+                server.should_exit = True
+                thread.join(timeout=10)

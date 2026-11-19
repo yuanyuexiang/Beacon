@@ -1,9 +1,10 @@
 "use client";
-import { Alert, Button, Card, Collapse, Empty, Input, Modal, QRCode, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Collapse, Empty, Input, Modal, Progress, QRCode, Space, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { api, json } from "@/lib/api";
 import { useOperator } from "@/lib/auth";
 import { pairingAddress, pairingServer } from "@/lib/mobile-channels";
+import { uploadMobileApp } from "@/lib/mobile-app-upload";
 import { afterCommit } from "@/lib/after-commit";
 
 type Release = {id:string;version_name:string;version_code:number;size:number;sha256:string;signer_sha256:string;uploaded_at:string;published_at?:string;notes?:string;development_signature?:boolean};
@@ -17,6 +18,7 @@ export default function MobileAppDownloads() {
   const [error,setError]=useState<string>(), [notice,setNotice]=useState<string>();
   const [busy,setBusy]=useState<string>(), [file,setFile]=useState<File>(), [notes,setNotes]=useState("");
   const [link,setLink]=useState<Download>(), [address,setAddress]=useState(""), [now,setNow]=useState(() => Date.now());
+  const [uploadPercent,setUploadPercent]=useState(0);
   const [modal,context]=Modal.useModal();
   const refresh=useCallback(async () => {
     const response=await api<Catalog>("/api/mobile/app");setData(response);
@@ -66,9 +68,11 @@ export default function MobileAppDownloads() {
         if(!file) return;
         if(!file.name.toLowerCase().endsWith(".apk")) throw new Error("请选择 .apk 安装包");
         if(file.size>(data?.max_bytes || 256*1024**2)) throw new Error("安装包不能超过 256 MB");
-        const result=await api<{already_published?:boolean}>("/api/mobile/app/uploads",{method:"POST",headers:{"Content-Type":"application/vnd.android.package-archive"},body:file});
+        setUploadPercent(0);
+        const result=await uploadMobileApp(file,setUploadPercent);
         await refresh();setNotice(result.already_published ? "此安装包已发布，无需重复发布" : "上传校验通过，请核对版本并点击发布");
       })}>上传并校验</Button></Space>
+      {busy==="upload" && <div role="status"><Progress percent={uploadPercent} status="active" /><Typography.Text type="secondary">{uploadPercent===100 ? "文件已传完，正在校验签名与版本…" : "正在分段上传安装包，请保持页面打开…"}</Typography.Text></div>}
       <Input.TextArea aria-label="App 更新说明" value={notes} onChange={e => setNotes(e.target.value)} maxLength={3000} rows={3} placeholder="填写这个版本的更新说明，发布后用户可见" style={{marginTop:16,marginBottom:12}} />
       {data?.drafts?.map(item => <Card key={item.id} size="small" title={<Space wrap><Tag>待发布</Tag>{version(item)}</Space>} style={{marginBottom:12}} extra={<Button type="primary" disabled={!!busy} onClick={() => publish(item)}>发布此版本</Button>}>
         <p>大小：{(item.size/1024**2).toFixed(1)} MB · 上传于 {new Date(item.uploaded_at).toLocaleString("zh-CN")}</p><Typography.Text type="secondary" style={{overflowWrap:"anywhere"}}>文件 SHA-256：{item.sha256}<br />签名 SHA-256：{item.signer_sha256}</Typography.Text>

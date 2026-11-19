@@ -4,7 +4,9 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
+import shutil
 import tempfile
 import time
 import uuid
@@ -17,18 +19,20 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
 from app.core import audit
 from app.core.auth import current_operator
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.models import AuditLog, Operator
-from app.modules.mobile import apktools
+from app.modules.mobile import apk_uploads, apktools
 
 router = APIRouter(prefix="/mobile/app", tags=["mobile-app"])
 public_router = APIRouter(prefix="/api/mobile/app-download", tags=["mobile-app"])
 MAX_BYTES = 256 * 1024**2
 LINK_SECONDS = 15 * 60
+logger = logging.getLogger(__name__)
 
 
 def admin(op: Operator) -> None:
@@ -142,30 +146,93 @@ async def upload(request: Request, db: Session = Depends(get_db), op: Operator =
                 stream.write(chunk)
         if not size:
             raise HTTPException(422, "安装包为空")
-        info = await run_in_threadpool(apktools.inspect, temporary)
-        db.execute(text("SELECT pg_advisory_xact_lock(71801801)"))
-        check_signer(db, info)
-        checksum = digest.hexdigest()
-        existing = next((r for r in uploads(db) if r["sha256"] == checksum), None)
-        destination = directory() / (checksum + ".apk")
-        # Atomic replace also repairs a missing file from an incomplete backup restore.
-        os.replace(temporary, destination)
-        if existing:
-            return {**existing, "already_published": any(p["release_id"] == existing["id"] for p in publications(db))}
-        identity = str(uuid.uuid4())
-        item = {
-            **info,
-            "id": identity,
-            "sha256": checksum,
-            "size": size,
-            "uploaded_at": datetime.now(UTC).isoformat(),
-            "uploaded_by": op.username,
-        }
-        audit.record(db, op, "mobile_app_uploaded", "mobile_app", identity, after=item)
-        db.commit()
-        return item
+        return await save_upload(temporary, size, digest.hexdigest(), db, op)
+    except ClientDisconnect as exc:
+        logger.warning("APK upload interrupted: expected_bytes=%s received_bytes=%s", length, size)
+        raise HTTPException(408, "安装包上传连接中断，请重新上传") from exc
     finally:
         temporary.unlink(missing_ok=True)
+
+
+async def save_upload(temporary: Path, size: int, checksum: str, db: Session, op: Operator):
+    info = await run_in_threadpool(apktools.inspect, temporary)
+    db.execute(text("SELECT pg_advisory_xact_lock(71801801)"))
+    check_signer(db, info)
+    existing = next((r for r in uploads(db) if r["sha256"] == checksum), None)
+    destination = directory() / (checksum + ".apk")
+    # Atomic replace also repairs a missing file from an incomplete backup restore.
+    os.replace(temporary, destination)
+    if existing:
+        return {**existing, "already_published": any(p["release_id"] == existing["id"] for p in publications(db))}
+    identity = str(uuid.uuid4())
+    item = {
+        **info,
+        "id": identity,
+        "sha256": checksum,
+        "size": size,
+        "uploaded_at": datetime.now(UTC).isoformat(),
+        "uploaded_by": op.username,
+    }
+    audit.record(db, op, "mobile_app_uploaded", "mobile_app", identity, after=item)
+    db.commit()
+    return item
+
+
+class UploadStart(BaseModel):
+    size: int = Field(gt=0, le=MAX_BYTES)
+
+
+@router.post("/uploads/start", status_code=201)
+def start_upload(body: UploadStart, db: Session = Depends(get_db), op: Operator = Depends(current_operator)):
+    admin(op)
+    identity = apk_uploads.begin(directory(), str(op.id), body.size)
+    return {"upload_id": identity, "chunk_bytes": apk_uploads.CHUNK_BYTES}
+
+
+@router.put("/uploads/{identity}/chunks")
+async def upload_chunk(
+    identity: uuid.UUID,
+    request: Request,
+    offset: int,
+    op: Operator = Depends(current_operator),
+):
+    admin(op)
+    body = bytearray()
+    try:
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > apk_uploads.CHUNK_BYTES:
+                raise HTTPException(413, "上传分段不能超过 2 MB")
+    except ClientDisconnect as exc:
+        raise HTTPException(408, "该分段上传中断，请重新上传") from exc
+    with apk_uploads.locked(directory(), identity, str(op.id)) as (path, meta):
+        received = apk_uploads.append(path, meta["size"], offset, bytes(body))
+        return {"received": received, "size": meta["size"]}
+
+
+@router.post("/uploads/{identity}/finish", status_code=201)
+async def finish_upload(
+    identity: uuid.UUID,
+    db: Session = Depends(get_db),
+    op: Operator = Depends(current_operator),
+):
+    admin(op)
+    with apk_uploads.locked(directory(), identity, str(op.id)) as (path, meta):
+        temporary = path / "data.apk"
+        if temporary.stat().st_size != meta["size"]:
+            raise HTTPException(409, "安装包尚未上传完整")
+        with temporary.open("rb") as stream:
+            checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+        result = await save_upload(temporary, meta["size"], checksum, db, op)
+        shutil.rmtree(path)
+        return result
+
+
+@router.delete("/uploads/{identity}", status_code=204)
+def cancel_upload(identity: uuid.UUID, op: Operator = Depends(current_operator)):
+    admin(op)
+    with apk_uploads.locked(directory(), identity, str(op.id)) as (path, _):
+        shutil.rmtree(path)
 
 
 class PublishIn(BaseModel):
