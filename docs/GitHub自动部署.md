@@ -125,3 +125,9 @@ D57（2026-10-15，本地已准备、服务器未发布）：新增 directory-wo
 2026-10-28 后续更新：Meta 连接诊断新增迁移 `d177a0010001`（可空 JSONB 字段），部署 head 已同步更新。跨 revision 自动回滚范围仍为空，未扩大旧版本兼容声明。
 
 2026-10-29：AI模型连接新增迁移 `d178a0010001`，部署声明同步。AI凭据恢复同时需要数据库及数据卷 `ai/encryption.key`；现有数据卷备份需保留该文件。跨 revision 自动回滚范围仍为空。
+
+### APK 上传返回 Bad Gateway（2026-11-19）
+
+上传完整 APK 同时受两层限制：Next 15 的 `experimental.middlewareClientMaxBodySize` 为 256 MB，Traefik HTTPS 入口 `--entrypoints.websecure.transport.respondingtimeouts.readtimeout=600s`。仅扩大前者仍会让超过一分钟的上传被公网网关中断。基础 Traefik 独立维护，应用 CI 不重建它；当前生产已在保留备份和发布锁／pending 检查后同步该参数。bootstrap 会幂等保留此设置，不需要更换手机 APK。
+
+排查时读取运行中的构建配置和网关 CLI，不能仅凭仓库配置判断已生效。2026-11-19 的无账号低速请求在修改前约 62 秒返回 502，API 尚在接收请求而非 APK 签名校验。不要为解决上传错误关闭包名、签名、权限或大小校验。超过十分钟仍需改善网络或另行设计分块上传。

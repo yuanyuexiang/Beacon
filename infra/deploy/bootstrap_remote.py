@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import pwd
+import re
 import secrets
 import subprocess
 from pathlib import Path
@@ -18,6 +19,17 @@ def prepare_traefik(before):
     after = before.replace("--log.level=DEBUG", "--log.level=INFO")
     after = after.replace("--api.dashboard=true", "--api.dashboard=false")
     after = after.replace("traefik.enable=true", "traefik.enable=false")
+    timeout_option = "--entrypoints.websecure.transport.respondingtimeouts.readtimeout="
+    if timeout_option in after:
+        after = re.sub(re.escape(timeout_option) + r"[^\s\"',\]]+", timeout_option + "600s", after)
+    else:
+        # Preserve the existing infrastructure and certificates; support block-list CLI options.
+        after = re.sub(
+            r"^(\s*-\s*)([\"\'])--entrypoints.websecure.address=:443\2[ \t]*$",
+            lambda m: m.group(0) + "\n" + m[1] + m[2] + timeout_option + "600s" + m[2],
+            after,
+            flags=re.MULTILINE,
+        )
     image = "traefik:v3.6.25@sha256:31267173a15b4944e797a76ffd9c419707c8d8b32fe5b610f80cd0cfa05f372d"
     if "traefik:v3.6.25@" not in after:
         after = after.replace("traefik:v3.6.25", image)

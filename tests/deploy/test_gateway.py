@@ -248,3 +248,15 @@ def test_backup_failure_does_not_start_directory_worker_with_old_api(tmp_path):
         g.deploy(body)
     worker_commands = [c for c in g.calls if "up" in c and "gmail-worker" in c]
     assert worker_commands and all("directory-worker" not in c for c in worker_commands)
+
+
+def test_infrastructure_upload_timeout_is_bounded_and_idempotent():
+    from infra.deploy.bootstrap_remote import prepare_traefik
+
+    option = "--entrypoints.websecure.transport.respondingtimeouts.readtimeout="
+    before = 'services:\n  traefik:\n    command:\n      - "--entrypoints.websecure.address=:443"\n'
+    result = prepare_traefik(before)
+    assert option + '600s"' in result
+    assert result.count(option) == 1
+    assert prepare_traefik(result) == result
+    assert prepare_traefik(result.replace(option + "600s", option + "60s")) == result

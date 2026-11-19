@@ -21,6 +21,8 @@ services:
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       - "--entrypoints.web.http.redirections.entryPoint.permanent=true"
       - "--entrypoints.websecure.address=:443"
+      # APK 上传须在此时间内完整接收；默认 60 秒会使慢速上传返回 502。
+      - "--entrypoints.websecure.transport.respondingtimeouts.readtimeout=600s"
       - "--certificatesresolvers.route53.acme.email=matrix_net@126.com"
       - "--certificatesresolvers.route53.acme.storage=/letsencrypt/acme.json"
       - "--certificatesresolvers.route53.acme.dnschallenge.provider=route53"

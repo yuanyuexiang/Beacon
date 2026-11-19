@@ -701,3 +701,11 @@ APK 存受控数据卷、元数据和发布记录存现有 AuditLog，无迁移�
 Next 15.5.26 的外部 rewrite 使用 clonableBody，默认只保留 10 MB，截断后仍保留原 Content-Length，造成 API 等待余下内容直至断连。配置 middlewareClientMaxBodySize=256mb，与 API 上传上限一致，保留既有十分钟代理超时及后台管理员／大小／签名校验。该配置属于 Next 15，不使用 Next 16 的 proxyClientMaxBodySize。代理仍会克隆缓冲请求体，不能将 API 流式写盘误称为全链路零缓冲。
 
 新增 `uv run --project apps/api python scripts/verify_apk_upload_proxy.py`，临时独立 Next 与计数 HTTP 服务验证超过默认限制的完整二进制传输及哈希，不访问真实账户或修改名单。另已通过本机真实 118306237 字节 APK 的代理传输检查；云端日志仅能证明接收中断，未在生产重新上传／发布。未调整共享 Traefik 或绕过部署规范；部署后仍需复验真实网络上传。
+
+### 2026-11-19 HTTPS 上传接收超时
+
+上轮 Next 10 MB 修复并未覆盖公网 HTTPS 入口。已读取生产构建配置确认 256 MB 生效，Traefik v3.6.25 实际 CLI 默认 readTimeout=60s；同一无账号低速 POST 在公网约 62 秒复现 502。将 websecure.transport.respondingtimeouts.readtimeout 明确设为 600s，与网页代理十分钟一致，不设无限超时。基础 Compose 与 prepare_traefik 同步，重复 bootstrap 不重复添加，并更新既有值。
+
+这是独立 Traefik 基础设施修复，使用受信管理员 SSH，在现有发布锁内检查 pending，备份原基础配置、限制 diff 仅一项、Compose 校验后仅重建 traefik，失败回滚原配置。未绕过应用固定 gateway／Compose hash 校验，未重启应用或数据库；生产已生效，不需要等待应用 CI 才生效。
+
+生产修改后相同 80 KB／1 KB/s 探针完整传入 80012 字节、78.35 秒返回 API 预期的 422 字段校验响应；不再出现 60 秒 502。Web 登录页 200、API 健康正常。该探针不登录、不产生发布记录，也不代表真实 APK 校验／发布已经替用户完成。
