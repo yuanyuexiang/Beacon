@@ -1,6 +1,8 @@
 """手动新增回归；所有 API 模拟，不写真实门店或发送。"""
 import asyncio
 import json
+import os
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 from playwright.async_api import async_playwright, expect
@@ -40,7 +42,20 @@ async def main():
             else:
                 await fallback(route)
         await page.route("**/api/**", handle)
-        await page.goto("http://localhost:3000/leads?batch=测试")
+        await page.goto(os.getenv("BEACON_UI_BASE", "http://localhost:3000") + "/leads?batch=测试")
+        await page.get_by_role("button", name="新增门店", exact=True).click()
+        drawer = page.get_by_role("dialog", name="新增门店")
+        await drawer.locator(".ant-drawer-close").click()
+        await expect(drawer).to_be_hidden()
+        await page.get_by_role("button", name="新增门店", exact=True).click()
+        await page.get_by_label("门店名称", exact=True).fill("未保存")
+        await drawer.locator(".ant-drawer-close").click()
+        await page.get_by_role("button", name="继续填写", exact=True).click()
+        await expect(page.get_by_label("门店名称", exact=True)).to_have_value("未保存")
+        await drawer.get_by_role("button", name=re.compile(r"^取\s*消$")).click()
+        await page.get_by_role("button", name=re.compile(r"^放\s*弃$")).click()
+        await expect(drawer).to_be_hidden()
+        assert not writes
         await page.get_by_role("button", name="新增门店", exact=True).click()
         await page.get_by_label("门店名称", exact=True).fill("Rose Garden")
         await page.get_by_role("button", name="添加联系方式", exact=True).click()
@@ -50,7 +65,7 @@ async def main():
         assert not any(path == "/api/leads/manual" for path, _ in writes)
         Path("data/devchecks").mkdir(parents=True, exist_ok=True)
         await page.screenshot(path="data/devchecks/manual-lead-duplicate.png")
-        await page.get_by_role("button", name="仍然新建并 AI 完善", exact=True).click()
+        await page.get_by_role("button", name=re.compile(r"仍然新建.*AI")).click()
         await expect(page.get_by_text("门店已保存", exact=True)).to_be_visible()
         await expect(page.get_by_text("门店已保存，自动完善未启动：模拟后台暂不可用", exact=True)).to_be_visible()
         assert len([x for x in writes if x[0] == "/api/leads/manual"]) == 1

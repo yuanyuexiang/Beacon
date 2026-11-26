@@ -13,6 +13,8 @@ const channels = [{value:"email",label:"邮箱"},{value:"phone",label:"电话"},
 export default function ManualLead({open,onClose,batches,batchKey,onSaved}:{open:boolean;onClose:()=>void;batches:{batch_key:string}[];batchKey?:string;onSaved:()=>void}) {
   const {me}=useOperator(), router=useRouter();
   const [form]=Form.useForm<Values>();
+  const [modal, modalContext] = Modal.useModal();
+  const edited = useRef(false);
   const [action,setAction]=useState<"view"|"enrich"|null>(null),[error,setError]=useState<string>();
   const busy=action!==null;
   const [matches,setMatches]=useState<Match[]>([]),[saved,setSaved]=useState<Saved>();
@@ -23,6 +25,7 @@ export default function ManualLead({open,onClose,batches,batchKey,onSaved}:{open
     if(!open){initialized.current=false;return;}
     if(initialized.current)return;
     initialized.current=true;
+    edited.current = false;
     request.current=crypto.randomUUID();setError(undefined);setMatches([]);setSaved(undefined);form.resetFields();
     form.setFieldsValue({batch_key:batchKey,contacts:[],assigned_to:me?.username});
     if(me?.role==="admin"||me?.role==="director") api<{username:string;display_name?:string}[]>("/api/communication/assignees").then(setMembers).catch(()=>setMembers([]));
@@ -43,13 +46,27 @@ export default function ManualLead({open,onClose,batches,batchKey,onSaved}:{open
       router.push(destination(result));onClose();
     }catch(e){setError((e as Error).message);}finally{setAction(null);}
   };
-  return <Drawer title="新增门店" width={620} open={open} onClose={()=>{if(busy)return;if(!saved&&form.isFieldsTouched())Modal.confirm({title:"放弃未保存的门店资料？",okText:"放弃",cancelText:"继续填写",onOk:onClose});else onClose();}} maskClosable={false} closable={!busy} destroyOnHidden
-    footer={saved ? <Link href={destination(saved)}>进入已保存门店 →</Link> : <Space wrap><Button loading={action==="view"} disabled={busy} onClick={()=>submit(false,!!matches.length)}>{matches.length?"仍然新建并查看":"保存并查看"}</Button><Button type="primary" loading={action==="enrich"} disabled={busy} onClick={()=>submit(true,!!matches.length)}>{matches.length?"仍然新建并 AI 完善":"保存并 AI 完善"}</Button></Space>}>
+  const close = () => {
+    if (busy) return;
+    if (!saved && edited.current) {
+      modal.confirm({
+        title: "放弃未保存的门店资料？",
+        okText: "放弃",
+        cancelText: "继续填写",
+        onOk: onClose,
+      });
+      return;
+    }
+    onClose();
+  };
+  return <Drawer title="新增门店" width={620} open={open} onClose={close} maskClosable={false} closable={!busy} destroyOnHidden
+    footer={saved ? <Link href={destination(saved)}>进入已保存门店 →</Link> : <Space wrap><Button disabled={busy} onClick={close}>取消</Button><Button loading={action==="view"} disabled={busy} onClick={()=>submit(false,!!matches.length)}>{matches.length?"仍然新建并查看":"保存并查看"}</Button><Button type="primary" loading={action==="enrich"} disabled={busy} onClick={()=>submit(true,!!matches.length)}>{matches.length?"仍然新建并 AI 完善":"保存并 AI 完善"}</Button></Space>}>
+    {modalContext}
     <Typography.Paragraph type="secondary">只需填写门店名称。官网、联系方式和菜单都可以之后补充；AI 完善会在后台查找官网及联系方式。</Typography.Paragraph>
     {error&&<Alert type="error" showIcon message={error} style={{marginBottom:16}}/>}
     {saved ? <Alert type="success" showIcon message="门店已保存" description="资料已保留，可进入门店详情继续完善或上传菜单。"/> : <>
     {!!matches.length&&<Alert type="warning" showIcon message="发现可能已有的门店" description={<><p>请先核对；不同分店可以选择下方“仍然新建”。</p>{matches.map(m=><div key={m.id} style={{marginBottom:12}}><Link href={`/leads/${m.id}`}>{m.name} ↗</Link><div>{m.address} {m.postcode}</div><Typography.Text type="secondary">{m.reasons.join("；")}</Typography.Text></div>)}</>} style={{marginBottom:16}}/>}
-    <Form form={form} layout="vertical" disabled={busy} onValuesChange={()=>setMatches([])}>
+    <Form form={form} layout="vertical" disabled={busy} onValuesChange={() => { edited.current = true; setMatches([]); }}>
       <Form.Item name="name" label="门店名称" rules={[{required:true,whitespace:true,message:"请填写门店名称"}]}><Input maxLength={256} placeholder="例如 Rose Garden Restaurant"/></Form.Item>
       <Form.Item name="batch_key" label="所属名单" extra="未选择时放入“我的手动录入”，之后可直接继续完善。"><Select allowClear placeholder="我的手动录入" options={batches.map(b=>({value:b.batch_key,label:b.batch_key}))}/></Form.Item>
       <Form.Item name="website" label="官网"><Input maxLength={512} placeholder="例如 www.restaurant.co.uk"/></Form.Item>
